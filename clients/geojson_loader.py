@@ -5,6 +5,7 @@ Load WMATA Metrobus stop GeoJSON into canonical BusStop objects.
 from __future__ import annotations
 
 import json
+import requests 
 from pathlib import Path
 from typing import List
 
@@ -75,7 +76,30 @@ def load_geojson(
 
     return stops
 
+def load_geojson_url(
+    url
+):
+    """
+    Load GeoJSON from an API endpoint.
+    """
 
+    response = requests.get(
+        url
+    )
+
+    response.raise_for_status()
+
+    data = response.json()
+
+    return [
+        feature["properties"]
+        | {
+            "geometry": feature.get(
+                "geometry"
+            )
+        }
+        for feature in data["features"]
+    ]
 def load_single_stop(
     filename: str | Path,
     stop_id: str,
