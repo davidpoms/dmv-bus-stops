@@ -1,251 +1,216 @@
--- DMV Bus Stops Intelligence Platform
--- Core database schema
---
--- Purpose:
--- Store every bus stop as a persistent physical location,
--- combine automated data sources with human intelligence,
--- and support bench/shelter prioritization.
+-- =====================================================
+-- DMV Bus Stops Database Schema
+-- =====================================================
 
-CREATE EXTENSION IF NOT EXISTS postgis;
+PRAGMA foreign_keys = ON;
 
 
-------------------------------------------------------------
--- BUS STOP MASTER TABLE
-------------------------------------------------------------
+-- =====================================================
+-- BUS STOP CORE DATA
+-- =====================================================
 
-CREATE TABLE bus_stops (
+CREATE TABLE IF NOT EXISTS bus_stops (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
 
-    stop_id TEXT PRIMARY KEY,
+    external_stop_id TEXT UNIQUE,
 
-    agency TEXT DEFAULT 'WMATA',
+    latitude REAL NOT NULL,
+    longitude REAL NOT NULL,
 
-    latitude DOUBLE PRECISION NOT NULL,
-    longitude DOUBLE PRECISION NOT NULL,
+    stop_name TEXT,
 
-    geom GEOGRAPHY(Point,4326),
-
-    street_name TEXT,
     direction TEXT,
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-
 );
 
 
-------------------------------------------------------------
--- ROUTE SERVICE INFORMATION
-------------------------------------------------------------
+-- =====================================================
+-- ROUTE INFORMATION
+-- =====================================================
 
-CREATE TABLE stop_routes (
+CREATE TABLE IF NOT EXISTS routes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
 
-    id SERIAL PRIMARY KEY,
+    route_id TEXT UNIQUE NOT NULL,
 
-    stop_id TEXT REFERENCES bus_stops(stop_id),
+    route_name TEXT,
 
-    route_id TEXT,
-
-    service_type TEXT,
-
-    estimated_monthly_boardings NUMERIC,
-
-    weekday_boardings NUMERIC,
-    saturday_boardings NUMERIC,
-    sunday_boardings NUMERIC
-
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 
+CREATE TABLE IF NOT EXISTS stop_routes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
 
-------------------------------------------------------------
--- CURRENT PHYSICAL CONDITIONS
---
--- Automated + human verified infrastructure
-------------------------------------------------------------
+    stop_id INTEGER NOT NULL,
+    route_id INTEGER NOT NULL,
 
-CREATE TABLE stop_conditions (
+    FOREIGN KEY(stop_id)
+        REFERENCES bus_stops(id),
 
-    stop_id TEXT PRIMARY KEY
-        REFERENCES bus_stops(stop_id),
+    FOREIGN KEY(route_id)
+        REFERENCES routes(id)
+);
+
+
+-- =====================================================
+-- HUMAN VERIFIED STOP CONDITIONS
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS stop_reviews (
+
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    stop_id INTEGER NOT NULL,
+
+    reviewer_id TEXT,
+
+    review_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+
+    -- basic infrastructure
 
     has_shelter BOOLEAN,
 
     has_bench BOOLEAN,
 
-    shelter_confidence NUMERIC,
-
-    bench_confidence NUMERIC,
-
-    condition_source TEXT,
-    -- examples:
-    -- streetview
-    -- volunteer
-    -- agency_data
-    -- field_visit
+    bench_condition TEXT,
 
 
-    last_verified TIMESTAMP
+    -- waiting environment
 
-);
+    waiting_area_type TEXT,
 
+    likely_waiting_location TEXT,
 
-
-------------------------------------------------------------
--- BENCH INSTALLATION OPPORTUNITY
-------------------------------------------------------------
-
-CREATE TABLE bench_opportunities (
-
-    stop_id TEXT PRIMARY KEY
-        REFERENCES bus_stops(stop_id),
+    sun_exposure TEXT,
 
 
-    suitable_for_bench BOOLEAN,
+    -- physical feasibility
 
     concrete_pad_present BOOLEAN,
 
-    estimated_pad_width_feet NUMERIC,
+    pad_width_feet REAL,
 
-    estimated_pad_depth_feet NUMERIC,
+    pad_depth_feet REAL,
+
+    bench_location_feasible BOOLEAN,
 
 
-    ADA_clearance_available BOOLEAN,
+    -- ADA observations
 
+    curb_access_clear BOOLEAN,
 
     bus_ramp_access_clear BOOLEAN,
 
-
-    pole_landing_zone_clear BOOLEAN,
-
+    landing_zone_clear BOOLEAN,
 
     rear_clear_zone_clear BOOLEAN,
 
 
-    extended_bus_clear_zone_clear BOOLEAN,
+    reviewer_confidence REAL,
 
 
-    obstruction_notes TEXT,
+    notes TEXT,
 
 
-    opportunity_score NUMERIC,
-
-
-    reviewed_by TEXT,
-
-    reviewed_at TIMESTAMP
-
+    FOREIGN KEY(stop_id)
+        REFERENCES bus_stops(id)
 );
 
 
 
-------------------------------------------------------------
--- WHERE PEOPLE ACTUALLY WAIT
---
--- Important because bus stop pole location != waiting location
-------------------------------------------------------------
-
-CREATE TABLE waiting_environment (
-
-    stop_id TEXT PRIMARY KEY
-        REFERENCES bus_stops(stop_id),
-
-
-    waiting_location TEXT,
-    -- examples:
-    -- front_of_pole
-    -- behind_pole
-    -- shelter_area
-    -- sidewalk_edge
-    -- grass_strip
-    -- uncertain
-
-
-    sun_exposure TEXT,
-    -- morning
-    -- afternoon
-    -- all_day
-    -- shaded
-    -- unknown
-
-
-    shade_available BOOLEAN,
-
-
-    weather_protection_available BOOLEAN,
-
-
-    volunteer_notes TEXT
-
-);
-
-
-
-------------------------------------------------------------
--- STREETVIEW / IMAGE REVIEW DATA
-------------------------------------------------------------
-
-CREATE TABLE imagery_reviews (
-
-    review_id SERIAL PRIMARY KEY,
-
-
-    stop_id TEXT REFERENCES bus_stops(stop_id),
-
-
-    image_url TEXT,
-
-
-    reviewer_id TEXT,
-
-
-    reviewed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
-
-    shelter_visible BOOLEAN,
-
-    bench_visible BOOLEAN,
-
-
-    people_waiting_visible BOOLEAN,
-
-
-    accessibility_notes TEXT,
-
-
-    reviewer_comments TEXT
-
-);
-
-
-
-------------------------------------------------------------
+-- =====================================================
 -- COMMUNITY REQUESTS
---
--- Captures "people asked us for a bench here"
-------------------------------------------------------------
+-- =====================================================
 
-CREATE TABLE community_requests (
+CREATE TABLE IF NOT EXISTS community_requests (
 
-    request_id SERIAL PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    stop_id INTEGER NOT NULL,
 
 
-    stop_id TEXT REFERENCES bus_stops(stop_id),
+    submitted_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
+
+    source TEXT,
 
     requester_name TEXT,
 
-
-    request_source TEXT,
-    -- email
-    -- web form
-    -- neighborhood group
-    -- volunteer
+    request_count INTEGER DEFAULT 1,
 
 
-    request_date DATE,
+    description TEXT,
 
 
-    urgency TEXT,
+    status TEXT DEFAULT 'new',
+
+
+    FOREIGN KEY(stop_id)
+        REFERENCES bus_stops(id)
+
+);
+
+
+
+-- =====================================================
+-- WMATA RIDERSHIP DATA
+-- Monthly automated import
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS ridership_snapshots (
+
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+
+    route_id TEXT NOT NULL,
+
+
+    service_type TEXT,
+
+
+    period DATE NOT NULL,
+
+
+    monthly_boardings REAL,
+
+
+    source TEXT,
+
+
+    imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+
+);
+
+
+
+CREATE INDEX IF NOT EXISTS idx_ridership_route
+ON ridership_snapshots(route_id);
+
+
+
+-- =====================================================
+-- AUTOMATED DATA PIPELINE LOG
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS data_refresh_log (
+
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+
+    dataset TEXT NOT NULL,
+
+
+    refresh_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+
+    status TEXT,
+
+
+    records_loaded INTEGER,
 
 
     notes TEXT
@@ -254,100 +219,103 @@ CREATE TABLE community_requests (
 
 
 
-------------------------------------------------------------
--- VOLUNTEER ACTIVITY
-------------------------------------------------------------
+-- =====================================================
+-- PRIORITY ENGINE OUTPUT
+-- This is the "brain"
+-- =====================================================
 
-CREATE TABLE volunteers (
+CREATE TABLE IF NOT EXISTS stop_priority_snapshots (
 
-    volunteer_id TEXT PRIMARY KEY,
-
-
-    name TEXT,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
 
 
-    email TEXT,
+    stop_id INTEGER NOT NULL,
 
 
-    skill_level TEXT,
+    calculated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
 
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-
-);
+    priority_score REAL,
 
 
-
-------------------------------------------------------------
--- REVIEW TASK QUEUE
---
--- Powers "give me the next 500 useful images"
-------------------------------------------------------------
-
-CREATE TABLE review_tasks (
-
-    task_id SERIAL PRIMARY KEY,
+    priority_rank INTEGER,
 
 
-    stop_id TEXT REFERENCES bus_stops(stop_id),
+    factors JSON,
 
 
-    task_type TEXT,
-    -- classify_image
-    -- verify_bench
-    -- verify_shelter
-    -- accessibility_review
-
-
-    priority_score NUMERIC,
-
-
-    assigned_volunteer TEXT
-        REFERENCES volunteers(volunteer_id),
-
-
-    completed BOOLEAN DEFAULT FALSE,
-
-
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    FOREIGN KEY(stop_id)
+        REFERENCES bus_stops(id)
 
 );
 
 
 
-------------------------------------------------------------
--- INTELLIGENCE SCORES
---
--- The project "brain"
-------------------------------------------------------------
-
-CREATE TABLE stop_scores (
-
-    stop_id TEXT PRIMARY KEY
-        REFERENCES bus_stops(stop_id),
+CREATE INDEX IF NOT EXISTS idx_priority_rank
+ON stop_priority_snapshots(priority_rank);
 
 
-    ridership_score NUMERIC,
+
+-- =====================================================
+-- VOLUNTEER REVIEW QUEUE
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS review_queue (
+
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
 
 
-    shelter_gap_score NUMERIC,
+    stop_id INTEGER NOT NULL,
 
 
-    bench_gap_score NUMERIC,
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
 
-    community_demand_score NUMERIC,
+    priority_reason TEXT,
 
 
-    feasibility_score NUMERIC,
+    assigned_reviewer TEXT,
 
 
-    equity_score NUMERIC,
+    status TEXT DEFAULT 'pending',
 
 
-    final_priority_score NUMERIC,
+    FOREIGN KEY(stop_id)
+        REFERENCES bus_stops(id)
+
+);
 
 
-    calculated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+
+-- =====================================================
+-- HUMAN FEEDBACK LOOP
+-- Tracks disagreements and corrections
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS review_feedback (
+
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+
+    stop_id INTEGER NOT NULL,
+
+
+    field_changed TEXT,
+
+
+    old_value TEXT,
+
+
+    new_value TEXT,
+
+
+    reviewer_id TEXT,
+
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+
+    FOREIGN KEY(stop_id)
+        REFERENCES bus_stops(id)
 
 );
