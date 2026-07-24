@@ -33,53 +33,62 @@ class Repository:
 
 
 
-    def save_review(
-        self,
-        review
-    ):
-        """
-        Save volunteer feedback.
-        """
+   def save_review(
+    self,
+    review
+):
+    """
+    Save structured volunteer stop review.
+    """
+
+    connection = sqlite3.connect(
+        self.database_path
+    )
+
+    cursor = connection.cursor()
 
 
-        connection = sqlite3.connect(
-            self.database_path
+    cursor.execute(
+        """
+        INSERT INTO stop_reviews
+        (
+            stop_id,
+            has_shelter,
+            has_bench,
+            reviewer_confidence,
+            notes
         )
 
-        cursor = connection.cursor()
+        VALUES (?, ?, ?, ?, ?)
 
+        """,
 
-        cursor.execute(
-            """
-            INSERT INTO stop_reviews
-            (
-                stop_id,
-                reviewer_type,
-                review_data,
-                confidence,
-                created_at
+        (
+            review["stop_id"],
+
+            review.get(
+                "shelter_present"
+            ),
+
+            review.get(
+                "bench_present"
+            ),
+
+            review.get(
+                "review_confidence"
+            ),
+
+            review.get(
+                "notes"
             )
 
-            VALUES (?, ?, ?, ?, ?)
-
-            """,
-
-            (
-                review["stop_id"],
-                "volunteer",
-                str(review),
-                review.get(
-                    "review_confidence",
-                    0
-                ),
-                datetime.utcnow()
-            )
         )
+    )
 
 
-        connection.commit()
+    connection.commit()
 
-        connection.close()
+    connection.close()
 
 
 
