@@ -1,66 +1,89 @@
 """
 Stop-level demand intelligence.
 
-Combines route ridership into a demand
-estimate for individual bus stops.
+Combines route-level daily ridership
+into an estimated stop demand score.
 """
 
 
 def calculate_stop_demand(routes):
     """
-    Calculate demand score for a stop.
+    Calculate stop demand from routes.
 
-    routes should be a list of dictionaries:
+    Example input:
 
     [
         {
             "route_id": "C53",
-            "monthly_boardings": 389211
+            "average_daily_boardings": 12974
+        },
+        {
+            "route_id": "D40",
+            "average_daily_boardings": 10226
         }
     ]
-
     """
 
     if not routes:
+
         return {
             "route_count": 0,
-            "total_boardings": 0,
-            "demand_score": 0
+            "estimated_daily_demand": 0,
+            "demand_score": 0,
+            "confidence": "low"
         }
 
 
-    total_boardings = sum(
-        route["monthly_boardings"]
+    total_daily_boardings = sum(
+        route["average_daily_boardings"]
         for route in routes
     )
 
 
-    highest_route = max(
-        routes,
-        key=lambda route: route["monthly_boardings"]
-    )
+    route_count = len(routes)
 
 
-    # Normalize to a 0-100 score
-    if total_boardings >= 500000:
+    if total_daily_boardings >= 20000:
         score = 100
+        level = "very_high"
 
-    elif total_boardings >= 250000:
+    elif total_daily_boardings >= 10000:
         score = 85
+        level = "high"
 
-    elif total_boardings >= 100000:
-        score = 70
-
-    elif total_boardings >= 50000:
-        score = 50
+    elif total_daily_boardings >= 5000:
+        score = 65
+        level = "medium"
 
     else:
-        score = 25
+        score = 35
+        level = "low"
+
+
+    if route_count >= 3:
+        confidence = "high"
+
+    elif route_count == 2:
+        confidence = "medium"
+
+    else:
+        confidence = "low"
 
 
     return {
-        "route_count": len(routes),
-        "total_boardings": total_boardings,
-        "highest_demand_route": highest_route["route_id"],
-        "demand_score": score
+
+        "route_count": route_count,
+
+        "estimated_daily_demand":
+            total_daily_boardings,
+
+        "demand_level":
+            level,
+
+        "demand_score":
+            score,
+
+        "confidence":
+            confidence
+
     }
