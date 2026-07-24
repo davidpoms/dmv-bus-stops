@@ -11,35 +11,23 @@ import requests
 
 def parse_geojson(data):
     """
-    Convert a GeoJSON FeatureCollection
-    into a list of dictionaries.
-    """
+    Convert a GeoJSON FeatureCollection"""
+GeoJSON loading utilities.
 
-    features = data.get("features", [])
+Supports:
+- Local GeoJSON files
+- GeoJSON API endpoints
+- ArcGIS FeatureServer pagination
+"""
 
-    stops = []
-
-    for feature in features:
-        properties = feature.get(
-            "properties",
-            {}
-        )
-
-        geometry = feature.get(
-            "geometry"
-        )
-
-        stop = properties.copy()
-
-        if geometry:
-            stop["geometry"] = geometry
-
-        stops.append(stop)
-
-    return stops
+import json
+import requests
 
 
-def load_geojson(filename):
+
+def load_geojson(
+    filename
+):
     """
     Load GeoJSON from a local file.
     """
@@ -49,49 +37,118 @@ def load_geojson(filename):
         "r",
         encoding="utf-8"
     ) as file:
-        data = json.load(file)
 
-    return parse_geojson(data)
+        return json.load(file)
 
 
-def load_geojson_url(url):
+
+def load_geojson_url(
+    url
+):
     """
-    Load GeoJSON from a URL/API endpoint.
+    Load GeoJSON from an API endpoint.
+
+    Handles ArcGIS-style pagination where
+    responses are limited to 2,000 records.
     """
 
-    response = requests.get(
-        url,
-        timeout=30
-    )
+    all_features = []
 
-    response.raise_for_status()
+    offset = 0
 
-    return parse_geojson(
-        response.json()
-    )
+    page_size = 2000
+
+
+    while True:
+
+        response = requests.get(
+            url,
+            params={
+                "resultOffset": offset,
+                "resultRecordCount": page_size,
+                "f": "geojson"
+            },
+            timeout=60
+        )
+
+
+        response.raise_for_status()
+
+
+        data = response.json()
+
+
+        features = data.get(
+            "features",
+            []
+        )
+
+
+        if not features:
+
+            break
+
+
+        all_features.extend(
+            features
+        )
+
+
+        if len(features) < page_size:
+
+            break
+
+
+        offset += page_size
+
+
+
+    return {
+        "features": all_features
+    }
+
 
 
 if __name__ == "__main__":
 
     import argparse
 
+
     parser = argparse.ArgumentParser()
+
 
     parser.add_argument(
         "geojson"
     )
 
+
     args = parser.parse_args()
 
-    stops = load_geojson(
+
+    data = load_geojson(
         args.geojson
     )
 
-    print(
-        f"Loaded {len(stops):,} bus stops."
+
+    features = data.get(
+        "features",
+        []
     )
 
-    if stops:
+
+    print(
+        f"Loaded {len(features):,} features."
+    )
+
+
+    if features:
+
         print()
-        print("Example:")
-        print(stops[0])
+
+        print(
+            "Example:"
+        )
+
+        print(
+            features[0]
+        )
