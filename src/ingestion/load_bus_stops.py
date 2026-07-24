@@ -25,6 +25,7 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 sys.path.append(
     str(ROOT_DIR)
 )
+
 from config import BUS_STOP_FILE
 
 
