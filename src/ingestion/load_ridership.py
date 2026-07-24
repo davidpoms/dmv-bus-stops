@@ -1,311 +1,135 @@
 """
-DMV Bus Stops Intelligence Platform
+Load WMATA Metrobus ridership data into the database.
 
-WMATA Metrobus ridership ingestion.
-
-Purpose:
-- Load route-level ridership data
-- Normalize service categories
-- Create demand metrics
-- Prepare route demand data for joining
-  to bus stops
-
-Important:
-This dataset represents route demand,
-not individual stop boardings.
-
-Stop-level demand will be estimated later.
+Designed for:
+- manual imports during development
+- automated GitHub Actions monthly refreshes
 """
 
-
-from pathlib import Path
-
 import csv
-
-from src.config import RIDERSHIP_FILE
-
-
-
-# ------------------------------------------------------------
-# Field detection
-#
-# WMATA exports may change column names.
-# ------------------------------------------------------------
-
-ROUTE_FIELDS = [
-    "Route",
-    "ROUTE",
-    "route"
-]
+import sqlite3
+from pathlib import Path
+from datetime import datetime
 
 
-SERVICE_FIELDS = [
-    "Service Type",
-    "SERVICE_TYPE",
-    "service_type"
-]
+BASE_DIR = Path(__file__).resolve().parents[2]
+
+DATABASE_PATH = (
+    BASE_DIR /
+    "src" /
+    "database" /
+    "dmv_bus_stops.db"
+)
+
+RIDERSHIP_FOLDER = (
+    BASE_DIR /
+    "data" /
+    "raw" /
+    "ridership"
+)
 
 
-BOARDING_FIELDS = [
-    "Monthly Boardings",
-    "MONTHLY_BOARDINGS",
-    "boardings"
-]
+def find_latest_ridership_file():
 
+    files = list(RIDERSHIP_FOLDER.glob("*.csv"))
 
-
-
-def find_column(fieldnames, candidates):
-
-    """
-    Find first matching column.
-    """
-
-    for field in candidates:
-
-        if field in fieldnames:
-
-            return field
-
-
-    return None
-
-
-
-
-
-def load_ridership(filepath=RIDERSHIP_FILE):
-
-    """
-    Load WMATA route ridership CSV.
-
-    Returns:
-
-    [
-        {
-            route_id,
-            service_type,
-            monthly_boardings
-        }
-    ]
-
-    """
-
-    filepath = Path(filepath)
-
-
-    if not filepath.exists():
-
+    if not files:
         raise FileNotFoundError(
-            f"Ridership file not found: {filepath}"
+            "No ridership CSV found in data/raw/ridership/"
         )
 
-
-
-    records = []
-
-
-
-    with open(
-        filepath,
-        "r",
-        encoding="utf-8"
-    ) as f:
-
-
-        reader = csv.DictReader(f)
+    return max(files, key=lambda f: f.stat().st_mtime)
 
 
 
-        route_field = find_column(
-            reader.fieldnames,
-            ROUTE_FIELDS
-        )
+def load_ridership(file_path):
+
+    connection = sqlite3.connect(DATABASE_PATH)
+
+    cursor = connection.cursor()
 
 
-        service_field = find_column(
-            reader.fieldnames,
-            SERVICE_FIELDS
-        )
+    records_loaded = 0
 
 
-        boarding_field = find_column(
-            reader.fieldnames,
-            BOARDING_FIELDS
-        )
+    with open(file_path, "r") as csv_file:
 
-
-
-        if not route_field:
-
-            raise ValueError(
-                "Could not find route column"
-            )
-
-
-        if not boarding_field:
-
-            raise ValueError(
-                "Could not find ridership column"
-            )
-
+        reader = csv.DictReader(csv_file)
 
 
         for row in reader:
 
-
-            route = row.get(route_field)
-
-
-            if not route:
-
-                continue
-
-
-
-            try:
-
-                boardings = float(
-                    row.get(boarding_field, 0)
+            cursor.execute(
+                """
+                INSERT INTO ridership_snapshots
+                (
+                    route_id,
+                    service_type,
+                    period,
+                    monthly_boardings,
+                    source
                 )
 
-            except ValueError:
+                VALUES
+                (?, ?, ?, ?, ?)
 
-                boardings = 0
+                """,
 
-
-
-            records.append(
-
-                {
-
-                    "route_id": route.strip(),
-
-                    "service_type": (
-                        row.get(service_field)
-                        if service_field
-                        else None
-                    ),
-
-                    "monthly_boardings": boardings
-
-                }
+                (
+                    row["Route"],
+                    row["Service Type"],
+                    datetime.now().strftime("%Y-%m-%d"),
+                    float(row["Monthly Boardings"]),
+                    "WMATA Metrobus Ridership Summary"
+                )
 
             )
 
-
-
-    return records
-
+            records_loaded += 1
 
 
 
-
-def summarize_ridership(records):
-
-    """
-    Print basic ridership diagnostics.
-    """
-
-    print(
-        f"Loaded {len(records)} ridership records"
-    )
-
-
-    total = sum(
-        r["monthly_boardings"]
-        for r in records
-    )
-
-
-    print(
-        f"Total reported monthly boardings: {total:,.0f}"
-    )
-
-
-
-    routes = set(
-        r["route_id"]
-        for r in records
-    )
-
-
-    print(
-        f"Routes represented: {len(routes)}"
-    )
-
-
-
-
-
-def calculate_route_demand(records):
-
-    """
-    Collapse multiple service categories into
-    one route demand score.
-
-    Example:
-
-    Route C53:
-        weekday
-        saturday
-        sunday
-
-    becomes:
-
-    {
-        C53: total_demand
-    }
-
-    """
-
-    demand = {}
-
-
-    for record in records:
-
-
-        route = record["route_id"]
-
-
-        demand.setdefault(
-            route,
-            0
+    cursor.execute(
+        """
+        INSERT INTO data_refresh_log
+        (
+            dataset,
+            status,
+            records_loaded,
+            notes
         )
 
+        VALUES
+        (?, ?, ?, ?)
 
-        demand[route] += (
-            record["monthly_boardings"]
+        """,
+
+        (
+            "WMATA ridership",
+            "SUCCESS",
+            records_loaded,
+            f"Loaded from {file_path.name}"
         )
 
+    )
 
 
-    return demand
+    connection.commit()
+    connection.close()
 
 
+    print(
+        f"Loaded {records_loaded} ridership records."
+    )
 
 
 
 if __name__ == "__main__":
 
-
-    records = load_ridership()
-
-
-    summarize_ridership(records)
-
-
-    demand = calculate_route_demand(records)
-
+    file = find_latest_ridership_file()
 
     print(
-        "Example routes:"
+        f"Using ridership file: {file}"
     )
 
-
-    for route, value in list(demand.items())[:10]:
-
-        print(
-            route,
-            f"{value:,.0f}"
-        )
+    load_ridership(file)
