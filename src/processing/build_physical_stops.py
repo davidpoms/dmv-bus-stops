@@ -2,10 +2,10 @@
 Build physical bus stop locations.
 
 Converts WMATA stop records into real-world
-physical stop locations.
+physical bus stop locations.
 
 One physical stop may contain multiple WMATA
-stop records.
+operational stop records.
 """
 
 import sqlite3
@@ -36,20 +36,17 @@ def haversine(
     lat2,
     lon2
 ):
+    """
+    Calculate distance between two coordinates.
+    """
 
     earth_radius = 6371000
 
     phi1 = math.radians(lat1)
     phi2 = math.radians(lat2)
 
-    d_phi = math.radians(
-        lat2 - lat1
-    )
-
-    d_lambda = math.radians(
-        lon2 - lon1
-    )
-
+    d_phi = math.radians(lat2 - lat1)
+    d_lambda = math.radians(lon2 - lon1)
 
     a = (
         math.sin(d_phi / 2) ** 2
@@ -60,7 +57,6 @@ def haversine(
         *
         math.sin(d_lambda / 2) ** 2
     )
-
 
     return (
         earth_radius
@@ -88,6 +84,8 @@ def setup_tables(cursor):
             longitude REAL NOT NULL,
 
             primary_name TEXT,
+
+            member_count INTEGER DEFAULT 1,
 
             created_at TIMESTAMP
                 DEFAULT CURRENT_TIMESTAMP
@@ -119,11 +117,22 @@ def setup_tables(cursor):
     )
 
 
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_physical_members_stop
+        ON physical_stop_members(bus_stop_id);
+        """
+    )
+
+
 
 def cluster_stops(stops):
 
     """
-    Simple connected-component clustering.
+    Connected-component clustering.
+
+    Stops within MAX_DISTANCE_METERS
+    become part of the same physical stop.
     """
 
     remaining = {
@@ -136,7 +145,6 @@ def cluster_stops(stops):
 
 
     while remaining:
-
 
         seed_id = next(
             iter(remaining)
@@ -163,18 +171,13 @@ def cluster_stops(stops):
             nearby = []
 
 
-            for stop_id, stop in list(
-                remaining.items()
-            ):
+            for stop_id, stop in remaining.items():
 
                 distance = haversine(
-
                     current["latitude"],
                     current["longitude"],
-
                     stop["latitude"],
                     stop["longitude"]
-
                 )
 
 
@@ -188,15 +191,11 @@ def cluster_stops(stops):
             for stop_id in nearby:
 
                 queue.append(
-                    remaining.pop(
-                        stop_id
-                    )
+                    remaining.pop(stop_id)
                 )
 
 
-        clusters.append(
-            cluster
-        )
+        clusters.append(cluster)
 
 
     return clusters
@@ -212,152 +211,175 @@ def build_physical_stops():
     cursor = conn.cursor()
 
 
-    setup_tables(
-        cursor
-    )
+    try:
 
-
-    cursor.execute(
-        """
-        DELETE FROM physical_stop_members;
-        """
-    )
-
-
-    cursor.execute(
-        """
-        DELETE FROM physical_stops;
-        """
-    )
-
-
-    cursor.execute(
-        """
-        SELECT
-            id,
-            latitude,
-            longitude,
-            stop_name
-
-        FROM bus_stops;
-        """
-    )
-
-
-    stops = []
-
-
-    for row in cursor.fetchall():
-
-        stops.append(
-            {
-                "id": row[0],
-                "latitude": row[1],
-                "longitude": row[2],
-                "name": row[3]
-            }
-        )
-
-
-    clusters = cluster_stops(
-        stops
-    )
-
-
-    for cluster in clusters:
-
-
-        latitude = sum(
-            s["latitude"]
-            for s in cluster
-        ) / len(cluster)
-
-
-        longitude = sum(
-            s["longitude"]
-            for s in cluster
-        ) / len(cluster)
-
-
-        names = [
-            s["name"]
-            for s in cluster
-            if s["name"]
-        ]
-
-
-        primary_name = max(
-            names,
-            key=len
-        ) if names else None
-
+        setup_tables(cursor)
 
 
         cursor.execute(
+            "DELETE FROM physical_stop_members;"
+        )
 
-            """
-            INSERT INTO physical_stops
-            (
-                latitude,
-                longitude,
-                primary_name
-            )
-
-            VALUES (?, ?, ?)
-
-            """,
-
-            (
-                latitude,
-                longitude,
-                primary_name
-            )
-
+        cursor.execute(
+            "DELETE FROM physical_stops;"
         )
 
 
-        physical_id = cursor.lastrowid
+        cursor.execute(
+            """
+            SELECT
+                id,
+                latitude,
+                longitude,
+                stop_name
+
+            FROM bus_stops;
+            """
+        )
 
 
+        stops = []
 
-        for stop in cluster:
+        for row in cursor.fetchall():
 
-
-            cursor.execute(
-
-                """
-                INSERT INTO physical_stop_members
-
-                (
-                    physical_stop_id,
-                    bus_stop_id
-                )
-
-                VALUES (?, ?)
-
-                """,
-
-                (
-                    physical_id,
-                    stop["id"]
-                )
-
+            stops.append(
+                {
+                    "id": row[0],
+                    "latitude": row[1],
+                    "longitude": row[2],
+                    "name": row[3]
+                }
             )
 
 
-    conn.commit()
+        clusters = cluster_stops(
+            stops
+        )
 
 
-    print(
-        f"Processed {len(stops):,} WMATA stops"
-    )
-
-    print(
-        f"Created {len(clusters):,} physical stops"
-    )
+        cluster_sizes = []
 
 
-    conn.close()
+        for cluster in clusters:
+
+
+            latitude = sum(
+                stop["latitude"]
+                for stop in cluster
+            ) / len(cluster)
+
+
+            longitude = sum(
+                stop["longitude"]
+                for stop in cluster
+            ) / len(cluster)
+
+
+            names = [
+                stop["name"]
+                for stop in cluster
+                if stop["name"]
+            ]
+
+
+            primary_name = max(
+                names,
+                key=len
+            ) if names else None
+
+
+
+            cursor.execute(
+                """
+                INSERT INTO physical_stops
+                (
+                    latitude,
+                    longitude,
+                    primary_name,
+                    member_count
+                )
+
+                VALUES (?, ?, ?, ?);
+
+                """,
+                (
+                    latitude,
+                    longitude,
+                    primary_name,
+                    len(cluster)
+                )
+            )
+
+
+            physical_stop_id = cursor.lastrowid
+
+
+            cluster_sizes.append(
+                len(cluster)
+            )
+
+
+            for stop in cluster:
+
+                cursor.execute(
+                    """
+                    INSERT INTO physical_stop_members
+                    (
+                        physical_stop_id,
+                        bus_stop_id
+                    )
+
+                    VALUES (?, ?);
+
+                    """,
+                    (
+                        physical_stop_id,
+                        stop["id"]
+                    )
+                )
+
+
+        conn.commit()
+
+
+        multi_stop_locations = sum(
+            1
+            for size in cluster_sizes
+            if size > 1
+        )
+
+
+        largest_cluster = max(
+            cluster_sizes
+        )
+
+
+        print(
+            f"Processed {len(stops):,} WMATA stops"
+        )
+
+        print(
+            f"Created {len(clusters):,} physical stops"
+        )
+
+        print(
+            f"Merged {multi_stop_locations:,} locations"
+        )
+
+        print(
+            f"Largest cluster: {largest_cluster} records"
+        )
+
+
+    except Exception:
+
+        conn.rollback()
+        raise
+
+
+    finally:
+
+        conn.close()
 
 
 
