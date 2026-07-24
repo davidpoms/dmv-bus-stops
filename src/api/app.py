@@ -54,7 +54,8 @@ def home():
             "endpoints": [
                 "/summary",
                 "/projects",
-                "/stops/<stop_id>"
+                "/stops/<stop_id>",
+                "/map/stops"
             ]
         }
     )
@@ -161,6 +162,70 @@ def stop_detail(stop_id):
                     "status": row[1]
                 }
                 for row in projects
+            ]
+        }
+    )
+
+
+
+@app.route("/map/stops")
+def map_stops():
+
+    rows = query_db(
+        """
+        SELECT
+
+            ps.id,
+
+            ps.primary_name,
+
+            ps.latitude,
+
+            ps.longitude,
+
+            sii.opportunity_score,
+
+            sii.impact_level
+
+        FROM physical_stops ps
+
+        JOIN stop_improvement_impact sii
+
+            ON ps.id = sii.physical_stop_id
+
+        ORDER BY
+            sii.opportunity_score DESC;
+        """
+    )
+
+
+    return jsonify(
+        {
+            "type": "FeatureCollection",
+
+            "features": [
+
+                {
+                    "type": "Feature",
+
+                    "geometry": {
+                        "type": "Point",
+                        "coordinates": [
+                            row[3],
+                            row[2]
+                        ]
+                    },
+
+                    "properties": {
+                        "stop_id": row[0],
+                        "location": row[1],
+                        "score": row[4],
+                        "impact": row[5]
+                    }
+                }
+
+                for row in rows
+
             ]
         }
     )
