@@ -33,93 +33,130 @@ class Repository:
 
 
 
-   def save_review(
-    self,
-    review
-):
-    """
-    Save structured volunteer stop review.
-    """
+  """
+Database repository methods.
 
-    connection = sqlite3.connect(
-        self.database_path
-    )
+Handles saving and retrieving
+bus stop intelligence.
+"""
 
-    cursor = connection.cursor()
+import sqlite3
+from pathlib import Path
+from datetime import datetime
 
 
-    cursor.execute(
+BASE_DIR = Path(__file__).resolve().parents[2]
+
+DATABASE_PATH = (
+    BASE_DIR
+    / "src"
+    / "database"
+    / "dmv_bus_stops.db"
+)
+
+
+class Repository:
+
+    def __init__(
+        self,
+        database_path=DATABASE_PATH
+    ):
+        self.database_path = database_path
+
+
+    def save_review(
+        self,
+        review
+    ):
         """
-        INSERT INTO stop_reviews
-        (
-            stop_id,
-            has_shelter,
-            has_bench,
-            reviewer_confidence,
-            notes
+        Save structured volunteer stop review.
+        """
+
+        connection = sqlite3.connect(
+            self.database_path
         )
 
-        VALUES (?, ?, ?, ?, ?)
+        cursor = connection.cursor()
 
-        """,
 
-        (
-            review["stop_id"],
-
-            review.get(
-                "shelter_present"
-            ),
-
-            review.get(
-                "bench_present"
-            ),
-
-            review.get(
-                "review_confidence"
-            ),
-
-            review.get(
-                "notes"
+        cursor.execute(
+            """
+            INSERT INTO stop_reviews
+            (
+                stop_id,
+                has_shelter,
+                has_bench,
+                reviewer_confidence,
+                notes
             )
 
+            VALUES (?, ?, ?, ?, ?)
+
+            """,
+
+            (
+                review["stop_id"],
+
+                review.get(
+                    "shelter_present"
+                ),
+
+                review.get(
+                    "bench_present"
+                ),
+
+                review.get(
+                    "review_confidence"
+                ),
+
+                review.get(
+                    "notes"
+                )
+
+            )
         )
-    )
 
 
-    connection.commit()
+        connection.commit()
 
-    connection.close()
-
-
-
-   def get_reviews_for_stop(
-    self,
-    stop_id
-):
-
-    connection = sqlite3.connect(
-        self.database_path
-    )
-
-    cursor = connection.cursor()
+        connection.close()
 
 
-    cursor.execute(
+
+    def get_reviews_for_stop(
+        self,
+        stop_id
+    ):
         """
-        SELECT *
-        FROM stop_reviews
-        WHERE stop_id = ?
+        Retrieve all reviews
+        for a stop.
+        """
 
-        """,
-
-        (
-            stop_id,
+        connection = sqlite3.connect(
+            self.database_path
         )
-    )
+
+        cursor = connection.cursor()
 
 
-    reviews = cursor.fetchall()
+        cursor.execute(
+            """
+            SELECT *
+            FROM stop_reviews
+            WHERE stop_id = ?
 
-    connection.close()
+            """,
 
-    return reviews
+            (
+                stop_id,
+            )
+        )
+
+
+        reviews = cursor.fetchall()
+
+
+        connection.close()
+
+
+        return reviews
