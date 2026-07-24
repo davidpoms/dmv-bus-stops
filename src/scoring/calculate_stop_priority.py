@@ -3,20 +3,23 @@ DMV Bus Stops Intelligence Platform
 
 Stop priority scoring engine.
 
-Scoring inputs:
-- GTFS stop-route relationships
-- WMATA ridership snapshots
+Ranks bus stops for improvement opportunities.
 
-Normalization:
-- Ridership snapshots contain monthly weekday totals
-- Convert to average weekday daily demand
+Inputs:
+- bus_stops
+- stop_routes
+- routes
+- ridership_snapshots
 
-Output:
-- stop_priority_snapshots
+Method:
+- Convert monthly weekday boardings to average weekday demand
+- Aggregate demand across all routes serving each stop
+- Add route diversity bonus
 """
 
 import sqlite3
 import json
+import math
 import calendar
 from datetime import datetime
 from pathlib import Path
@@ -35,39 +38,31 @@ DATABASE_PATH = (
 
 def weekdays_in_month(date_string):
 
-    """
-    Calculate number of weekdays
-    in the reporting month.
-    """
-
     date = datetime.strptime(
         date_string,
         "%Y-%m-%d"
     )
 
+    year = date.year
+    month = date.month
+
     total = 0
-
-    days = calendar.monthrange(
-        date.year,
-        date.month
-    )[1]
-
 
     for day in range(
         1,
-        days + 1
+        calendar.monthrange(
+            year,
+            month
+        )[1] + 1
     ):
 
-        weekday = datetime(
-            date.year,
-            date.month,
+        if datetime(
+            year,
+            month,
             day
-        ).weekday()
+        ).weekday() < 5:
 
-
-        if weekday < 5:
             total += 1
-
 
     return total
 
@@ -91,72 +86,69 @@ def calculate_scores():
 
     cursor.execute(
         """
-        WITH route_demand AS (
+        WITH route_daily AS (
 
             SELECT
 
                 route_id,
 
-                MAX(
-                    weekday_boardings
-                ) AS monthly_weekday_boardings,
+                weekday_boardings,
 
-                MAX(
-                    period
-                ) AS period
+                CASE
+
+                    WHEN weekday_boardings IS NULL
+                    THEN 0
+
+                    ELSE
+
+                        weekday_boardings
+                        /
+                        (
+                            CASE
+
+                            WHEN strftime(
+                                '%m',
+                                period
+                            ) IS NOT NULL
+
+                            THEN
+
+                                CASE
+
+                                WHEN strftime(
+                                    '%m',
+                                    period
+                                ) IN
+                                (
+                                    '01',
+                                    '02',
+                                    '03',
+                                    '04',
+                                    '05',
+                                    '06',
+                                    '07',
+                                    '08',
+                                    '09',
+                                    '10',
+                                    '11',
+                                    '12'
+                                )
+
+                                THEN 21
+
+                                ELSE 21
+
+                                END
+
+                            ELSE 21
+
+                            END
+                        )
+
+                END AS daily_boardings
 
 
             FROM ridership_snapshots
-
-            GROUP BY route_id
-
-        ),
-
-
-        normalized_routes AS (
-
-            SELECT
-
-                route_id,
-
-                monthly_weekday_boardings,
-
-                monthly_weekday_boardings
-                /
-                (
-                    CASE
-
-                    WHEN period IS NOT NULL
-
-                    THEN
-
-                        (
-                        CAST(
-                            strftime(
-                                '%d',
-                                date(
-                                    period,
-                                    'start of month',
-                                    '+1 month',
-                                    '-1 day'
-                                )
-                            )
-                            AS INTEGER
-                        )
-                        )
-
-                    ELSE 1
-
-                    END
-                )
-
-                AS daily_estimate,
-
-
-                period
-
-
-            FROM route_demand
 
         )
 
@@ -170,32 +162,37 @@ def calculate_scores():
             ) AS routes_served,
 
 
-            MAX(
-                nr.daily_estimate
-            ) AS average_daily_boardings,
+            SUM(
+                rd.daily_boardings
+            ) AS total_daily_boardings,
 
 
             MAX(
-                nr.monthly_weekday_boardings
-            ) AS monthly_weekday_boardings,
+                rd.daily_boardings
+            ) AS highest_route_daily,
 
 
             GROUP_CONCAT(
                 DISTINCT sr.route_id
-            ) AS routes
+            ) AS routes,
+
+
+            MAX(
+                rd.weekday_boardings
+            ) AS largest_monthly_route_total
 
 
         FROM bus_stops b
 
 
-        LEFT JOIN stop_routes sr
+        JOIN stop_routes sr
 
             ON b.gtfs_stop_id = sr.stop_id
 
 
-        LEFT JOIN normalized_routes nr
+        LEFT JOIN route_daily rd
 
-            ON sr.route_id = nr.route_id
+            ON sr.route_id = rd.route_id
 
 
         GROUP BY b.id;
@@ -210,26 +207,36 @@ def calculate_scores():
     if not rows:
 
         print(
-            "No data found."
+            "No stop data found"
         )
 
         return
 
 
 
-    max_daily = max(
-        row[2] or 0
+    max_score_base = max(
+
+        math.log(
+            1 + (row[2] or 0)
+        )
+
         for row in rows
+
     )
 
 
     max_routes = max(
-        row[1] or 0
+
+        row[1]
+
         for row in rows
+
     )
 
 
-    ranked = []
+
+    results = []
+
 
 
     for row in rows:
@@ -237,34 +244,26 @@ def calculate_scores():
         (
             stop_id,
             routes_served,
-            daily_boardings,
-            monthly_boardings,
-            routes
+            total_daily,
+            highest_route_daily,
+            routes,
+            largest_monthly
 
         ) = row
 
 
-        daily_boardings = (
-            daily_boardings or 0
-        )
+        total_daily = total_daily or 0
 
 
-        routes_served = (
-            routes_served or 0
-        )
+        demand_score = (
 
-
-        ridership_score = (
-
-            daily_boardings
+            math.log(
+                1 + total_daily
+            )
             /
-            max_daily
+            max_score_base
             *
             100
-
-            if max_daily
-
-            else 0
 
         )
 
@@ -277,16 +276,12 @@ def calculate_scores():
             *
             100
 
-            if max_routes
-
-            else 0
-
         )
 
 
         priority_score = (
 
-            ridership_score * 0.70
+            demand_score * 0.70
 
             +
 
@@ -297,12 +292,15 @@ def calculate_scores():
 
         factors = {
 
-            "monthly_weekday_boardings":
-                monthly_boardings,
-
             "average_daily_weekday_boardings":
                 round(
-                    daily_boardings,
+                    total_daily,
+                    2
+                ),
+
+            "highest_route_daily_boardings":
+                round(
+                    highest_route_daily or 0,
                     2
                 ),
 
@@ -316,7 +314,7 @@ def calculate_scores():
 
             "ridership_score":
                 round(
-                    ridership_score,
+                    demand_score,
                     2
                 ),
 
@@ -329,7 +327,7 @@ def calculate_scores():
         }
 
 
-        ranked.append(
+        results.append(
             (
                 stop_id,
                 priority_score,
@@ -339,22 +337,19 @@ def calculate_scores():
 
 
 
-    ranked.sort(
+    results.sort(
         key=lambda x: x[1],
         reverse=True
     )
 
 
 
-    for rank, (
-        stop_id,
-        score,
-        factors
-
-    ) in enumerate(
-        ranked,
+    for rank, item in enumerate(
+        results,
         start=1
     ):
+
+        stop_id, score, factors = item
 
 
         cursor.execute(
@@ -385,12 +380,13 @@ def calculate_scores():
         )
 
 
+
     conn.commit()
     conn.close()
 
 
     print(
-        f"Scored {len(ranked):,} stops"
+        f"Scored {len(results):,} stops"
     )
 
 
