@@ -161,25 +161,25 @@ CREATE TABLE IF NOT EXISTS community_requests (
 -- Monthly automated import
 -- =====================================================
 
-CREATE TABLE IF NOT EXISTS ridership_snapshots (
+CREATE TABLE ridership_snapshots (
 
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-
+    id INTEGER PRIMARY KEY,
 
     route_id TEXT NOT NULL,
 
-
     service_type TEXT,
-
 
     period DATE NOT NULL,
 
-
     monthly_boardings REAL,
 
+    weekday_boardings REAL,
+
+    saturday_boardings REAL,
+
+    sunday_boardings REAL,
 
     source TEXT,
-
 
     imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 
