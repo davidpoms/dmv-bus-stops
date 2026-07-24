@@ -17,119 +17,133 @@ from dmv_bus_stops.models.stop import BusStop
 DEFAULT_FIELD_MAP = {
     "stop_id": "REG_ID",
     "stop_name": "NAME",
-}
+}"""
+GeoJSON loading utilities.
+
+Supports loading GeoJSON bus stop data
+from local files or API endpoints.
+"""
+
+import json
+import requests
 
 
-def load_geojson(
-    filename: str | Path,
-    field_map: dict | None = None,
-) -> List[BusStop]:
+def parse_geojson(
+    data
+):
     """
-    Load a GeoJSON FeatureCollection and return BusStop objects.
-
-    Parameters
-    ----------
-    filename
-        Path to the WMATA bus stop GeoJSON.
-
-    field_map
-        Mapping between BusStop fields and GeoJSON property names.
-
-    Returns
-    -------
-    list[BusStop]
+    Convert a GeoJSON FeatureCollection
+    into a list of dictionaries.
     """
 
-    field_map = field_map or DEFAULT_FIELD_MAP
+    features = data.get(
+        "features",
+        []
+    )
 
-    with open(filename, "r", encoding="utf-8") as f:
-        geojson = json.load(f)
-
-    features = geojson.get("features", [])
-
-    stops: List[BusStop] = []
+    stops = []
 
     for feature in features:
 
-        geometry = feature.get("geometry", {})
-        properties = feature.get("properties", {})
-
-        if geometry.get("type") != "Point":
-            continue
-
-        coordinates = geometry.get("coordinates", [])
-
-        if len(coordinates) < 2:
-            continue
-
-        lon = coordinates[0]
-        lat = coordinates[1]
-
-        stop = BusStop(
-            stop_id=str(properties.get(field_map["stop_id"], "")),
-            stop_name=properties.get(field_map["stop_name"]),
-            latitude=lat,
-            longitude=lon,
+        properties = feature.get(
+            "properties",
+            {}
         )
 
-        stops.append(stop)
+        geometry = feature.get(
+            "geometry"
+        )
+
+        stop = properties.copy()
+
+        if geometry:
+            stop["geometry"] = geometry
+
+        stops.append(
+            stop
+        )
 
     return stops
+
+
+
+def load_geojson(
+    filename
+):
+    """
+    Load GeoJSON from a local file.
+    """
+
+    with open(
+        filename,
+        "r",
+        encoding="utf-8"
+    ) as file:
+
+        data = json.load(
+            file
+        )
+
+    return parse_geojson(
+        data
+    )
+
+
 
 def load_geojson_url(
     url
 ):
     """
-    Load GeoJSON from an API endpoint.
+    Load GeoJSON from a URL/API endpoint.
     """
 
     response = requests.get(
-        url
+        url,
+        timeout=30
     )
 
     response.raise_for_status()
 
     data = response.json()
 
-    return [
-        feature["properties"]
-        | {
-            "geometry": feature.get(
-                "geometry"
-            )
-        }
-        for feature in data["features"]
-    ]
-def load_single_stop(
-    filename: str | Path,
-    stop_id: str,
-) -> BusStop | None:
-    """
-    Convenience function for loading one stop by ID.
-    """
+    return parse_geojson(
+        data
+    )
 
-    for stop in load_geojson(filename):
-        if stop.stop_id == stop_id:
-            return stop
-
-    return None
 
 
 if __name__ == "__main__":
 
     import argparse
 
+
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("geojson")
+    parser.add_argument(
+        "geojson"
+    )
 
     args = parser.parse_args()
 
-    stops = load_geojson(args.geojson)
 
-    print(f"Loaded {len(stops):,} bus stops.")
+    stops = load_geojson(
+        args.geojson
+    )
+
+
+    print(
+        f"Loaded {len(stops):,} bus stops."
+    )
+
 
     if stops:
+
         print()
-        print("Example:")
-        print(stops[0])
+
+        print(
+            "Example:"
+        )
+
+        print(
+            stops[0]
+        )
