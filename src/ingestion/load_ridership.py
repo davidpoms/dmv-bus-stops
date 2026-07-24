@@ -1,7 +1,8 @@
 """
-Load WMATA Metrobus ridership data into database.
+Load WMATA Metrobus ridership data.
 
-Handles WMATA tab-delimited export format.
+Handles WMATA tab-delimited export format and
+stores daily and monthly ridership metrics.
 """
 
 import csv
@@ -27,9 +28,12 @@ RIDERSHIP_FOLDER = (
 )
 
 
+
 def find_latest_ridership_file():
 
-    files = list(RIDERSHIP_FOLDER.glob("*.csv"))
+    files = list(
+        RIDERSHIP_FOLDER.glob("*.csv")
+    )
 
     if not files:
         raise FileNotFoundError(
@@ -42,9 +46,25 @@ def find_latest_ridership_file():
     )
 
 
+
+def clean_number(value):
+
+    if not value:
+        return 0
+
+    return float(
+        value
+        .replace(",", "")
+        .strip()
+    )
+
+
+
 def load_ridership(file_path):
 
-    connection = sqlite3.connect(DATABASE_PATH)
+    connection = sqlite3.connect(
+        DATABASE_PATH
+    )
 
     cursor = connection.cursor()
 
@@ -64,10 +84,11 @@ def load_ridership(file_path):
         )
 
 
-        # Skip first title/header row
+        # Skip title row
         next(reader)
 
 
+        # Header row
         header = next(reader)
 
 
@@ -77,23 +98,21 @@ def load_ridership(file_path):
                 continue
 
 
-            route = row[0].strip()
+            route_id = row[0].strip()
 
 
-            # Skip totals row
-            if route == "Grand Total":
+            # Ignore summary rows
+            if route_id in [
+                "Grand Total",
+                ""
+            ]:
                 continue
 
 
-            monthly_total = (
-                row[4]
-                .replace(",", "")
-                .strip()
-            )
-
-
-            if not monthly_total:
-                continue
+            weekday = clean_number(row[1])
+            sunday = clean_number(row[2])
+            saturday = clean_number(row[3])
+            monthly_total = clean_number(row[4])
 
 
             cursor.execute(
@@ -104,18 +123,26 @@ def load_ridership(file_path):
                     service_type,
                     period,
                     monthly_boardings,
+                    weekday_boardings,
+                    saturday_boardings,
+                    sunday_boardings,
                     source
                 )
 
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 
                 """,
 
                 (
-                    route,
-                    "Monthly Total",
-                    datetime.now().strftime("%Y-%m-%d"),
-                    float(monthly_total),
+                    route_id,
+                    "Metrobus",
+                    datetime.now().strftime(
+                        "%Y-%m-%d"
+                    ),
+                    monthly_total,
+                    weekday,
+                    saturday,
+                    sunday,
                     "WMATA Metrobus Ridership Summary"
                 )
 
@@ -155,6 +182,7 @@ def load_ridership(file_path):
     print(
         f"Loaded {records_loaded} ridership records."
     )
+
 
 
 if __name__ == "__main__":
