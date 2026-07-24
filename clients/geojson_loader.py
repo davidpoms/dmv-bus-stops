@@ -66,9 +66,7 @@ def load_geojson_url(url):
         offset += limit
 
 
-    return {
-        "features": all_features
-    }
+    return all_features 
 
 
 
