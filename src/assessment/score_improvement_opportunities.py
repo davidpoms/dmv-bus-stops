@@ -193,7 +193,7 @@ def score_opportunities():
 
         opportunity_score = (
 
-            ridership_score * 0.60
+            ridership_score * 0.70
 
             +
 
@@ -201,7 +201,7 @@ def score_opportunities():
 
             +
 
-            complexity_score * 0.15
+            complexity_score * 0.05
 
         )
 
