@@ -1,92 +1,113 @@
 """
-Review queue builder.
+Build volunteer review queues.
 
-This is the first end-to-end pipeline in the project.
-
-It loads bus stops, enriches them with available data, scores them,
-and produces an ordered review queue.
+Prioritizes stops where human review
+will create the most value.
 """
 
-from pathlib import Path
 
-from dmv_bus_stops.io.geojson_loader import load_geojson
-from dmv_bus_stops.review.priority import ReviewPriorityEngine
-
-
-class ReviewQueueBuilder:
+def calculate_review_priority(
+    priority_score,
+    image_available=True,
+    review_count=0,
+    confidence=0
+):
     """
-    Builds prioritized review queues.
+    Calculate how useful a review would be.
+
+    Higher score means:
+    - important stop
+    - available imagery
+    - little existing review
+    - low confidence
     """
 
-    def __init__(self):
 
-        self.priority_engine = ReviewPriorityEngine()
+    if not image_available:
 
-    def build(
-        self,
-        geojson_file: str | Path,
-    ):
-        """
-        Build a prioritized review queue.
-        """
-
-        #
-        # Load WMATA stops
-        #
-
-        stops = load_geojson(geojson_file)
-
-        #
-        # Future enrichment happens here.
-        #
-        # Examples:
-        #
-        #   add OSM tags
-        #   add Street View imagery
-        #   add ridership
-        #   add volunteer consensus
-        #   add public requests
-        #
-
-        #
-        # Compute review priorities
-        #
-
-        ranked = self.priority_engine.rank(stops)
-
-        return ranked
+        return 0
 
 
-if __name__ == "__main__":
+    score = priority_score
 
-    import argparse
 
-    parser = argparse.ArgumentParser()
+    # Encourage reviewing unknown stops
+    if review_count == 0:
+        score += 20
 
-    parser.add_argument("geojson")
+    elif review_count < 3:
+        score += 10
 
-    parser.add_argument(
-        "--top",
-        type=int,
-        default=25,
+
+    # Prioritize uncertainty
+    score += (100 - confidence) * 0.20
+
+
+    return round(score)
+
+
+
+def build_review_queue(stops, limit=500):
+    """
+    Build ranked volunteer queue.
+
+    Input:
+
+    [
+        {
+            "stop_id": "700123",
+            "priority_score": 85,
+            "review_count": 0,
+            "confidence": 30
+        }
+    ]
+
+    """
+
+
+    ranked = []
+
+
+    for stop in stops:
+
+        review_score = calculate_review_priority(
+            priority_score=
+                stop["priority_score"],
+
+            image_available=
+                stop.get(
+                    "image_available",
+                    True
+                ),
+
+            review_count=
+                stop.get(
+                    "review_count",
+                    0
+                ),
+
+            confidence=
+                stop.get(
+                    "confidence",
+                    0
+                )
+        )
+
+
+        ranked.append(
+            {
+                **stop,
+                "review_priority":
+                    review_score
+            }
+        )
+
+
+    ranked.sort(
+        key=lambda x:
+            x["review_priority"],
+        reverse=True
     )
 
-    args = parser.parse_args()
 
-    builder = ReviewQueueBuilder()
-
-    queue = builder.build(args.geojson)
-
-    print()
-
-    print(f"Top {args.top} review candidates")
-
-    print("-" * 60)
-
-    for stop in queue[: args.top]:
-
-        print(
-            stop.stop_id,
-            stop.stop_name,
-            f"score={stop.review_priority:.2f}",
-        )
+    return ranked[:limit]
