@@ -1,0 +1,53 @@
+name: Update WMATA Ridership Data
+
+on:
+  schedule:
+    # Run monthly on the 5th at 8:00 AM UTC
+    - cron: "0 8 5 * *"
+
+  # Allows manual runs from GitHub Actions tab
+  workflow_dispatch:
+
+
+jobs:
+
+  update-ridership:
+
+    runs-on: ubuntu-latest
+
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+
+      - name: Initialize database
+        run: |
+          python src/database/init_db.py
+
+
+      - name: Load WMATA ridership
+        run: |
+          python src/ingestion/load_ridership.py
+
+
+      - name: Run priority update
+        run: |
+          python review/priority.py
+
+
+      - name: Save updated data
+        run: |
+          git status
