@@ -18,7 +18,7 @@ downstream analysis.
 import json
 from pathlib import Path
 
-from src.config import BUS_STOP_FILE
+from config import BUS_STOP_FILE
 
 
 
