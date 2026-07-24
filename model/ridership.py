@@ -1,8 +1,8 @@
 """
 Ridership intelligence model.
 
-Transforms raw route ridership data into
-usable scoring information for bus stop prioritization.
+Uses WMATA ridership metrics to create
+human-readable demand intelligence.
 """
 
 from dataclasses import dataclass
@@ -15,75 +15,94 @@ class RouteRidership:
     """
 
     route_id: str
-    monthly_boardings: float
+    average_daily_boardings: float
+    monthly_boardings: float | None = None
 
 
     def demand_level(self):
         """
-        Classify route demand.
+        Classify route demand based on
+        average daily boardings.
         """
 
-        if self.monthly_boardings >= 200000:
+        if self.average_daily_boardings >= 10000:
             return "very_high"
 
-        if self.monthly_boardings >= 100000:
+        if self.average_daily_boardings >= 5000:
             return "high"
 
-        if self.monthly_boardings >= 50000:
+        if self.average_daily_boardings >= 2000:
             return "medium"
 
         return "low"
 
 
 
-def calculate_demand_score(monthly_boardings):
+def calculate_demand_score(average_daily_boardings):
     """
-    Convert ridership into a 0-100 score.
-
-    Used later by priority engine.
+    Convert average daily boardings
+    into a 0-100 demand score.
     """
 
-    if monthly_boardings <= 0:
+    if average_daily_boardings <= 0:
         return 0
 
 
-    if monthly_boardings >= 300000:
+    if average_daily_boardings >= 10000:
         return 100
 
 
-    if monthly_boardings >= 200000:
-        return 90
+    if average_daily_boardings >= 5000:
+        return 85
 
 
-    if monthly_boardings >= 100000:
-        return 75
+    if average_daily_boardings >= 2000:
+        return 65
 
 
-    if monthly_boardings >= 50000:
-        return 55
+    if average_daily_boardings >= 500:
+        return 40
 
 
-    if monthly_boardings >= 25000:
-        return 35
-
-
-    return 15
+    return 20
 
 
 
-def summarize_route(route_id, monthly_boardings):
+def summarize_route(
+    route_id,
+    average_daily_boardings,
+    monthly_boardings=None
+):
+    """
+    Create a volunteer-friendly route summary.
+    """
 
     route = RouteRidership(
         route_id=route_id,
+        average_daily_boardings=average_daily_boardings,
         monthly_boardings=monthly_boardings
     )
 
 
     return {
+
         "route_id": route.route_id,
-        "monthly_boardings": route.monthly_boardings,
-        "demand_level": route.demand_level(),
-        "demand_score": calculate_demand_score(
-            route.monthly_boardings
-        )
+
+        "average_daily_boardings":
+            route.average_daily_boardings,
+
+        "monthly_boardings":
+            route.monthly_boardings,
+
+        "demand_level":
+            route.demand_level(),
+
+        "demand_score":
+            calculate_demand_score(
+                route.average_daily_boardings
+            ),
+
+        "source":
+            "WMATA"
+
     }
