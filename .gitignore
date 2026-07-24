@@ -1,2 +1,13 @@
 __pycache__/
 src/database/*.db
+
+# generated exports
+*.csv
+*.json
+*.html
+
+# raw source data
+data/raw/
+
+# temporary files
+*.save
