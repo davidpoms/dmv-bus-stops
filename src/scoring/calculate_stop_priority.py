@@ -3,16 +3,22 @@ DMV Bus Stops Intelligence Platform
 
 Stop priority scoring engine.
 
-Version 1 scoring:
-- Highest route ridership serving the stop
-- Number of routes serving the stop
+Scoring inputs:
+- GTFS stop-route relationships
+- WMATA ridership snapshots
 
-Outputs:
-    stop_priority_snapshots
+Normalization:
+- Ridership snapshots contain monthly weekday totals
+- Convert to average weekday daily demand
+
+Output:
+- stop_priority_snapshots
 """
 
 import sqlite3
 import json
+import calendar
+from datetime import datetime
 from pathlib import Path
 
 
@@ -27,6 +33,46 @@ DATABASE_PATH = (
 
 
 
+def weekdays_in_month(date_string):
+
+    """
+    Calculate number of weekdays
+    in the reporting month.
+    """
+
+    date = datetime.strptime(
+        date_string,
+        "%Y-%m-%d"
+    )
+
+    total = 0
+
+    days = calendar.monthrange(
+        date.year,
+        date.month
+    )[1]
+
+
+    for day in range(
+        1,
+        days + 1
+    ):
+
+        weekday = datetime(
+            date.year,
+            date.month,
+            day
+        ).weekday()
+
+
+        if weekday < 5:
+            total += 1
+
+
+    return total
+
+
+
 def calculate_scores():
 
     conn = sqlite3.connect(
@@ -36,7 +82,6 @@ def calculate_scores():
     cursor = conn.cursor()
 
 
-    # Clear previous snapshot
     cursor.execute(
         """
         DELETE FROM stop_priority_snapshots;
@@ -44,14 +89,22 @@ def calculate_scores():
     )
 
 
-    # Build stop demand profile
     cursor.execute(
         """
         WITH route_demand AS (
 
             SELECT
+
                 route_id,
-                MAX(weekday_boardings) AS weekday_boardings
+
+                MAX(
+                    weekday_boardings
+                ) AS monthly_weekday_boardings,
+
+                MAX(
+                    period
+                ) AS period
+
 
             FROM ridership_snapshots
 
@@ -60,50 +113,92 @@ def calculate_scores():
         ),
 
 
-        stop_demand AS (
+        normalized_routes AS (
 
             SELECT
 
-                b.id AS stop_id,
+                route_id,
 
-                COUNT(
-                    DISTINCT sr.route_id
-                ) AS route_count,
+                monthly_weekday_boardings,
+
+                monthly_weekday_boardings
+                /
+                (
+                    CASE
+
+                    WHEN period IS NOT NULL
+
+                    THEN
+
+                        (
+                        CAST(
+                            strftime(
+                                '%d',
+                                date(
+                                    period,
+                                    'start of month',
+                                    '+1 month',
+                                    '-1 day'
+                                )
+                            )
+                            AS INTEGER
+                        )
+                        )
+
+                    ELSE 1
+
+                    END
+                )
+
+                AS daily_estimate,
 
 
-                COALESCE(
-                    MAX(
-                        rd.weekday_boardings
-                    ),
-                    0
-                ) AS weekday_boardings,
+                period
 
 
-                GROUP_CONCAT(
-                    DISTINCT sr.route_id
-                ) AS routes
-
-
-            FROM bus_stops b
-
-
-            LEFT JOIN stop_routes sr
-
-                ON b.gtfs_stop_id = sr.stop_id
-
-
-            LEFT JOIN route_demand rd
-
-                ON sr.route_id = rd.route_id
-
-
-            GROUP BY b.id
+            FROM route_demand
 
         )
 
 
-        SELECT *
-        FROM stop_demand;
+        SELECT
+
+            b.id,
+
+            COUNT(
+                DISTINCT sr.route_id
+            ) AS routes_served,
+
+
+            MAX(
+                nr.daily_estimate
+            ) AS average_daily_boardings,
+
+
+            MAX(
+                nr.monthly_weekday_boardings
+            ) AS monthly_weekday_boardings,
+
+
+            GROUP_CONCAT(
+                DISTINCT sr.route_id
+            ) AS routes
+
+
+        FROM bus_stops b
+
+
+        LEFT JOIN stop_routes sr
+
+            ON b.gtfs_stop_id = sr.stop_id
+
+
+        LEFT JOIN normalized_routes nr
+
+            ON sr.route_id = nr.route_id
+
+
+        GROUP BY b.id;
 
         """
     )
@@ -115,21 +210,21 @@ def calculate_scores():
     if not rows:
 
         print(
-            "No stop data found."
+            "No data found."
         )
 
         return
 
 
 
-    max_boardings = max(
-        row[2]
+    max_daily = max(
+        row[2] or 0
         for row in rows
     )
 
 
     max_routes = max(
-        row[1]
+        row[1] or 0
         for row in rows
     )
 
@@ -137,23 +232,37 @@ def calculate_scores():
     ranked = []
 
 
-    for (
-        stop_id,
-        route_count,
-        weekday_boardings,
-        routes
-    ) in rows:
+    for row in rows:
+
+        (
+            stop_id,
+            routes_served,
+            daily_boardings,
+            monthly_boardings,
+            routes
+
+        ) = row
+
+
+        daily_boardings = (
+            daily_boardings or 0
+        )
+
+
+        routes_served = (
+            routes_served or 0
+        )
 
 
         ridership_score = (
 
-            weekday_boardings
+            daily_boardings
             /
-            max_boardings
+            max_daily
             *
             100
 
-            if max_boardings
+            if max_daily
 
             else 0
 
@@ -162,7 +271,7 @@ def calculate_scores():
 
         route_score = (
 
-            route_count
+            routes_served
             /
             max_routes
             *
@@ -188,11 +297,17 @@ def calculate_scores():
 
         factors = {
 
-            "weekday_boardings":
-                weekday_boardings,
+            "monthly_weekday_boardings":
+                monthly_boardings,
+
+            "average_daily_weekday_boardings":
+                round(
+                    daily_boardings,
+                    2
+                ),
 
             "routes_served":
-                route_count,
+                routes_served,
 
             "routes":
                 routes.split(",")
@@ -215,23 +330,18 @@ def calculate_scores():
 
 
         ranked.append(
-
             (
                 stop_id,
                 priority_score,
                 factors
             )
-
         )
 
 
 
     ranked.sort(
-
         key=lambda x: x[1],
-
         reverse=True
-
     )
 
 
@@ -264,24 +374,18 @@ def calculate_scores():
             """,
 
             (
-
                 stop_id,
-
                 score,
-
                 rank,
-
                 json.dumps(
                     factors
                 )
-
             )
 
         )
 
 
     conn.commit()
-
     conn.close()
 
 
