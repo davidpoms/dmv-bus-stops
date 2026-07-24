@@ -1,36 +1,8 @@
-"""
-GeoJSON loading utilities.
-
-Supports loading GeoJSON bus stop data
-from local files or API endpoints.
-"""
-
 import json
 import requests
 
 
-def parse_geojson(data):
-    """
-    Convert a GeoJSON FeatureCollection"""
-GeoJSON loading utilities.
-
-Supports:
-- Local GeoJSON files
-- GeoJSON API endpoints
-- ArcGIS FeatureServer pagination
-"""
-
-import json
-import requests
-
-
-
-def load_geojson(
-    filename
-):
-    """
-    Load GeoJSON from a local file.
-    """
+def load_geojson(filename):
 
     with open(
         filename,
@@ -42,21 +14,13 @@ def load_geojson(
 
 
 
-def load_geojson_url(
-    url
-):
-    """
-    Load GeoJSON from an API endpoint.
-
-    Handles ArcGIS-style pagination where
-    responses are limited to 2,000 records.
-    """
+def load_geojson_url(url):
 
     all_features = []
 
     offset = 0
 
-    page_size = 2000
+    limit = 2000
 
 
     while True:
@@ -65,7 +29,7 @@ def load_geojson_url(
             url,
             params={
                 "resultOffset": offset,
-                "resultRecordCount": page_size,
+                "resultRecordCount": limit,
                 "f": "geojson"
             },
             timeout=60
@@ -94,13 +58,12 @@ def load_geojson_url(
         )
 
 
-        if len(features) < page_size:
+        if len(features) < limit:
 
             break
 
 
-        offset += page_size
-
+        offset += limit
 
 
     return {
@@ -116,11 +79,9 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
 
-
     parser.add_argument(
         "geojson"
     )
-
 
     args = parser.parse_args()
 
@@ -130,25 +91,6 @@ if __name__ == "__main__":
     )
 
 
-    features = data.get(
-        "features",
-        []
-    )
-
-
     print(
-        f"Loaded {len(features):,} features."
+        f"Loaded {len(data.get('features', [])):,} features."
     )
-
-
-    if features:
-
-        print()
-
-        print(
-            "Example:"
-        )
-
-        print(
-            features[0]
-        )
