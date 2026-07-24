@@ -1,13 +1,9 @@
 """
 DMV Bus Stops Intelligence Platform
 
-Bus stop ingestion module.
-
-Purpose:
-- Load bus stop GeoJSON from API sources
-- Normalize fields
-- Produce consistent stop records
-- Prepare data for database loading
+Loads bus stops from a GeoJSON API,
+normalizes fields, and prepares records
+for database ingestion.
 """
 
 from pathlib import Path
@@ -25,14 +21,6 @@ from src.config import BUS_STOP_API_URL
 from clients.geojson_loader import load_geojson_url
 
 
-
-# ------------------------------------------------------------
-# Field mapping
-#
-# WMATA exports have changed over time.
-# Keep this centralized so we can adjust without
-# rewriting the pipeline.
-# ------------------------------------------------------------
 
 STOP_FIELD_MAP = {
 
@@ -70,18 +58,14 @@ STOP_FIELD_MAP = {
 
 def find_first_property(
     properties,
-    possible_fields
+    fields
 ):
-    """
-    Find the first matching property name.
-    """
 
-    for field in possible_fields:
+    for field in fields:
 
         if field in properties:
 
             return properties[field]
-
 
     return None
 
@@ -90,42 +74,21 @@ def find_first_property(
 def load_bus_stops(
     url=BUS_STOP_API_URL
 ):
-    """
-    Load bus stops from GeoJSON API.
 
-    Returns:
-
-    [
-        {
-            stop_id,
-            latitude,
-            longitude,
-            stop_name,
-            ...
-        }
-    ]
-
-    """
-
-    geojson = load_geojson_url(
+    features = load_geojson_url(
         url
     )
 
     stops = []
 
 
-    for feature in geojson.get(
-        "features",
-        []
-    ):
+    for feature in features:
 
         geometry = feature.get(
             "geometry"
         )
 
-
         if not geometry:
-
             continue
 
 
@@ -147,11 +110,6 @@ def load_bus_stops(
             continue
 
 
-        longitude = coordinates[0]
-
-        latitude = coordinates[1]
-
-
         properties = feature.get(
             "properties",
             {}
@@ -160,13 +118,13 @@ def load_bus_stops(
 
         stop = {
 
-            "latitude": latitude,
+            "latitude": coordinates[1],
 
-            "longitude": longitude,
+            "longitude": coordinates[0],
 
             "geometry": (
-                longitude,
-                latitude
+                coordinates[0],
+                coordinates[1]
             )
 
         }
@@ -192,9 +150,6 @@ def load_bus_stops(
 def summarize_bus_stops(
     stops
 ):
-    """
-    Quick quality check.
-    """
 
     return {
 
@@ -204,13 +159,6 @@ def summarize_bus_stops(
             1
             for stop in stops
             if stop.get("stop_id")
-        ),
-
-        "with_coordinates": sum(
-            1
-            for stop in stops
-            if stop.get("latitude")
-            and stop.get("longitude")
         )
 
     }
@@ -221,13 +169,9 @@ if __name__ == "__main__":
 
     stops = load_bus_stops()
 
-
     print(
         f"Loaded {len(stops):,} bus stops."
     )
-
-
-    print()
 
     print(
         summarize_bus_stops(
@@ -235,32 +179,10 @@ if __name__ == "__main__":
         )
     )
 
-
     if stops:
 
         print()
 
         print(
-            "Example:"
-        )
-
-        print(
             stops[0]
         )
-        if not stop.get("stop_id")
-    )
-
-
-    print(
-        f"Missing stop IDs: {missing_ids}"
-    )
-
-
-
-if __name__ == "__main__":
-
-
-    stops = load_bus_stops()
-
-
-    summarize_bus_stops(stops)
