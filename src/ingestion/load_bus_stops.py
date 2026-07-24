@@ -4,21 +4,15 @@ DMV Bus Stops Intelligence Platform
 Bus stop ingestion module.
 
 Purpose:
-- Load WMATA bus stop GeoJSON files
+- Load bus stop GeoJSON from API sources
 - Normalize fields
 - Produce consistent stop records
 - Prepare data for database loading
-
-This replaces the Colab notebook load_stops()
-function and creates the foundation for all
-downstream analysis.
 """
 
-
-import json
 from pathlib import Path
 import sys
-from pathlib import Path
+
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 
@@ -26,7 +20,9 @@ sys.path.append(
     str(ROOT_DIR)
 )
 
-from src.config import BUS_STOP_FILE
+
+from src.config import BUS_STOP_API_URL
+from clients.geojson_loader import load_geojson_url
 
 
 
@@ -55,7 +51,7 @@ STOP_FIELD_MAP = {
 
     "route_id": [
         "ROUTES",
-        "ROUTE",
+        "ROUTE"
     ],
 
     "direction": [
@@ -72,13 +68,12 @@ STOP_FIELD_MAP = {
 
 
 
-def find_first_property(properties, possible_fields):
-
+def find_first_property(
+    properties,
+    possible_fields
+):
     """
     Find the first matching property name.
-
-    Different WMATA exports have used
-    different column names.
     """
 
     for field in possible_fields:
@@ -92,11 +87,11 @@ def find_first_property(properties, possible_fields):
 
 
 
-
-def load_bus_stops(filepath=BUS_STOP_FILE):
-
+def load_bus_stops(
+    url=BUS_STOP_API_URL
+):
     """
-    Load bus stops from GeoJSON.
+    Load bus stops from GeoJSON API.
 
     Returns:
 
@@ -112,31 +107,21 @@ def load_bus_stops(filepath=BUS_STOP_FILE):
 
     """
 
-    filepath = Path(filepath)
-
-
-    if not filepath.exists():
-
-        raise FileNotFoundError(
-            f"Bus stop file not found: {filepath}"
-        )
-
-
-
-    with open(filepath, "r", encoding="utf-8") as f:
-
-        geojson = json.load(f)
-
-
+    geojson = load_geojson_url(
+        url
+    )
 
     stops = []
 
 
+    for feature in geojson.get(
+        "features",
+        []
+    ):
 
-    for feature in geojson.get("features", []):
-
-
-        geometry = feature.get("geometry")
+        geometry = feature.get(
+            "geometry"
+        )
 
 
         if not geometry:
@@ -144,11 +129,11 @@ def load_bus_stops(filepath=BUS_STOP_FILE):
             continue
 
 
-
-        if geometry.get("type") != "Point":
+        if geometry.get(
+            "type"
+        ) != "Point":
 
             continue
-
 
 
         coordinates = geometry.get(
@@ -162,11 +147,9 @@ def load_bus_stops(filepath=BUS_STOP_FILE):
             continue
 
 
-
         longitude = coordinates[0]
 
         latitude = coordinates[1]
-
 
 
         properties = feature.get(
@@ -175,15 +158,11 @@ def load_bus_stops(filepath=BUS_STOP_FILE):
         )
 
 
-
         stop = {
-
 
             "latitude": latitude,
 
-
             "longitude": longitude,
-
 
             "geometry": (
                 longitude,
@@ -193,9 +172,6 @@ def load_bus_stops(filepath=BUS_STOP_FILE):
         }
 
 
-
-        # Normalize known fields
-
         for output_field, candidates in STOP_FIELD_MAP.items():
 
             stop[output_field] = find_first_property(
@@ -204,32 +180,73 @@ def load_bus_stops(filepath=BUS_STOP_FILE):
             )
 
 
-
-        stops.append(stop)
-
+        stops.append(
+            stop
+        )
 
 
     return stops
 
 
 
-
-def summarize_bus_stops(stops):
-
+def summarize_bus_stops(
+    stops
+):
     """
     Quick quality check.
-
-    Useful before loading thousands of records.
     """
 
+    return {
+
+        "count": len(stops),
+
+        "with_stop_id": sum(
+            1
+            for stop in stops
+            if stop.get("stop_id")
+        ),
+
+        "with_coordinates": sum(
+            1
+            for stop in stops
+            if stop.get("latitude")
+            and stop.get("longitude")
+        )
+
+    }
+
+
+
+if __name__ == "__main__":
+
+    stops = load_bus_stops()
+
+
     print(
-        f"Loaded {len(stops)} bus stops"
+        f"Loaded {len(stops):,} bus stops."
     )
 
 
-    missing_ids = sum(
-        1
-        for stop in stops
+    print()
+
+    print(
+        summarize_bus_stops(
+            stops
+        )
+    )
+
+
+    if stops:
+
+        print()
+
+        print(
+            "Example:"
+        )
+
+        print(
+            stops[0]
+        )
         if not stop.get("stop_id")
     )
 
