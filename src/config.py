@@ -189,3 +189,4 @@ LOG_LEVEL = os.getenv(
     "LOG_LEVEL",
     "INFO"
 )
+WMATA_API_KEY = "YOUR_KEY_HERE"
