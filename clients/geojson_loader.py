@@ -1,23 +1,4 @@
 """
-Load WMATA Metrobus stop GeoJSON into canonical BusStop objects.
-"""
-
-from __future__ import annotations
-
-import json
-import requests 
-from pathlib import Path
-from typing import List
-
-from dmv_bus_stops.models.stop import BusStop
-
-
-# Default property mappings for the current WMATA export.
-# These can be overridden if WMATA changes field names.
-DEFAULT_FIELD_MAP = {
-    "stop_id": "REG_ID",
-    "stop_name": "NAME",
-}"""
 GeoJSON loading utilities.
 
 Supports loading GeoJSON bus stop data
@@ -28,23 +9,17 @@ import json
 import requests
 
 
-def parse_geojson(
-    data
-):
+def parse_geojson(data):
     """
     Convert a GeoJSON FeatureCollection
     into a list of dictionaries.
     """
 
-    features = data.get(
-        "features",
-        []
-    )
+    features = data.get("features", [])
 
     stops = []
 
     for feature in features:
-
         properties = feature.get(
             "properties",
             {}
@@ -59,17 +34,12 @@ def parse_geojson(
         if geometry:
             stop["geometry"] = geometry
 
-        stops.append(
-            stop
-        )
+        stops.append(stop)
 
     return stops
 
 
-
-def load_geojson(
-    filename
-):
+def load_geojson(filename):
     """
     Load GeoJSON from a local file.
     """
@@ -79,20 +49,12 @@ def load_geojson(
         "r",
         encoding="utf-8"
     ) as file:
+        data = json.load(file)
 
-        data = json.load(
-            file
-        )
-
-    return parse_geojson(
-        data
-    )
+    return parse_geojson(data)
 
 
-
-def load_geojson_url(
-    url
-):
+def load_geojson_url(url):
     """
     Load GeoJSON from a URL/API endpoint.
     """
@@ -104,18 +66,14 @@ def load_geojson_url(
 
     response.raise_for_status()
 
-    data = response.json()
-
     return parse_geojson(
-        data
+        response.json()
     )
-
 
 
 if __name__ == "__main__":
 
     import argparse
-
 
     parser = argparse.ArgumentParser()
 
@@ -125,25 +83,15 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-
     stops = load_geojson(
         args.geojson
     )
-
 
     print(
         f"Loaded {len(stops):,} bus stops."
     )
 
-
     if stops:
-
         print()
-
-        print(
-            "Example:"
-        )
-
-        print(
-            stops[0]
-        )
+        print("Example:")
+        print(stops[0])
