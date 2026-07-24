@@ -1,9 +1,7 @@
 """
-Load WMATA Metrobus ridership data into the database.
+Load WMATA Metrobus ridership data into database.
 
-Designed for:
-- manual imports during development
-- automated GitHub Actions monthly refreshes
+Handles WMATA tab-delimited export format.
 """
 
 import csv
@@ -35,11 +33,13 @@ def find_latest_ridership_file():
 
     if not files:
         raise FileNotFoundError(
-            "No ridership CSV found in data/raw/ridership/"
+            "No ridership file found."
         )
 
-    return max(files, key=lambda f: f.stat().st_mtime)
-
+    return max(
+        files,
+        key=lambda f: f.stat().st_mtime
+    )
 
 
 def load_ridership(file_path):
@@ -48,16 +48,53 @@ def load_ridership(file_path):
 
     cursor = connection.cursor()
 
-
     records_loaded = 0
 
 
-    with open(file_path, "r") as csv_file:
+    with open(
+        file_path,
+        "r",
+        encoding="utf-8"
+    ) as csv_file:
 
-        reader = csv.DictReader(csv_file)
+
+        reader = csv.reader(
+            csv_file,
+            delimiter="\t"
+        )
+
+
+        # Skip first title/header row
+        next(reader)
+
+
+        header = next(reader)
 
 
         for row in reader:
+
+            if not row:
+                continue
+
+
+            route = row[0].strip()
+
+
+            # Skip totals row
+            if route == "Grand Total":
+                continue
+
+
+            monthly_total = (
+                row[4]
+                .replace(",", "")
+                .strip()
+            )
+
+
+            if not monthly_total:
+                continue
+
 
             cursor.execute(
                 """
@@ -70,16 +107,15 @@ def load_ridership(file_path):
                     source
                 )
 
-                VALUES
-                (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?)
 
                 """,
 
                 (
-                    row["Route"],
-                    row["Service Type"],
+                    route,
+                    "Monthly Total",
                     datetime.now().strftime("%Y-%m-%d"),
-                    float(row["Monthly Boardings"]),
+                    float(monthly_total),
                     "WMATA Metrobus Ridership Summary"
                 )
 
@@ -99,8 +135,7 @@ def load_ridership(file_path):
             notes
         )
 
-        VALUES
-        (?, ?, ?, ?)
+        VALUES (?, ?, ?, ?)
 
         """,
 
@@ -108,9 +143,8 @@ def load_ridership(file_path):
             "WMATA ridership",
             "SUCCESS",
             records_loaded,
-            f"Loaded from {file_path.name}"
+            file_path.name
         )
-
     )
 
 
@@ -121,7 +155,6 @@ def load_ridership(file_path):
     print(
         f"Loaded {records_loaded} ridership records."
     )
-
 
 
 if __name__ == "__main__":
