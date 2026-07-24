@@ -319,3 +319,21 @@ CREATE TABLE IF NOT EXISTS review_feedback (
         REFERENCES bus_stops(id)
 
 );
+
+
+
+CREATE TABLE IF NOT EXISTS stop_reviews (
+
+    id INTEGER PRIMARY KEY,
+
+    stop_id TEXT NOT NULL,
+
+    reviewer_type TEXT DEFAULT 'volunteer',
+
+    review_data TEXT NOT NULL,
+
+    confidence REAL DEFAULT 0,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+
+);
