@@ -26,7 +26,7 @@ sys.path.append(
     str(ROOT_DIR)
 )
 
-from config import BUS_STOP_FILE
+from src.config import BUS_STOP_FILE
 
 
 
