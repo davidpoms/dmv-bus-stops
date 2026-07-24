@@ -1,5 +1,8 @@
 """
 Load normalized bus stops into SQLite.
+
+Uses upsert behavior so the loader
+can safely be rerun.
 """
 
 import sqlite3
@@ -43,6 +46,19 @@ def save_bus_stops(
                 direction
             )
             VALUES (?, ?, ?, ?, ?)
+
+            ON CONFLICT(external_stop_id)
+            DO UPDATE SET
+
+                latitude = excluded.latitude,
+
+                longitude = excluded.longitude,
+
+                stop_name = excluded.stop_name,
+
+                direction = excluded.direction,
+
+                updated_at = CURRENT_TIMESTAMP
             """,
             (
                 str(stop["stop_id"]),
@@ -64,6 +80,7 @@ if __name__ == "__main__":
 
     stops = load_bus_stops()
 
+
     print(
         f"Loaded {len(stops):,} stops from API."
     )
@@ -75,5 +92,5 @@ if __name__ == "__main__":
 
 
     print(
-        "Database load complete."
+        "Database upsert complete."
     )
