@@ -21,7 +21,6 @@ from src.config import BUS_STOP_API_URL
 from clients.geojson_loader import load_geojson_url
 
 
-
 STOP_FIELD_MAP = {
 
     "stop_id": [
@@ -32,12 +31,14 @@ STOP_FIELD_MAP = {
     ],
 
     "stop_name": [
+        "BSTP_MSG_TEXT",
         "STOP_NAME",
         "NAME",
         "LOCATION"
     ],
 
     "route_id": [
+        "ROUTEID",
         "ROUTES",
         "ROUTE"
     ],
@@ -48,12 +49,12 @@ STOP_FIELD_MAP = {
     ],
 
     "street_name": [
+        "AT_STR",
         "STREET",
         "STREET_NAME"
     ]
 
 }
-
 
 
 def find_first_property(
