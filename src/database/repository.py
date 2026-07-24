@@ -92,41 +92,34 @@ class Repository:
 
 
 
-    def get_reviews_for_stop(
-        self,
-        stop_id
-    ):
+   def get_reviews_for_stop(
+    self,
+    stop_id
+):
+
+    connection = sqlite3.connect(
+        self.database_path
+    )
+
+    cursor = connection.cursor()
+
+
+    cursor.execute(
         """
-        Retrieve all reviews
-        for a stop.
-        """
+        SELECT *
+        FROM stop_reviews
+        WHERE stop_id = ?
 
+        """,
 
-        connection = sqlite3.connect(
-            self.database_path
+        (
+            stop_id,
         )
-
-        cursor = connection.cursor()
-
-
-        cursor.execute(
-            """
-            SELECT *
-            FROM stop_reviews
-            WHERE stop_id = ?
-
-            """,
-
-            (
-                stop_id,
-            )
-        )
+    )
 
 
-        reviews = cursor.fetchall()
+    reviews = cursor.fetchall()
 
+    connection.close()
 
-        connection.close()
-
-
-        return reviews
+    return reviews
