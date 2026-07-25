@@ -1265,6 +1265,7 @@ def create_community_action(stop_id):
 
 
 @app.route("/community-actions/summary")
+@app.route("/community-action-summary")
 def community_action_summary():
 
     rows = query_db(
