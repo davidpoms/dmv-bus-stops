@@ -227,3 +227,52 @@ def route_validation_metrics():
 
         """
     )[0]
+
+
+def verification_coverage():
+    return query(
+        """
+        SELECT
+
+            COUNT(*) AS total_stops,
+
+            SUM(
+                CASE
+                    WHEN id IN (
+                        SELECT stop_id
+                        FROM stop_reviews
+                    )
+                    THEN 1
+                    ELSE 0
+                END
+            ) AS reviewed_stops,
+
+            ROUND(
+                100.0 *
+                SUM(
+                    CASE
+                        WHEN id IN (
+                            SELECT stop_id
+                            FROM stop_reviews
+                        )
+                        THEN 1
+                        ELSE 0
+                    END
+                ) / COUNT(*),
+                1
+            ) AS coverage_percent
+
+        FROM physical_stops
+        """
+    )[0]
+
+
+
+def dashboard_metrics():
+    return {
+        "verification": community_verification_metrics(),
+        "coverage": verification_coverage(),
+        "benches": bench_metrics(),
+        "routes": route_validation_metrics(),
+    }
+
