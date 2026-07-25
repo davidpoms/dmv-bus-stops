@@ -582,6 +582,41 @@ def submit_review():
 
     data = request.json
 
+    stop_id = data.get("stop_id")
+    reviewer_id = data.get("reviewer_id")
+    assignment_id = data.get("assignment_id")
+
+
+    if not assignment_id or not reviewer_id:
+
+        return {
+            "error": "assignment_id and reviewer_id required"
+        }, 400
+
+
+    assignment = query_db(
+        '''
+        SELECT id
+        FROM stop_review_assignments
+        WHERE id=?
+        AND stop_id=?
+        AND reviewer_id=?
+        AND status='assigned'
+        ''',
+        (
+            assignment_id,
+            stop_id,
+            reviewer_id
+        )
+    )
+
+
+    if not assignment:
+
+        return {
+            "error": "Invalid or completed assignment"
+        }, 403
+
 
     query_db(
         """
@@ -611,6 +646,20 @@ def submit_review():
             data.get("sun_exposure"),
             data.get("reviewer_confidence"),
             data.get("notes")
+        )
+    )
+
+
+    query_db(
+        '''
+        UPDATE stop_review_assignments
+        SET
+            status='completed',
+            completed_at=CURRENT_TIMESTAMP
+        WHERE id=?
+        ''',
+        (
+            assignment_id,
         )
     )
 
@@ -1456,7 +1505,9 @@ def reviewer_queue(reviewer_id):
         """
         SELECT
 
+            a.id AS assignment_id,
             a.stop_id,
+            a.reviewer_id,
             a.status,
 
             p.latitude,
