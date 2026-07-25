@@ -93,10 +93,19 @@ def community_verification_metrics():
             ) AS total_reviews,
 
             (
-                SELECT COUNT(DISTINCT stop_id)
-                FROM stop_reviews
-                GROUP BY stop_id
-                HAVING COUNT(*) >= 3
+                SELECT COUNT(*)
+                FROM (
+                    SELECT stop_id
+                    FROM stop_reviews
+                    GROUP BY stop_id
+                    HAVING COUNT(
+                        DISTINCT COALESCE(
+                            reviewer_id,
+                            CAST(user_id AS TEXT),
+                            anonymous_email
+                        )
+                    ) >= 3
+                )
             ) AS consensus_stops
 
         """
@@ -132,7 +141,6 @@ def bench_metrics():
 
 
 def route_validation_metrics():
-
     return query(
         """
         WITH consensus_stops AS (
@@ -144,7 +152,13 @@ def route_validation_metrics():
 
             GROUP BY stop_id
 
-            HAVING COUNT(*) >= 3
+            HAVING COUNT(
+                DISTINCT COALESCE(
+                    reviewer_id,
+                    CAST(user_id AS TEXT),
+                    anonymous_email
+                )
+            ) >= 3
 
         ),
 
@@ -154,16 +168,15 @@ def route_validation_metrics():
 
                 route_id,
 
-                COUNT(stop_id) AS total_stops,
+                COUNT(DISTINCT stop_id) AS total_stops,
 
-                SUM(
-                    CASE
+                COUNT(
+                    DISTINCT CASE
                         WHEN stop_id IN (
                             SELECT stop_id
                             FROM consensus_stops
                         )
-                        THEN 1
-                        ELSE 0
+                        THEN stop_id
                     END
                 ) AS verified_stops
 
@@ -177,21 +190,27 @@ def route_validation_metrics():
 
             COUNT(*) AS total_routes,
 
-            SUM(
-                CASE
-                    WHEN verified_stops = total_stops
-                    THEN 1
-                    ELSE 0
-                END
+            COALESCE(
+                SUM(
+                    CASE
+                        WHEN verified_stops = total_stops
+                        THEN 1
+                        ELSE 0
+                    END
+                ),
+                0
             ) AS fully_verified_routes,
 
-            SUM(
-                CASE
-                    WHEN verified_stops > 0
-                    AND verified_stops < total_stops
-                    THEN 1
-                    ELSE 0
-                END
+            COALESCE(
+                SUM(
+                    CASE
+                        WHEN verified_stops > 0
+                        AND verified_stops < total_stops
+                        THEN 1
+                        ELSE 0
+                    END
+                ),
+                0
             ) AS partially_verified_routes
 
         FROM route_progress
