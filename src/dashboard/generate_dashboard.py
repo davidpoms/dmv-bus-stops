@@ -12,8 +12,6 @@ from src.dashboard.data import (
     dc_ancs,
     dashboard_metrics,
     jurisdiction_totals,
-    top_counties,
-    top_municipalities,
     dc_wards,
 )
 

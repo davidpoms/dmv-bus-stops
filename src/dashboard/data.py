@@ -28,35 +28,6 @@ def jurisdiction_totals():
     )
 
 
-def top_counties(limit=10):
-    return query(
-        f"""
-        SELECT
-            state,
-            county,
-            stop_count
-        FROM county_summary
-        ORDER BY stop_count DESC
-        LIMIT {limit}
-        """
-    )
-
-
-def top_municipalities(limit=10):
-    return query(
-        f"""
-        SELECT
-            state,
-            county,
-            municipality,
-            stop_count
-        FROM municipality_summary
-        ORDER BY stop_count DESC
-        LIMIT {limit}
-        """
-    )
-
-
 def dc_wards():
     return query(
         """
