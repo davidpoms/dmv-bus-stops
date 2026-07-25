@@ -272,7 +272,86 @@ def dashboard_metrics():
     return {
         "verification": community_verification_metrics(),
         "coverage": verification_coverage(),
-        "benches": bench_metrics(),
+        "benches": stop_level_bench_metrics(),
         "routes": route_validation_metrics(),
     }
+
+
+
+
+
+def stop_level_bench_metrics():
+    return query(
+        """
+        SELECT
+
+            (
+                SELECT COUNT(DISTINCT stop_id)
+                FROM stop_reviews
+                WHERE has_bench = 1
+            ) AS community_confirmed_benches,
+
+            (
+                SELECT COUNT(DISTINCT stop_id)
+                FROM stop_reviews
+                WHERE has_bench = 0
+                AND bench_location_feasible = 1
+            ) AS community_bench_opportunities,
+
+            (
+                SELECT COUNT(*)
+                FROM physical_stops ps
+                WHERE ps.id NOT IN (
+                    SELECT DISTINCT stop_id
+                    FROM stop_reviews
+                )
+            ) AS stops_needing_review
+
+        """
+    )[0]
+
+
+
+def counties():
+    return query(
+        """
+        SELECT
+            state,
+            county,
+            stop_count
+        FROM county_summary
+        ORDER BY state, county
+        """
+    )
+
+
+def municipalities():
+    return query(
+        """
+        SELECT
+            state,
+            county,
+            municipality,
+            stop_count
+        FROM municipality_summary
+        ORDER BY state, county, municipality
+        """
+    )
+
+
+
+
+
+
+def dc_ancs():
+    return query(
+        """
+        SELECT
+            dc_anc,
+            stop_count
+        FROM dc_anc_summary
+        WHERE dc_anc IS NOT NULL
+        ORDER BY dc_anc
+        """
+    )
 

@@ -7,6 +7,9 @@ from pathlib import Path
 from string import Template
 
 from src.dashboard.data import (
+    counties,
+    municipalities,
+    dc_ancs,
     dashboard_metrics,
     jurisdiction_totals,
     top_counties,
@@ -65,6 +68,8 @@ def generate_dashboard():
     )
 
 
+
+
     county_list = "\n".join(
         f"""
         <tr>
@@ -73,7 +78,7 @@ def generate_dashboard():
             <td>{x['stop_count']}</td>
         </tr>
         """
-        for x in top_counties(10)
+        for x in counties()
     )
 
 
@@ -81,11 +86,12 @@ def generate_dashboard():
         f"""
         <tr>
             <td>{x['state']}</td>
+            <td>{x['county']}</td>
             <td>{x['municipality']}</td>
             <td>{x['stop_count']}</td>
         </tr>
         """
-        for x in top_municipalities(10)
+        for x in municipalities()
     )
 
 
@@ -100,12 +106,29 @@ def generate_dashboard():
     )
 
 
+    anc_list = "\n".join(
+        f"""
+        <tr>
+            <td>{x['dc_anc']}</td>
+            <td>{x['stop_count']}</td>
+        </tr>
+        """
+        for x in dc_ancs()
+    )
+
+
     template = Template(
         TEMPLATE_FILE.read_text()
     )
 
 
     metrics = dashboard_metrics()
+
+    geography = {
+        "counties": counties(),
+        "municipalities": municipalities(),
+        "dc_ancs": dc_ancs(),
+    }
 
     html = template.substitute(
         STOP_COUNT=f"{metrics['verification']['total_stops']:,}",
@@ -122,6 +145,7 @@ def generate_dashboard():
         geography_totals=geography_totals,
         county_list=county_list,
         municipality_list=municipality_list,
+        anc_list=anc_list,
         ward_list=ward_list,
 
     )
