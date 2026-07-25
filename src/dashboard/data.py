@@ -94,6 +94,15 @@ def community_verification_metrics():
 
             (
                 SELECT COUNT(*)
+                FROM physical_stops
+                WHERE id NOT IN (
+                    SELECT DISTINCT stop_id
+                    FROM stop_reviews
+                )
+            ) AS awaiting_review,
+
+            (
+                SELECT COUNT(*)
                 FROM (
                     SELECT stop_id
                     FROM stop_reviews
@@ -344,4 +353,50 @@ def dc_ancs():
         ORDER BY dc_anc
         """
     )
+
+
+
+def verification_funnel_metrics():
+    return query(
+        """
+        SELECT
+
+            (
+                SELECT COUNT(*)
+                FROM physical_stops
+            ) AS total_stops,
+
+            (
+                SELECT COUNT(DISTINCT stop_id)
+                FROM stop_reviews
+            ) AS stops_with_reviews,
+
+            (
+                SELECT COUNT(*)
+                FROM (
+                    SELECT stop_id
+                    FROM stop_reviews
+                    GROUP BY stop_id
+                    HAVING COUNT(
+                        DISTINCT COALESCE(
+                            reviewer_id,
+                            CAST(user_id AS TEXT),
+                            anonymous_email
+                        )
+                    ) >= 3
+                )
+            ) AS consensus_verified_stops,
+
+            (
+                SELECT COUNT(*)
+                FROM physical_stops
+            )
+            -
+            (
+                SELECT COUNT(DISTINCT stop_id)
+                FROM stop_reviews
+            ) AS awaiting_review
+
+        """
+    )[0]
 
