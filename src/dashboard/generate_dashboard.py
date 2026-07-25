@@ -7,6 +7,7 @@ from pathlib import Path
 from string import Template
 
 from src.dashboard.data import (
+    dashboard_metrics,
     jurisdiction_totals,
     top_counties,
     top_municipalities,
@@ -104,9 +105,19 @@ def generate_dashboard():
     )
 
 
+    metrics = dashboard_metrics()
+
     html = template.substitute(
-        STOP_COUNT=f"{query_count('SELECT COUNT(*) FROM physical_stops;'):,}",
-        total_projects=data["total_projects"],
+        STOP_COUNT=f"{metrics['verification']['total_stops']:,}",
+        REVIEWED_STOPS=f"{metrics['verification']['reviewed_stops']:,}",
+        CONSENSUS_STOPS=f"{metrics['verification']['consensus_stops'] or 0:,}",
+        VERIFICATION_COVERAGE=f"{metrics['coverage']['coverage_percent']}%",
+        OSM_BENCHES=f"{metrics['benches']['osm_bench_features']:,}",
+        COMMUNITY_BENCHES=f"{metrics['benches']['community_benches']:,}",
+        BENCH_OPPORTUNITIES=f"{metrics['benches']['community_bench_opportunities']:,}",
+        TOTAL_ROUTES=f"{metrics['routes']['total_routes']:,}",
+        FULLY_VERIFIED_ROUTES=f"{metrics['routes']['fully_verified_routes']:,}",
+        PARTIAL_ROUTES=f"{metrics['routes']['partially_verified_routes']:,}",        total_projects=data["total_projects"],
         status_list=status_list,
         geography_totals=geography_totals,
         county_list=county_list,
