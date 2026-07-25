@@ -11,3 +11,6 @@ data/raw/
 
 # temporary files
 *.save
+
+# Dashboard patch history
+scripts/archive/

@@ -1,16 +1,26 @@
 """
-Generate static HTML implementation dashboard.
+Generate live HTML implementation dashboard.
 """
 
 import json
 from pathlib import Path
+from string import Template
+
+from src.dashboard.data import (
+    jurisdiction_totals,
+    top_counties,
+    top_municipalities,
+    dc_wards,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 
-INPUT_FILE = (
+INPUT_FILE = BASE_DIR / "implementation_summary.json"
+
+TEMPLATE_FILE = (
     BASE_DIR /
-    "implementation_summary.json"
+    "src/dashboard/templates/dashboard.html"
 )
 
 OUTPUT_FILE = (
@@ -25,146 +35,76 @@ def generate_dashboard():
         data = json.load(f)
 
 
-    html = f"""
-<!DOCTYPE html>
-<html>
-
-<head>
-
-<title>
-DMV Bus Stop Improvement Dashboard
-</title>
-
-<style>
-
-body {{
-    font-family: Arial, sans-serif;
-    margin: 40px;
-}}
-
-.card {{
-    display:inline-block;
-    padding:20px;
-    margin:10px;
-    border:1px solid #ccc;
-}}
-
-table {{
-    border-collapse:collapse;
-    width:100%;
-}}
-
-td, th {{
-    border:1px solid #ddd;
-    padding:8px;
-}}
-
-</style>
-
-</head>
-
-
-<body>
-
-<h1>
-DMV Bus Stop Improvement Dashboard
-</h1>
-
-
-<div class="card">
-<h2>{data["total_projects"]}</h2>
-<p>Active Projects</p>
-</div>
-
-
-<h2>
-Project Status
-</h2>
-
-<ul>
-"""
-
-    for status, count in data["project_status"].items():
-
-        html += f"""
-<li>{status}: {count}</li>
-"""
-
-
-    html += """
-</ul>
-
-<h2>
-Impact Levels
-</h2>
-
-<ul>
-"""
-
-
-    for impact, count in data["impact_levels"].items():
-
-        html += f"""
-<li>{impact}: {count}</li>
-"""
-
-
-    html += """
-</ul>
-
-
-<h2>
-Top Priority Stops
-</h2>
-
-<table>
-
-<tr>
-<th>Rank</th>
-<th>Stop</th>
-<th>Location</th>
-<th>Score</th>
-<th>Impact</th>
-</tr>
-"""
-
-
-    for i, stop in enumerate(
-        data["top_priority_stops"],
-        start=1
-    ):
-
-        html += f"""
-<tr>
-<td>{i}</td>
-<td>{stop["stop_id"]}</td>
-<td>{stop["location"]}</td>
-<td>{stop["score"]}</td>
-<td>{stop["impact"]}</td>
-</tr>
-"""
-
-
-    html += """
-
-</table>
-
-</body>
-
-</html>
-"""
-
-
-    OUTPUT_FILE.write_text(
-        html
+    status_list = "\n".join(
+        f"<li>{status}: {count}</li>"
+        for status, count in data["project_status"].items()
     )
 
 
-    print(
-        OUTPUT_FILE
+    geography_totals = "\n".join(
+        f"""
+        <div class="geo-card">
+            <div class="geo-number">{x['stop_count']}</div>
+            <div class="geo-label">{x['state']} stops</div>
+        </div>
+        """
+        for x in jurisdiction_totals()
     )
+
+
+    county_list = "\n".join(
+        f"""
+        <tr>
+            <td>{x['state']}</td>
+            <td>{x['county']}</td>
+            <td>{x['stop_count']}</td>
+        </tr>
+        """
+        for x in top_counties(10)
+    )
+
+
+    municipality_list = "\n".join(
+        f"""
+        <tr>
+            <td>{x['state']}</td>
+            <td>{x['municipality']}</td>
+            <td>{x['stop_count']}</td>
+        </tr>
+        """
+        for x in top_municipalities(10)
+    )
+
+
+    ward_list = "\n".join(
+        f"""
+        <tr>
+            <td>Ward {x['dc_ward']}</td>
+            <td>{x['stop_count']}</td>
+        </tr>
+        """
+        for x in dc_wards()
+    )
+
+
+    template = Template(
+        TEMPLATE_FILE.read_text()
+    )
+
+
+    html = template.substitute(
+        total_projects=data["total_projects"],
+        status_list=status_list,
+        geography_totals=geography_totals,
+        county_list=county_list,
+        municipality_list=municipality_list,
+        ward_list=ward_list,
+
+    )
+
+
+    OUTPUT_FILE.write_text(html)
 
 
 if __name__ == "__main__":
-
     generate_dashboard()

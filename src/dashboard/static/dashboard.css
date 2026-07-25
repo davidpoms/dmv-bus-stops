@@ -1,0 +1,146 @@
+body {
+    font-family: Arial, sans-serif;
+    margin: 40px;
+}
+
+.card {
+    display:inline-block;
+    padding:20px;
+    margin:10px;
+    border:1px solid #ccc;
+}
+
+table {
+    border-collapse:collapse;
+    width:100%;
+}
+
+td, th {
+    border:1px solid #ddd;
+    padding:8px;
+}
+
+#map {
+    height:500px;
+    width:100%;
+    margin-top:30px;
+}
+
+
+.legend {
+    background:white;
+    padding:10px;
+    border:1px solid #ccc;
+    line-height:1.6;
+    font-size:14px;
+}
+
+
+#routeStatus {
+    margin-top:15px;
+    font-size:18px;
+    font-weight:bold;
+}
+
+
+#topPriorities {
+    background:white;
+    padding:15px;
+    margin:15px;
+    border:1px solid #ccc;
+    max-width:350px;
+}
+
+.priorityItem {
+    font-size:14px;
+}
+
+
+
+
+
+.geo-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 15px;
+    margin: 20px 0;
+}
+
+.geo-card {
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 15px;
+}
+
+.geo-number {
+    font-size: 28px;
+    font-weight: bold;
+}
+
+.geo-label {
+    color: #555;
+}
+
+
+.geo-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 25px;
+}
+
+.geo-table th,
+.geo-table td {
+    border-bottom: 1px solid #ddd;
+    padding: 8px;
+    text-align: left;
+}
+
+.geo-bar {
+    height: 12px;
+    background: #4a90e2;
+    margin-top: 5px;
+}
+
+.mapLegend {
+    background:white;
+    padding:10px;
+    line-height:20px;
+    border-radius:5px;
+    box-shadow:0 0 8px rgba(0,0,0,.25);
+    font-size:13px;
+}
+
+
+.communityKPI {
+
+    position: absolute;
+
+    top: 15px;
+
+    right: 15px;
+
+    background: white;
+
+    padding: 12px 16px;
+
+    border-radius: 6px;
+
+    box-shadow:
+        0 0 8px rgba(0,0,0,.25);
+
+    z-index: 999;
+
+    font-size: 14px;
+
+    line-height: 22px;
+
+}
+
+
+.communityKPI b {
+
+    font-size: 16px;
+
+}
+

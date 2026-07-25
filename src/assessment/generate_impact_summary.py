@@ -127,15 +127,15 @@ def generate_impact_summary():
         )
 
 
-        if opportunity_score >= 85:
+        if opportunity_score >= 75:
 
             impact_level = "very_high"
 
-        elif opportunity_score >= 70:
+        elif opportunity_score >= 60:
 
             impact_level = "high"
 
-        elif opportunity_score >= 50:
+        elif opportunity_score >= 45:
 
             impact_level = "medium"
 
