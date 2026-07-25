@@ -400,3 +400,35 @@ def verification_funnel_metrics():
         """
     )[0]
 
+
+
+def reviewer_progress_metrics():
+    return query(
+        """
+        SELECT
+
+            (
+                SELECT COUNT(*)
+                FROM community_reviewers
+            ) AS reviewers,
+
+            (
+                SELECT COUNT(*)
+                FROM stop_review_assignments
+            ) AS assignments,
+
+            (
+                SELECT COUNT(*)
+                FROM stop_review_assignments
+                WHERE status='completed'
+            ) AS completed_assignments,
+
+            (
+                SELECT COUNT(*)
+                FROM stop_review_assignments
+                WHERE status='assigned'
+            ) AS pending_assignments
+
+        """
+    )[0]
+
