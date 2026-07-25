@@ -29,6 +29,18 @@ OUTPUT_FILE = (
 )
 
 
+
+def query_count(sql):
+    import sqlite3
+
+    db = BASE_DIR / "src/database/dmv_bus_stops.db"
+
+    conn = sqlite3.connect(db)
+    count = conn.execute(sql).fetchone()[0]
+    conn.close()
+
+    return count
+
 def generate_dashboard():
 
     with open(INPUT_FILE) as f:
@@ -93,6 +105,7 @@ def generate_dashboard():
 
 
     html = template.substitute(
+        STOP_COUNT=f"{query_count('SELECT COUNT(*) FROM physical_stops;'):,}",
         total_projects=data["total_projects"],
         status_list=status_list,
         geography_totals=geography_totals,
