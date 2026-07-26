@@ -61,7 +61,7 @@ def export_priority_report():
                 DISTINCT ir.recommendation_type
             ),
 
-            sr.notes
+            so.notes
 
         FROM improvement_opportunities io
 
@@ -81,9 +81,19 @@ def export_priority_report():
             ON io.physical_stop_id = ir.physical_stop_id
 
 
-        LEFT JOIN stop_reviews sr
+        LEFT JOIN (
 
-            ON io.physical_stop_id = sr.stop_id
+            SELECT
+                physical_stop_id,
+                GROUP_CONCAT(notes, '; ') AS notes
+
+            FROM stop_observations
+
+            GROUP BY physical_stop_id
+
+        ) so
+
+            ON io.physical_stop_id = so.physical_stop_id
 
 
         LEFT JOIN recommendation_confidence rc
@@ -98,7 +108,7 @@ def export_priority_report():
             ps.primary_name,
             io.opportunity_score,
             sii.impact_level,
-            sr.notes
+            so.notes
 
 
         ORDER BY

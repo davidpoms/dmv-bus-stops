@@ -31,21 +31,17 @@ def update_recommendations():
         """
         SELECT
 
-            stop_id,
+            physical_stop_id,
 
-            has_shelter,
+            shelter_present,
 
-            has_bench,
+            bench_present,
 
-            concrete_pad_present,
-
-            bench_location_feasible,
-
-            curb_access_clear,
+            bench_feasible,
 
             notes
 
-        FROM stop_reviews;
+        FROM stop_observations;
 
         """
     )
@@ -60,12 +56,10 @@ def update_recommendations():
     for review in reviews:
 
         (
-            stop_id,
-            has_shelter,
-            has_bench,
-            concrete_pad_present,
-            bench_location_feasible,
-            curb_access_clear,
+            physical_stop_id,
+            shelter_present,
+            bench_present,
+            bench_feasible,
             notes
         ) = review
 
@@ -73,25 +67,19 @@ def update_recommendations():
         recommendations = []
 
 
-        if not has_bench and bench_location_feasible:
+        if bench_present == 'no' and bench_feasible == 'yes':
 
             recommendations.append(
                 "bench_installation"
             )
 
 
-        if not has_shelter:
+        if shelter_present == 'no':
 
             recommendations.append(
                 "shelter_installation"
             )
 
-
-        if not curb_access_clear:
-
-            recommendations.append(
-                "accessibility_improvement"
-            )
 
 
         cursor.execute(
@@ -102,7 +90,7 @@ def update_recommendations():
 
             """,
             (
-                stop_id,
+                physical_stop_id,
             )
         )
 
@@ -113,7 +101,7 @@ def update_recommendations():
                 """
                 INSERT INTO improvement_recommendations
                 (
-                    physical_stop_id,
+                    physical_physical_stop_id,
                     recommendation_type,
                     priority,
                     reasons
@@ -123,7 +111,7 @@ def update_recommendations():
 
                 """,
                 (
-                    stop_id,
+                    physical_stop_id,
                     recommendation,
                     "high",
                     json.dumps(

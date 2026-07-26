@@ -1,7 +1,7 @@
 """
 Submit a completed volunteer stop review.
 
-Writes field observations into stop_reviews.
+Writes field observations into stop_observations.
 """
 
 import sqlite3
@@ -34,15 +34,15 @@ def submit_review(review_file):
 
     cursor.execute(
         """
-        INSERT INTO stop_reviews (
+        INSERT INTO stop_observations (
 
-            stop_id,
+            physical_stop_id,
 
             reviewer_id,
 
-            has_shelter,
+            shelter_present,
 
-            has_bench,
+            bench_present,
 
             bench_condition,
 
@@ -58,7 +58,7 @@ def submit_review(review_file):
 
             pad_depth_feet,
 
-            bench_location_feasible,
+            bench_feasible,
 
             curb_access_clear,
 
@@ -68,7 +68,7 @@ def submit_review(review_file):
 
             rear_clear_zone_clear,
 
-            reviewer_confidence,
+            confidence,
 
             notes
 
@@ -87,9 +87,9 @@ def submit_review(review_file):
 
             data.get("reviewer_id"),
 
-            data.get("has_shelter"),
+            data.get("shelter_present"),
 
-            data.get("has_bench"),
+            data.get("bench_present"),
 
             data.get("bench_condition"),
 
@@ -105,7 +105,7 @@ def submit_review(review_file):
 
             data.get("pad_depth_feet"),
 
-            data.get("bench_location_feasible"),
+            data.get("bench_feasible"),
 
             data.get("curb_access_clear"),
 
@@ -115,7 +115,7 @@ def submit_review(review_file):
 
             data.get("rear_clear_zone_clear"),
 
-            data.get("reviewer_confidence"),
+            data.get("confidence"),
 
             data.get("notes")
 

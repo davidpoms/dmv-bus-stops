@@ -71,13 +71,13 @@ def calculate_confidence():
 
             io.opportunity_score,
 
-            COUNT(sr.id)
+            COUNT(o.id)
 
         FROM improvement_opportunities io
 
-        LEFT JOIN stop_reviews sr
+        LEFT JOIN stop_observations o
 
-            ON io.physical_stop_id = sr.stop_id
+            ON io.physical_stop_id = o.physical_stop_id
 
         GROUP BY
 

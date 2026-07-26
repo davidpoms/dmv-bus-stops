@@ -139,6 +139,10 @@ def generate_dashboard():
         TOTAL_ROUTES=f"{metrics['routes']['total_routes']:,}",
         FULLY_VERIFIED_ROUTES=f"{metrics['routes']['fully_verified_routes']:,}",
         PARTIAL_ROUTES=f"{metrics['routes']['partially_verified_routes']:,}",        total_projects=data["total_projects"],
+
+        COMPLETED_REVIEWS=f"{metrics['consensus']['completed_reviews']:,}",
+        PENDING_REVIEWS=f"{metrics['consensus']['pending_reviews']:,}",
+        VERIFIED_STOPS=f"{metrics['consensus']['verified_stops']:,}",
         status_list=status_list,
         geography_totals=geography_totals,
         county_list=county_list,

@@ -1,7 +1,7 @@
 """
 Validate stop review workflow tables.
 
-The stop_reviews table already stores volunteer field observations.
+The stop_observations table already stores volunteer field observations.
 This script ensures required indexes exist.
 """
 
@@ -22,25 +22,25 @@ DATABASE_PATH = (
 )
 
 
-def create_stop_reviews():
+def create_stop_observations():
 
     conn = sqlite3.connect(DATABASE_PATH)
     cursor = conn.cursor()
 
     cursor.execute(
         """
-        CREATE INDEX IF NOT EXISTS idx_stop_reviews_stop
-        ON stop_reviews(
-            stop_id
+        CREATE INDEX IF NOT EXISTS idx_stop_observations_stop
+        ON stop_observations(
+            physical_stop_id
         );
         """
     )
 
     cursor.execute(
         """
-        CREATE INDEX IF NOT EXISTS idx_stop_reviews_date
-        ON stop_reviews(
-            review_date
+        CREATE INDEX IF NOT EXISTS idx_stop_observations_date
+        ON stop_observations(
+            observed_at
         );
         """
     )
@@ -50,7 +50,7 @@ def create_stop_reviews():
     cursor.execute(
         """
         SELECT COUNT(*)
-        FROM stop_reviews;
+        FROM stop_observations;
         """
     )
 
@@ -59,9 +59,9 @@ def create_stop_reviews():
     conn.close()
 
     print(
-        f"stop_reviews ready ({count} existing reviews)"
+        f"stop_observations ready ({count} existing reviews)"
     )
 
 
 if __name__ == "__main__":
-    create_stop_reviews()
+    create_stop_observations()

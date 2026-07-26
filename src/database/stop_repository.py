@@ -76,12 +76,12 @@ class StopRepository:
 
 
 
-    def get_stop_reviews(
+    def get_stop_observations(
         self,
         stop_id
     ):
         """
-        Retrieve reviews
+        Retrieve observations
         for a stop.
         """
 
@@ -96,8 +96,8 @@ class StopRepository:
         cursor.execute(
             """
             SELECT *
-            FROM stop_reviews
-            WHERE stop_id = ?
+            FROM stop_observations
+            WHERE physical_stop_id = ?
 
             """,
 

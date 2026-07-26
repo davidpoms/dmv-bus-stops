@@ -19,7 +19,7 @@ function submitCurrentReview(){
 
         stop_id: currentReviewStop,
 
-        anonymous_email:
+        observer:
             document.getElementById("reviewEmail").value,
 
         waiting_area_type:
@@ -28,7 +28,7 @@ function submitCurrentReview(){
         concrete_pad_present:
             document.getElementById("padPresent").value,
 
-        bench_location_feasible:
+        bench_feasible:
             document.getElementById("benchFeasible").value,
 
         sun_exposure:
@@ -65,3 +65,44 @@ function submitCurrentReview(){
     });
 
 }
+
+
+// Open a stop automatically when linked from reviewer queue
+
+function loadStopFromURL() {
+
+    const params = new URLSearchParams(
+        window.location.search
+    );
+
+    const stop = params.get("stop");
+
+    if (!stop) {
+        return;
+    }
+
+
+    if (typeof selectStop === "function") {
+        selectStop(Number(stop));
+        return;
+    }
+
+
+    if (typeof loadStop === "function") {
+        loadStop(Number(stop));
+        return;
+    }
+
+
+    console.log(
+        "Stop requested:",
+        stop
+    );
+}
+
+
+document.addEventListener(
+    "DOMContentLoaded",
+    loadStopFromURL
+);
+

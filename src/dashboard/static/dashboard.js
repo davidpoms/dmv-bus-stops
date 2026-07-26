@@ -37,6 +37,19 @@ L.tileLayer(
 let markers = [];
 
 
+function loadEvidence(stopId) {
+
+    return fetch(
+        `/api/stops/${stopId}/evidence`
+    )
+    .then(
+        response => response.json()
+    );
+
+}
+
+
+
 function loadStops(route="") {
 
 
@@ -165,6 +178,10 @@ function loadStops(route="") {
                         .then(
                             detail => {
 
+                                return loadEvidence(props.stop_id)
+                                .then(
+                                    evidence => {
+
                                 let popup = `
                                 <b>${props.location}</b><br><br>
 
@@ -208,6 +225,59 @@ function loadStops(route="") {
                                         Adopt this stop
                                     </button>
                                     `;
+
+                                }
+
+
+                                if (evidence.osm) {
+
+                                    popup += `
+                                    <br>
+                                    <b>OSM Evidence</b><br>
+
+                                    Bus stop mapped:
+                                    ${evidence.osm.osm_bus_stop === 1 ? "Yes" : "No"}<br>
+
+                                    Shelter:
+                                    ${evidence.osm.osm_shelter === 1 ? "Yes" : "No"}<br>
+
+                                    Bench:
+                                    ${evidence.osm.osm_bench === 1 ? "Yes" : "No"}<br>
+                                    `;
+
+                                }
+
+
+                                if (evidence.observations.length > 0) {
+
+                                    popup += `
+                                    <br>
+                                    <b>Field Observations</b><br>
+                                    `;
+
+
+                                    evidence.observations.forEach(
+                                        obs => {
+
+                                            popup += `
+                                            Reviewer:
+                                            ${obs.observer || "Unknown"}<br>
+
+                                            Bench:
+                                            ${obs.bench_present}<br>
+
+                                            Feasible:
+                                            ${obs.bench_feasible}<br>
+
+                                            Confidence:
+                                            ${obs.confidence}<br>
+
+                                            Notes:
+                                            ${obs.notes || ""}<br><br>
+                                            `;
+
+                                        }
+                                    );
 
                                 }
 
@@ -270,6 +340,9 @@ function loadStops(route="") {
                                 marker.bindPopup(
                                     popup
                                 ).openPopup();
+
+                                    }
+                                );
 
                             }
                         );

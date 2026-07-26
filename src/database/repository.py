@@ -44,12 +44,12 @@ class Repository:
 
         cursor.execute(
             """
-            INSERT INTO stop_reviews
+            INSERT INTO stop_observations
             (
-                stop_id,
-                has_shelter,
-                has_bench,
-                reviewer_confidence,
+                physical_stop_id,
+                shelter_present,
+                bench_present,
+                confidence,
                 notes
             )
 
@@ -57,7 +57,7 @@ class Repository:
 
             """,
             (
-                review["stop_id"],
+                review["physical_stop_id"],
 
                 review.get(
                     "shelter_present"
@@ -99,8 +99,8 @@ class Repository:
         cursor.execute(
             """
             SELECT *
-            FROM stop_reviews
-            WHERE stop_id = ?
+            FROM stop_observations
+            WHERE physical_stop_id = ?
 
             """,
             (

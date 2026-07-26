@@ -59,66 +59,46 @@ CREATE TABLE IF NOT EXISTS stop_routes (
 -- HUMAN VERIFIED STOP CONDITIONS
 -- =====================================================
 
-CREATE TABLE IF NOT EXISTS stop_reviews (
+
+CREATE TABLE IF NOT EXISTS stop_observations (
 
     id INTEGER PRIMARY KEY AUTOINCREMENT,
 
-    stop_id INTEGER NOT NULL,
+    physical_stop_id INTEGER NOT NULL,
 
-    reviewer_id TEXT,
+    observer TEXT,
 
-    review_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    shelter_present TEXT,
 
+    bench_present TEXT,
 
-    -- basic infrastructure
+    trash_present TEXT,
 
-    has_shelter BOOLEAN,
+    bench_feasible TEXT,
 
-    has_bench BOOLEAN,
-
-    bench_condition TEXT,
-
-
-    -- waiting environment
-
-    waiting_area_type TEXT,
-
-    likely_waiting_location TEXT,
-
-    sun_exposure TEXT,
-
-
-    -- physical feasibility
-
-    concrete_pad_present BOOLEAN,
-
-    pad_width_feet REAL,
-
-    pad_depth_feet REAL,
-
-    bench_location_feasible BOOLEAN,
-
-
-    -- ADA observations
-
-    curb_access_clear BOOLEAN,
-
-    bus_ramp_access_clear BOOLEAN,
-
-    landing_zone_clear BOOLEAN,
-
-    rear_clear_zone_clear BOOLEAN,
-
-
-    reviewer_confidence REAL,
-
+    ada_clearance_possible TEXT,
 
     notes TEXT,
 
+    observed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
-    FOREIGN KEY(stop_id)
-        REFERENCES bus_stops(id)
+    source TEXT DEFAULT 'unknown',
+
+    reviewer_id INTEGER,
+
+    confidence REAL,
+
+    streetview_checked BOOLEAN,
+
+    osm_checked BOOLEAN,
+
+    FOREIGN KEY(physical_stop_id)
+        REFERENCES physical_stops(id)
+
 );
+
+
+
 
 
 
@@ -322,18 +302,6 @@ CREATE TABLE IF NOT EXISTS review_feedback (
 
 
 
-CREATE TABLE IF NOT EXISTS stop_reviews (
 
-    id INTEGER PRIMARY KEY,
 
-    stop_id TEXT NOT NULL,
 
-    reviewer_type TEXT DEFAULT 'volunteer',
-
-    review_data TEXT NOT NULL,
-
-    confidence REAL DEFAULT 0,
-
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-
-);

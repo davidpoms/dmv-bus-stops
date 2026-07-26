@@ -1,7 +1,7 @@
 """
 Complete volunteer stop review records.
 
-Takes reviewed observations and stores them in stop_reviews.
+Takes reviewed observations and stores them in stop_observations.
 This layer captures field validation only.
 """
 
@@ -23,10 +23,10 @@ DATABASE_PATH = (
 
 
 def complete_stop_review(
-    stop_id,
+    physical_stop_id,
     reviewer_id,
-    has_shelter,
-    has_bench,
+    shelter_present,
+    bench_present,
     bench_condition,
     waiting_area_type,
     notes
@@ -38,13 +38,13 @@ def complete_stop_review(
 
     cursor.execute(
         """
-        DELETE FROM stop_reviews
+        DELETE FROM stop_observations
 
-        WHERE stop_id = ?
+        WHERE physical_stop_id = ?
         AND reviewer_id = ?;
         """,
         (
-            stop_id,
+            physical_stop_id,
             reviewer_id
         )
     )
@@ -52,12 +52,12 @@ def complete_stop_review(
 
     cursor.execute(
         """
-        INSERT INTO stop_reviews
+        INSERT INTO stop_observations
         (
-            stop_id,
+            physical_stop_id,
             reviewer_id,
-            has_shelter,
-            has_bench,
+            shelter_present,
+            bench_present,
             bench_condition,
             waiting_area_type,
             notes
@@ -66,10 +66,10 @@ def complete_stop_review(
         VALUES (?, ?, ?, ?, ?, ?, ?);
         """,
         (
-            stop_id,
+            physical_stop_id,
             reviewer_id,
-            has_shelter,
-            has_bench,
+            shelter_present,
+            bench_present,
             bench_condition,
             waiting_area_type,
             notes
@@ -80,17 +80,17 @@ def complete_stop_review(
     conn.close()
 
     print(
-        f"Saved review for stop {stop_id}"
+        f"Saved review for stop {physical_stop_id}"
     )
 
 
 if __name__ == "__main__":
 
     complete_stop_review(
-        stop_id=5478,
+        physical_stop_id=5478,
         reviewer_id="demo_volunteer",
-        has_shelter=False,
-        has_bench=False,
+        shelter_present="no",
+        bench_present="no",
         bench_condition="none",
         waiting_area_type="sidewalk",
         notes="High ridership stop with no existing seating."

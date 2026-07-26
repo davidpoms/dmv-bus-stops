@@ -66,31 +66,55 @@ def generate_recommendations():
         """
         SELECT
 
-            sr.stop_id,
+            o.physical_stop_id,
 
-            sr.has_shelter,
+            CASE
+                WHEN o.shelter_present IN ('yes','true','1')
+                THEN 1
+                ELSE 0
+            END,
 
-            sr.has_bench,
+            CASE
+                WHEN o.bench_present IN ('yes','true','1')
+                THEN 1
+                ELSE 0
+            END,
 
-            sr.bench_location_feasible,
+            CASE
+                WHEN o.bench_feasible IN ('yes','true','1')
+                THEN 1
+                ELSE 0
+            END,
 
-            sr.concrete_pad_present,
+            NULL,
 
-            sr.curb_access_clear,
+            CASE
+                WHEN o.ada_clearance_possible IN ('yes','true','1')
+                THEN 1
+                ELSE 0
+            END,
 
-            sr.bus_ramp_access_clear,
+            CASE
+                WHEN o.ada_clearance_possible IN ('yes','true','1')
+                THEN 1
+                ELSE 0
+            END,
 
-            sr.landing_zone_clear,
+            CASE
+                WHEN o.ada_clearance_possible IN ('yes','true','1')
+                THEN 1
+                ELSE 0
+            END,
 
-            sr.notes,
+            o.notes,
 
             io.opportunity_score
 
-        FROM stop_reviews sr
+        FROM stop_observations o
 
         LEFT JOIN improvement_opportunities io
 
-            ON sr.stop_id = io.physical_stop_id;
+            ON o.physical_stop_id = io.physical_stop_id;
 
         """
     )
@@ -106,8 +130,8 @@ def generate_recommendations():
 
         (
             stop_id,
-            has_shelter,
-            has_bench,
+            shelter_present,
+            bench_present,
             bench_feasible,
             concrete_pad,
             curb_access,
@@ -121,7 +145,7 @@ def generate_recommendations():
         recommendations = []
 
 
-        if not has_bench and bench_feasible:
+        if not bench_present and bench_feasible:
 
             recommendations.append(
                 {
@@ -135,7 +159,7 @@ def generate_recommendations():
             )
 
 
-        if not has_shelter and score and score >= 80:
+        if not shelter_present and score and score >= 80:
 
             recommendations.append(
                 {

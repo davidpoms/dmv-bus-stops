@@ -48,17 +48,17 @@ def validation_progress():
             ps.id AS stop_id,
             ps.primary_name,
 
-            COUNT(sr.id) AS review_count,
+            COUNT(o.id) AS review_count,
 
-            AVG(sr.reviewer_confidence)
+            AVG(o.confidence)
                 AS confidence,
 
             sv.status
 
         FROM physical_stops ps
 
-        LEFT JOIN stop_reviews sr
-            ON ps.id = sr.stop_id
+        LEFT JOIN stop_observations o
+            ON ps.id = o.physical_stop_id
 
         LEFT JOIN stop_validation sv
             ON ps.id = sv.physical_stop_id
@@ -129,15 +129,15 @@ def bench_metrics():
 
             (
                 SELECT COUNT(DISTINCT stop_id)
-                FROM stop_reviews
-                WHERE has_bench = 1
+                FROM stop_observations
+                WHERE bench_present='yes'
             ) AS community_benches,
 
             (
                 SELECT COUNT(DISTINCT stop_id)
-                FROM stop_reviews
-                WHERE has_bench = 0
-                AND bench_location_feasible = 1
+                FROM stop_observations
+                WHERE bench_present='no'
+                AND bench_feasible='yes'
             ) AS community_bench_opportunities
 
         """
@@ -150,18 +150,14 @@ def route_validation_metrics():
         WITH consensus_stops AS (
 
             SELECT
-                stop_id
+                physical_stop_id AS stop_id
 
-            FROM stop_reviews
+            FROM stop_observations
 
-            GROUP BY stop_id
+            GROUP BY physical_stop_id
 
             HAVING COUNT(
-                DISTINCT COALESCE(
-                    reviewer_id,
-                    CAST(user_id AS TEXT),
-                    anonymous_email
-                )
+                DISTINCT observer
             ) >= 3
 
         ),
@@ -233,8 +229,8 @@ def verification_coverage():
             SUM(
                 CASE
                     WHEN id IN (
-                        SELECT stop_id
-                        FROM stop_reviews
+                        SELECT physical_stop_id
+                        FROM stop_observations
                     )
                     THEN 1
                     ELSE 0
@@ -246,8 +242,8 @@ def verification_coverage():
                 SUM(
                     CASE
                         WHEN id IN (
-                            SELECT stop_id
-                            FROM stop_reviews
+                            SELECT physical_stop_id
+                            FROM stop_observations
                         )
                         THEN 1
                         ELSE 0
@@ -367,21 +363,20 @@ def verification_funnel_metrics():
             ) AS total_stops,
 
             (
-                SELECT COUNT(DISTINCT stop_id)
-                FROM stop_reviews
+                SELECT COUNT(DISTINCT physical_stop_id)
+                FROM stop_observations
             ) AS stops_with_reviews,
 
             (
                 SELECT COUNT(*)
                 FROM (
-                    SELECT stop_id
-                    FROM stop_reviews
-                    GROUP BY stop_id
+                    SELECT physical_stop_id
+                    FROM stop_observations
+                    GROUP BY physical_stop_id
                     HAVING COUNT(
                         DISTINCT COALESCE(
                             reviewer_id,
-                            CAST(user_id AS TEXT),
-                            anonymous_email
+                            observer
                         )
                     ) >= 3
                 )
@@ -393,8 +388,8 @@ def verification_funnel_metrics():
             )
             -
             (
-                SELECT COUNT(DISTINCT stop_id)
-                FROM stop_reviews
+                SELECT COUNT(DISTINCT physical_stop_id)
+                FROM stop_observations
             ) AS awaiting_review
 
         """
