@@ -73,6 +73,7 @@ def validation_progress():
 
 
 def community_verification_metrics():
+
     return query(
         """
         SELECT
@@ -82,39 +83,33 @@ def community_verification_metrics():
                 FROM physical_stops
             ) AS total_stops,
 
+
             (
-                SELECT COUNT(DISTINCT stop_id)
-                FROM stop_reviews
+                SELECT COUNT(DISTINCT physical_stop_id)
+                FROM stop_observations
             ) AS reviewed_stops,
+
 
             (
                 SELECT COUNT(*)
-                FROM stop_reviews
+                FROM stop_observations
             ) AS total_reviews,
+
 
             (
                 SELECT COUNT(*)
                 FROM physical_stops
                 WHERE id NOT IN (
-                    SELECT DISTINCT stop_id
-                    FROM stop_reviews
+                    SELECT DISTINCT physical_stop_id
+                    FROM stop_observations
                 )
             ) AS awaiting_review,
 
+
             (
                 SELECT COUNT(*)
-                FROM (
-                    SELECT stop_id
-                    FROM stop_reviews
-                    GROUP BY stop_id
-                    HAVING COUNT(
-                        DISTINCT COALESCE(
-                            reviewer_id,
-                            CAST(user_id AS TEXT),
-                            anonymous_email
-                        )
-                    ) >= 3
-                )
+                FROM stop_consensus
+                WHERE consensus_status='verified'
             ) AS consensus_stops
 
         """
@@ -273,6 +268,7 @@ def dashboard_metrics():
         "coverage": verification_coverage(),
         "benches": stop_level_bench_metrics(),
         "routes": route_validation_metrics(),
+        "consensus": consensus_progress_metrics(),
     }
 
 
@@ -280,35 +276,39 @@ def dashboard_metrics():
 
 
 def stop_level_bench_metrics():
+
     return query(
         """
         SELECT
 
-            (
-                SELECT COUNT(DISTINCT stop_id)
-                FROM stop_reviews
-                WHERE has_bench = 1
-            ) AS community_confirmed_benches,
 
             (
-                SELECT COUNT(DISTINCT stop_id)
-                FROM stop_reviews
-                WHERE has_bench = 0
-                AND bench_location_feasible = 1
+                SELECT COUNT(DISTINCT physical_stop_id)
+                FROM stop_observations
+                WHERE bench_present='yes'
+            ) AS community_confirmed_benches,
+
+
+            (
+                SELECT COUNT(DISTINCT physical_stop_id)
+                FROM stop_observations
+                WHERE bench_present='no'
+                AND bench_feasible='yes'
             ) AS community_bench_opportunities,
+
 
             (
                 SELECT COUNT(*)
                 FROM physical_stops ps
-                WHERE ps.id NOT IN (
-                    SELECT DISTINCT stop_id
-                    FROM stop_reviews
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM stop_observations so
+                    WHERE so.physical_stop_id = ps.id
                 )
             ) AS stops_needing_review
 
         """
     )[0]
-
 
 
 def counties():
@@ -428,6 +428,123 @@ def reviewer_progress_metrics():
                 FROM stop_review_assignments
                 WHERE status='assigned'
             ) AS pending_assignments
+
+        """
+    )[0]
+
+
+
+def consensus_progress_metrics():
+    return query(
+        """
+        SELECT
+
+            (
+                SELECT COUNT(*)
+                FROM physical_stops
+            ) AS total_stops,
+
+            (
+                SELECT COUNT(*)
+                FROM stop_review_assignments
+            ) AS total_assignments,
+
+            (
+                SELECT COUNT(*)
+                FROM stop_review_assignments
+                WHERE status='completed'
+            ) AS completed_reviews,
+
+            (
+                SELECT COUNT(*)
+                FROM stop_consensus
+                WHERE consensus_status='verified'
+            ) AS verified_stops,
+
+            (
+                SELECT COUNT(*)
+                FROM stop_review_assignments
+                WHERE status='assigned'
+            ) AS pending_reviews
+
+        """
+    )[0]
+
+
+
+def bench_status_metrics():
+
+    return query(
+        """
+        SELECT
+
+            (
+                SELECT COUNT(*)
+                FROM stop_observations
+                WHERE bench_present = 'yes'
+            ) AS confirmed_benches,
+
+
+            (
+                SELECT COUNT(*)
+                FROM osm_features
+                WHERE tags LIKE '%bench%'
+            ) AS likely_osm_benches,
+
+
+            (
+                SELECT COUNT(*)
+                FROM stop_observations
+                WHERE bench_present = 'no'
+                AND bench_feasible = 'yes'
+            ) AS bench_candidates,
+
+
+            (
+                SELECT COUNT(*)
+                FROM physical_stops p
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM stop_observations o
+                    WHERE o.physical_stop_id = p.id
+                )
+            ) AS unknown_stops
+
+        """
+    )[0]
+
+
+
+
+
+def bench_priority_metrics():
+
+    return query(
+        """
+        SELECT
+
+            (
+                SELECT COUNT(*)
+                FROM stop_osm_evidence
+                WHERE osm_bench = 1
+            ) AS confirmed_benches,
+
+
+            (
+                SELECT COUNT(*)
+                FROM stop_osm_evidence
+                WHERE osm_shelter = 1
+                AND osm_bench = 0
+            ) AS shelter_without_bench,
+
+
+            (
+                SELECT COUNT(*)
+                FROM stop_osm_evidence
+                WHERE osm_bus_stop = 1
+                AND osm_bench = 0
+                AND osm_shelter = 0
+            ) AS high_priority_reviews
 
         """
     )[0]
