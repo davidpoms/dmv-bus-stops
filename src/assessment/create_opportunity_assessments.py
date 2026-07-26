@@ -45,9 +45,9 @@ def setup_table(cursor):
 
             physical_stop_id INTEGER NOT NULL,
 
-            average_daily_weekday_boardings REAL,
+            combined_route_weekday_boardings REAL,
 
-            highest_route_daily_boardings REAL,
+            highest_route_weekday_boardings REAL,
 
             routes_served INTEGER,
 
@@ -235,15 +235,15 @@ def create_assessments():
 
         assessment = {
 
-            "ridership": {
+            "route_exposure": {
 
-                "average_daily_weekday_boardings":
+                "combined_route_weekday_boardings":
                     round(
                         average_daily,
                         2
                     ),
 
-                "highest_route_daily_boardings":
+                "highest_route_weekday_boardings":
                     round(
                         highest_route_daily,
                         2
@@ -281,9 +281,9 @@ def create_assessments():
 
                 physical_stop_id,
 
-                average_daily_weekday_boardings,
+                combined_route_weekday_boardings,
 
-                highest_route_daily_boardings,
+                highest_route_weekday_boardings,
 
                 routes_served,
 

@@ -39,12 +39,17 @@ def setup_table(cursor):
 
             reasons JSON,
 
+            confidence TEXT,
+
+            evidence JSON,
+
             created_at TIMESTAMP
                 DEFAULT CURRENT_TIMESTAMP
 
         );
         """
     )
+
 
 
 def generate_recommendations():
@@ -66,62 +71,34 @@ def generate_recommendations():
         """
         SELECT
 
-            o.physical_stop_id,
+            io.physical_stop_id,
 
-            CASE
-                WHEN o.shelter_present IN ('yes','true','1')
-                THEN 1
-                ELSE 0
-            END,
+            io.opportunity_score,
 
-            CASE
-                WHEN o.bench_present IN ('yes','true','1')
-                THEN 1
-                ELSE 0
-            END,
+            COALESCE(ose.osm_bench,0),
 
-            CASE
-                WHEN o.bench_feasible IN ('yes','true','1')
-                THEN 1
-                ELSE 0
-            END,
+            COALESCE(ose.osm_shelter,0),
 
-            NULL,
+            COALESCE(ste.gtfs_bus_stop,0)
 
-            CASE
-                WHEN o.ada_clearance_possible IN ('yes','true','1')
-                THEN 1
-                ELSE 0
-            END,
 
-            CASE
-                WHEN o.ada_clearance_possible IN ('yes','true','1')
-                THEN 1
-                ELSE 0
-            END,
+        FROM improvement_opportunities io
 
-            CASE
-                WHEN o.ada_clearance_possible IN ('yes','true','1')
-                THEN 1
-                ELSE 0
-            END,
+        LEFT JOIN stop_osm_evidence ose
 
-            o.notes,
+            ON ose.stop_id = io.physical_stop_id
 
-            io.opportunity_score
+        LEFT JOIN stop_transit_evidence ste
 
-        FROM stop_observations o
+            ON ste.stop_id = io.physical_stop_id
 
-        LEFT JOIN improvement_opportunities io
-
-            ON o.physical_stop_id = io.physical_stop_id;
+        ORDER BY io.opportunity_score DESC;
 
         """
     )
 
 
     rows = cursor.fetchall()
-
 
     created = 0
 
@@ -130,78 +107,60 @@ def generate_recommendations():
 
         (
             stop_id,
-            shelter_present,
-            bench_present,
-            bench_feasible,
-            concrete_pad,
-            curb_access,
-            ramp_access,
-            landing_clear,
-            notes,
-            score
+            opportunity_score,
+            osm_bench,
+            osm_shelter,
+            gtfs_bus_stop
         ) = row
 
 
         recommendations = []
 
 
-        if not bench_present and bench_feasible:
+        if opportunity_score >= 70 and not osm_bench:
 
             recommendations.append(
                 {
-                    "type": "bench_installation",
+                    "type": "bench_review",
                     "priority": "high",
+                    "confidence": "medium",
+
+                    "evidence": {
+                        "opportunity_score": opportunity_score,
+                        "osm_bench": osm_bench,
+                        "osm_shelter": osm_shelter,
+        "gtfs_bus_stop": gtfs_bus_stop
+                    },
+
                     "reasons": [
-                        "No existing bench",
-                        "Space appears available"
+                        "High route exposure opportunity score",
+                        ("No bench mapped at active transit stop" if gtfs_bus_stop == 1 else "No bench mapped at active transit stop" if gtfs_bus_stop else "No bench mapped in OSM"),
+                        "Volunteer verification needed"
                     ]
                 }
             )
 
 
-        if not shelter_present and score and score >= 80:
+        if opportunity_score >= 80 and not osm_shelter:
 
             recommendations.append(
                 {
-                    "type": "shelter_installation",
+                    "type": "shelter_review",
                     "priority": "high",
+                    "confidence": "medium",
+
+                    "evidence": {
+                        "opportunity_score": opportunity_score,
+                        "osm_bench": osm_bench,
+                        "osm_shelter": osm_shelter,
+        "gtfs_bus_stop": gtfs_bus_stop
+                    },
+
                     "reasons": [
-                        "High improvement opportunity score",
-                        "No existing shelter"
+                        "High route exposure opportunity score",
+                        ("No shelter mapped at active transit stop" if gtfs_bus_stop == 1 else "No shelter mapped at active transit stop" if gtfs_bus_stop else "No shelter mapped in OSM"),
+                        "Shelter opportunity requires review"
                     ]
-                }
-            )
-
-
-        accessibility_issues = []
-
-
-        if not curb_access:
-
-            accessibility_issues.append(
-                "curb access unclear"
-            )
-
-        if not ramp_access:
-
-            accessibility_issues.append(
-                "bus ramp access unclear"
-            )
-
-        if not landing_clear:
-
-            accessibility_issues.append(
-                "landing zone unclear"
-            )
-
-
-        if accessibility_issues:
-
-            recommendations.append(
-                {
-                    "type": "accessibility_review",
-                    "priority": "medium",
-                    "reasons": accessibility_issues
                 }
             )
 
@@ -210,19 +169,19 @@ def generate_recommendations():
 
             cursor.execute(
                 """
-                INSERT INTO improvement_recommendations (
-
+                INSERT INTO improvement_recommendations
+                (
                     physical_stop_id,
-
                     recommendation_type,
-
                     priority,
+                    reasons,
 
-                    reasons
+                    confidence,
 
+                    evidence
                 )
 
-                VALUES (?, ?, ?, ?);
+                VALUES (?, ?, ?, ?, ?, ?);
 
                 """,
                 (
@@ -231,6 +190,12 @@ def generate_recommendations():
                     recommendation["priority"],
                     json.dumps(
                         recommendation["reasons"]
+                    ),
+
+                    recommendation["confidence"],
+
+                    json.dumps(
+                        recommendation["evidence"]
                     )
                 )
             )

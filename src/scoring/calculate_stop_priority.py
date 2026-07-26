@@ -292,13 +292,13 @@ def calculate_scores():
 
         factors = {
 
-            "average_daily_weekday_boardings":
+            "combined_route_weekday_boardings":
                 round(
                     total_daily,
                     2
                 ),
 
-            "highest_route_daily_boardings":
+            "highest_route_weekday_boardings":
                 round(
                     highest_route_daily or 0,
                     2
@@ -312,7 +312,7 @@ def calculate_scores():
                 if routes
                 else [],
 
-            "ridership_score":
+            "route_exposure_score":
                 round(
                     demand_score,
                     2

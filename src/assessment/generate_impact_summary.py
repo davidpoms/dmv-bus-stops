@@ -68,7 +68,7 @@ def generate_impact_summary():
 
             io.physical_stop_id,
 
-            oa.total_daily_weekday_boardings,
+            oa.combined_route_weekday_boardings,
 
             io.opportunity_score,
 
@@ -92,7 +92,7 @@ def generate_impact_summary():
 
             io.physical_stop_id,
 
-            oa.total_daily_weekday_boardings,
+            oa.combined_route_weekday_boardings,
 
             io.opportunity_score,
 

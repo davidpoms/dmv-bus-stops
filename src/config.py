@@ -143,7 +143,7 @@ MAX_OSM_MATCH_DISTANCE_METERS = 30
 SCORING_WEIGHTS = {
 
     # demand from WMATA ridership
-    "ridership": 0.30,
+    "route_exposure": 0.30,
 
 
     # stop lacks existing shelter/bench

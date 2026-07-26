@@ -106,9 +106,9 @@ def score_opportunities():
 
             physical_stop_id,
 
-            total_daily_weekday_boardings,
+            combined_route_weekday_boardings,
 
-            highest_route_daily_boardings,
+            highest_route_weekday_boardings,
 
             routes_served,
 
@@ -173,19 +173,19 @@ def score_opportunities():
 
 
 
-        ridership_score = normalize(
+        route_exposure_score = normalize(
             total_daily,
             max_daily
         )
 
 
-        route_score = normalize(
+        connectivity_score = normalize(
             routes,
             max_routes
         )
 
 
-        complexity_score = normalize(
+        physical_complexity_score = normalize(
             records,
             max_records
         )
@@ -193,30 +193,30 @@ def score_opportunities():
 
         opportunity_score = (
 
-            ridership_score * 0.70
+            route_exposure_score * 0.70
 
             +
 
-            route_score * 0.25
+            connectivity_score * 0.25
 
             +
 
-            complexity_score * 0.05
+            physical_complexity_score * 0.05
 
         )
 
 
         factors = {
 
-            "ridership": {
+            "route_exposure": {
 
-                "total_daily_weekday_boardings":
+                "combined_route_weekday_boardings":
                     round(
                         total_daily,
                         2
                     ),
 
-                "highest_route_daily_boardings":
+                "highest_route_weekday_boardings":
                     round(
                         highest_route,
                         2
@@ -224,7 +224,7 @@ def score_opportunities():
 
                 "score":
                     round(
-                        ridership_score,
+                        route_exposure_score,
                         2
                     )
 
@@ -238,7 +238,7 @@ def score_opportunities():
 
                 "score":
                     round(
-                        route_score,
+                        connectivity_score,
                         2
                     )
 
@@ -252,7 +252,7 @@ def score_opportunities():
 
                 "score":
                     round(
-                        complexity_score,
+                        physical_complexity_score,
                         2
                     )
 
