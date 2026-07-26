@@ -1,3 +1,5 @@
+import json
+
 """
 DMV Bus Stops Improvement API
 """
@@ -5,6 +7,13 @@ DMV Bus Stops Improvement API
 from flask import Flask, jsonify, send_from_directory, request
 import sqlite3
 from pathlib import Path
+
+from src.assessment.interpretation import (
+    summarize_stop_evidence,
+    generate_review_action_summary,
+    interpret_bench_status,
+    interpret_review_priority,
+)
 
 
 app = Flask(
@@ -41,6 +50,57 @@ def query_db(sql, params=()):
 
 
 
+
+
+def get_stop_evidence_summary(stop_id):
+
+    conn = sqlite3.connect(DATABASE_PATH)
+    conn.row_factory = sqlite3.Row
+
+    transit = conn.execute(
+        """
+        SELECT *
+        FROM stop_transit_evidence
+        WHERE stop_id=?
+        """,
+        (stop_id,)
+    ).fetchone()
+
+
+    osm = conn.execute(
+        """
+        SELECT *
+        FROM stop_osm_evidence
+        WHERE stop_id=?
+        """,
+        (stop_id,)
+    ).fetchone()
+
+
+    reviews = conn.execute(
+        """
+        SELECT *
+        FROM stop_observations
+        WHERE physical_stop_id=?
+        ORDER BY observed_at DESC
+        """,
+        (stop_id,)
+    ).fetchall()
+
+
+    conn.close()
+
+
+    return {
+        "transit": dict(transit) if transit else None,
+
+        "osm": dict(osm) if osm else None,
+
+        "reviews": [
+            dict(r)
+            for r in reviews
+        ]
+    }
 
 
 @app.route("/observations/create", methods=["POST"])
@@ -157,8 +217,8 @@ def validation_queue():
         SELECT
             ps.id,
             ps.primary_name,
-            ps.latitude,
-            ps.longitude,
+            ps.latitude AS lat,
+            ps.longitude AS lon,
             sii.opportunity_score,
             sii.priority_level,
             sv.status
@@ -468,8 +528,8 @@ def stop_detail(stop_id):
         """
         SELECT
             ps.primary_name,
-            ps.latitude,
-            ps.longitude,
+            ps.latitude AS lat,
+            ps.longitude AS lon,
             sii.opportunity_score,
             sii.impact_level
 
@@ -498,6 +558,42 @@ def stop_detail(stop_id):
     )
 
 
+    recommendations = query_db(
+        """
+        SELECT
+            recommendation_type,
+            priority,
+            confidence,
+            evidence,
+            reasons
+
+        FROM improvement_recommendations
+
+        WHERE physical_stop_id = ?
+
+        ORDER BY
+            priority,
+            recommendation_type;
+        """,
+        (stop_id,)
+    )
+
+
+    recommendation_payload = []
+
+    for row in recommendations:
+
+        recommendation_payload.append(
+            {
+                "type": row[0],
+                "priority": row[1],
+                "confidence": row[2],
+                "evidence": json.loads(row[3]) if row[3] else {},
+                "reasons": json.loads(row[4]) if row[4] else []
+            }
+        )
+
+
     stop_row = stop[0] if stop else None
 
     evidence = get_stop_evidence_summary(stop_id)
@@ -507,6 +603,15 @@ def stop_detail(stop_id):
     review_priority = interpret_review_priority(
         evidence,
         bench_status
+    )
+
+    evidence_summary = summarize_stop_evidence(
+        evidence
+    )
+
+    review_actions = generate_review_action_summary(
+        evidence,
+        review_priority
     )
 
 
@@ -530,7 +635,13 @@ def stop_detail(stop_id):
                 for row in projects
             ],
 
+            "recommendations": recommendation_payload,
+
             "evidence": evidence,
+
+            "evidence_summary": evidence_summary,
+
+            "review_actions": review_actions,
 
             "bench_status": bench_status,
 
@@ -560,7 +671,7 @@ def survey(stop_id):
         SELECT
             ps.id,
             ps.primary_name,
-            ps.latitude,
+            ps.latitude AS lat,
             ps.longitude
 
         FROM physical_stops ps
@@ -689,78 +800,132 @@ def submit_review():
 
 
 
-@app.route("/stops/<int:stop_id>/review-summary")
-def review_summary(stop_id):
 
-    rows = query_db(
+
+
+
+@app.route("/api/review-queue")
+def review_queue():
+
+    conn = sqlite3.connect(DATABASE_PATH)
+    conn.row_factory = sqlite3.Row
+
+    rows = conn.execute(
         """
         SELECT
-            bench_feasible,
-            NULL,
-            confidence
-        FROM stop_observations
-        WHERE physical_stop_id = ?
-        """,
-        (stop_id,)
+            ir.physical_stop_id,
+            ps.latitude AS lat,
+            ps.longitude AS lon,
+            ir.recommendation_type,
+            ir.priority,
+            ir.confidence,
+            ir.reasons,
+            ir.evidence
+
+        FROM improvement_recommendations ir
+
+        JOIN physical_stops ps
+            ON ps.id = ir.physical_stop_id
+
+        ORDER BY
+            CASE ir.priority
+                WHEN 'high' THEN 1
+                WHEN 'medium' THEN 2
+                ELSE 3
+            END,
+            ir.physical_stop_id
+
+        """
+    ).fetchall()
+
+    conn.close()
+
+    return jsonify(
+        {
+            "count": len(rows),
+            "queue": [
+                {
+                    "stop_id": row["physical_stop_id"],
+                    "lat": row["lat"],
+                    "lon": row["lon"],
+                    "type": row["recommendation_type"],
+                    "priority": row["priority"],
+                    "confidence": row["confidence"],
+                    "reasons": json.loads(row["reasons"])
+                        if row["reasons"]
+                        else [],
+                    "evidence": json.loads(row["evidence"])
+                        if row["evidence"]
+                        else {}
+                }
+                for row in rows
+            ]
+        }
     )
 
 
-    total = len(rows)
+@app.route("/stops/<int:stop_id>/review-summary")
+def stop_review_summary(stop_id):
 
+    evidence = get_stop_evidence_summary(stop_id)
 
-    bench_yes = 0
-    bench_no = 0
-    confidence_total = 0
+    transit = evidence.get("transit") or {}
+    osm = evidence.get("osm") or {}
+    reviews = evidence.get("reviews") or []
 
+    reasons = []
 
-    sun_counts = {}
+    if transit.get("gtfs_bus_stop"):
+        reasons.append(
+            "Active transit stop confirmed"
+        )
 
+    if not osm.get("osm_bench"):
+        reasons.append(
+            "No OSM bench evidence"
+        )
 
-    for row in rows:
+    if not osm.get("osm_shelter"):
+        reasons.append(
+            "No OSM shelter evidence"
+        )
 
-        bench = row[0]
-        sun = row[1]
-        confidence = row[2]
-
-
-        if bench == "true":
-            bench_yes += 1
-
-        elif bench == "false":
-            bench_no += 1
-
-
-        if confidence:
-            confidence_total += float(confidence)
-
-
-        if sun:
-            sun_counts[sun] = sun_counts.get(sun, 0) + 1
-
-
-
-    average_confidence = (
-        confidence_total / total
-        if total > 0
-        else 0
-    )
+    if len(reviews) == 0:
+        reasons.append(
+            "No community observations"
+        )
 
 
     return jsonify(
         {
             "stop_id": stop_id,
-            "review_count": total,
-            "bench_feasible_yes": bench_yes,
-            "bench_feasible_no": bench_no,
-            "average_confidence": round(
-                average_confidence,
-                2
-            ),
-            "sun_exposure": sun_counts
+
+            "review_status": {
+                "needs_field_review": len(reasons) > 0,
+                "reasons": reasons
+            },
+
+            "evidence": {
+                "gtfs_confirmed":
+                    bool(transit.get("gtfs_bus_stop")),
+
+                "osm_bench":
+                    bool(osm.get("osm_bench")),
+
+                "osm_shelter":
+                    bool(osm.get("osm_shelter")),
+
+                "community_reviews":
+                    len(reviews)
+            },
+
+            "recommended_actions": [
+                "Verify bench presence",
+                "Verify shelter presence",
+                "Collect first community observation"
+            ]
         }
     )
-
-
 
 @app.route("/priorities/top")
 def top_priorities():
@@ -769,8 +934,8 @@ def top_priorities():
         """
         SELECT
             ps.primary_name,
-            ps.latitude,
-            ps.longitude,
+            ps.latitude AS lat,
+            ps.longitude AS lon,
             sii.opportunity_score,
             sii.priority_level,
             sii.impact_level
@@ -905,8 +1070,8 @@ def map_stops():
 
                 ps.id,
                 ps.primary_name,
-                ps.latitude,
-                ps.longitude,
+                ps.latitude AS lat,
+                ps.longitude AS lon,
                 sii.opportunity_score,
                 sii.impact_level,
                 sii.priority_level,
@@ -1037,8 +1202,8 @@ def map_stops():
 
                 ps.id,
                 ps.primary_name,
-                ps.latitude,
-                ps.longitude,
+                ps.latitude AS lat,
+                ps.longitude AS lon,
                 sii.opportunity_score,
                 sii.impact_level,
                 sii.priority_level,
@@ -1500,442 +1665,8 @@ def summary():
         }
     )
 
-if __name__ == "__main__":
 
-    app.run(
-        host="0.0.0.0",
-        port=5000,
-        debug=True
-    )
 
-
-@app.route("/api/stops/<int:stop_id>/evidence")
-def stop_evidence(stop_id):
-
-    conn = sqlite3.connect(DATABASE_PATH)
-    conn.row_factory = sqlite3.Row
-
-    osm = conn.execute(
-        """
-        SELECT *
-        FROM stop_osm_evidence
-        WHERE stop_id=?
-        """,
-        (stop_id,)
-    ).fetchone()
-
-
-    observations = conn.execute(
-        """
-        SELECT
-            source,
-            observer,
-            shelter_present,
-            bench_present,
-            bench_feasible,
-            notes,
-            confidence,
-            observed_at
-
-        FROM stop_observations
-
-        WHERE physical_stop_id=?
-
-        ORDER BY observed_at DESC
-        """,
-        (stop_id,)
-    ).fetchall()
-
-
-    conn.close()
-
-
-    return jsonify(
-        {
-            "stop_id": stop_id,
-            "osm": dict(osm) if osm else None,
-            "observations":
-                [
-                    dict(row)
-                    for row in observations
-                ]
-        }
-    )
-
-
-
-@app.get("/api/reviewer/<int:reviewer_id>/queue")
-def reviewer_queue(reviewer_id):
-
-    conn = sqlite3.connect(DATABASE_PATH)
-    conn.row_factory = sqlite3.Row
-
-    rows = conn.execute(
-        """
-        SELECT
-
-            a.id AS assignment_id,
-            a.stop_id,
-            a.reviewer_id,
-            a.status,
-
-            p.latitude,
-            p.longitude,
-
-            p.stop_name
-
-        FROM stop_review_assignments a
-
-        JOIN physical_stops p
-        ON p.id = a.stop_id
-
-        WHERE a.reviewer_id = ?
-
-        ORDER BY a.assigned_at
-
-        """,
-        (
-            reviewer_id,
-        )
-    ).fetchall()
-
-
-    conn.close()
-
-    return [
-        dict(row)
-        for row in rows
-    ]
-
-
-
-def refresh_stop_consensus(stop_id):
-
-    conn = sqlite3.connect(DATABASE_PATH)
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
-
-    reviewers = cur.execute(
-        """
-        SELECT COUNT(
-            DISTINCT COALESCE(
-                reviewer_id,
-                observer
-            )
-        )
-        FROM stop_observations
-        WHERE physical_stop_id = ?
-        """,
-        (stop_id,)
-    ).fetchone()[0]
-
-
-    if reviewers < 3:
-        conn.close()
-        return False
-
-
-    review = cur.execute(
-        """
-        SELECT
-            ROUND(AVG(
-                CASE
-                    WHEN shelter_present IN ('yes','true','1')
-                    THEN 1
-                    ELSE 0
-                END
-            ),0),
-
-            ROUND(AVG(
-                CASE
-                    WHEN bench_present IN ('yes','true','1')
-                    THEN 1
-                    ELSE 0
-                END
-            ),0),
-
-            ROUND(AVG(
-                CASE
-                    WHEN bench_feasible IN ('yes','true','1')
-                    THEN 1
-                    ELSE 0
-                END
-            ),0),
-
-            ROUND(AVG(
-                CASE
-                    WHEN ada_clearance_possible IN ('yes','true','1')
-                    THEN 1
-                    ELSE 0
-                END
-            ),2),
-
-            AVG(confidence)
-
-        FROM stop_observations
-        WHERE physical_stop_id = ?
-        """,
-        (stop_id,)
-    ).fetchone()
-
-
-    cur.execute(
-        """
-        INSERT INTO stop_consensus
-        (
-            stop_id,
-            reviewer_count,
-            shelter_present,
-            bench_present,
-            bench_feasible,
-            ada_accessible,
-            confidence,
-            consensus_status
-        )
-
-        VALUES (?,?,?,?,?,?,?,'verified')
-
-        ON CONFLICT(stop_id)
-        DO UPDATE SET
-
-            reviewer_count=excluded.reviewer_count,
-            shelter_present=excluded.shelter_present,
-            bench_present=excluded.bench_present,
-            bench_feasible=excluded.bench_feasible,
-            ada_accessible=excluded.ada_accessible,
-            confidence=excluded.confidence,
-            consensus_status='verified'
-        """,
-        (
-            stop_id,
-            reviewers,
-            review[0],
-            review[1],
-            review[2],
-            review[3],
-            review[4],
-        )
-    )
-
-
-    cur.execute(
-        """
-        UPDATE stop_validation
-        SET
-            status='validated',
-            validated_at=CURRENT_TIMESTAMP
-        WHERE physical_stop_id=?
-        """,
-        (stop_id,)
-    )
-
-
-    conn.commit()
-    conn.close()
-
-    return True
-
-
-
-@app.route("/reviewer/<int:reviewer_id>")
-def reviewer_dashboard(reviewer_id):
-
-    assignments = query_db(
-        """
-        SELECT
-
-            a.stop_id,
-            a.status,
-
-            p.latitude,
-            p.longitude,
-            p.stop_name
-
-        FROM stop_review_assignments a
-
-        JOIN physical_stops p
-        ON p.id=a.stop_id
-
-        WHERE reviewer_id=?
-
-        ORDER BY a.status, a.assigned_at
-
-        """,
-        (reviewer_id,)
-    )
-
-    return render_template(
-        "reviewer_dashboard.html",
-        assignments=assignments,
-        reviewer_id=reviewer_id
-    )
-
-
-
-
-
-
-def interpret_review_priority(evidence, bench_status):
-
-    osm = evidence.get("osm")
-
-    if bench_status["status"] == "confirmed_bench":
-        return {
-            "level": "low",
-            "reasons": [
-                "Bench already mapped"
-            ]
-        }
-
-    if osm and osm.get("osm_shelter") == 1:
-        return {
-            "level": "medium",
-            "reasons": [
-                "Shelter mapped",
-                "Bench status needs verification"
-            ]
-        }
-
-    return {
-        "level": "high",
-        "reasons": [
-            "No bench evidence",
-            "Needs volunteer review"
-        ]
-    }
-
-
-def interpret_bench_status(evidence):
-
-    osm = evidence.get("osm")
-
-    if not osm:
-        return {
-            "status": "unknown",
-            "label": "No evidence yet"
-        }
-
-    if osm["osm_bench"] == 1:
-        return {
-            "status": "confirmed_bench",
-            "label": "Confirmed bench"
-        }
-
-    if osm["osm_shelter"] == 1:
-        return {
-            "status": "likely_bench_candidate",
-            "label": "Shelter present, bench needs verification"
-        }
-
-    return {
-        "status": "needs_review",
-        "label": "Needs bench review"
-    }
-
-
-def get_stop_evidence_summary(stop_id):
-
-    conn = sqlite3.connect(DATABASE_PATH)
-    conn.row_factory = sqlite3.Row
-
-    osm = conn.execute(
-        '''
-        SELECT *
-        FROM stop_osm_evidence
-        WHERE stop_id=?
-        ''',
-        (stop_id,)
-    ).fetchone()
-
-    reviews = conn.execute(
-        '''
-        SELECT *
-        FROM stop_observations
-        WHERE physical_stop_id=?
-        ORDER BY observed_at DESC
-        ''',
-        (stop_id,)
-    ).fetchall()
-
-    conn.close()
-
-    return {
-        "osm": dict(osm) if osm else None,
-        "reviews": [
-            dict(r)
-            for r in reviews
-        ]
-    }
-
-
-
-@app.route("/api/review-queue")
-def review_queue():
-
-    conn = sqlite3.connect(DATABASE_PATH)
-    conn.row_factory = sqlite3.Row
-
-    rows = conn.execute(
-        """
-        SELECT
-
-            e.stop_id,
-
-            ps.primary_name,
-
-            ps.latitude,
-
-            ps.longitude,
-
-            CASE
-
-                WHEN e.osm_shelter = 1
-                THEN 'medium'
-
-                ELSE 'high'
-
-            END AS priority,
-
-
-            CASE
-
-                WHEN e.osm_shelter = 1
-                THEN 'Shelter mapped, bench needs verification'
-
-                ELSE 'No bench or shelter mapped'
-
-            END AS reason
-
-
-        FROM stop_osm_evidence e
-
-        JOIN physical_stops ps
-
-            ON ps.id = e.stop_id
-
-
-        WHERE e.osm_bus_stop = 1
-
-        AND e.osm_bench = 0
-
-
-        ORDER BY priority DESC
-
-        LIMIT 100
-
-        """
-    ).fetchall()
-
-
-    conn.close()
-
-
-    return jsonify(
-        [
-            dict(row)
-            for row in rows
-        ]
-    )
 
 
 if __name__ == "__main__":
@@ -1945,4 +1676,3 @@ if __name__ == "__main__":
         port=5000,
         debug=True
     )
-
