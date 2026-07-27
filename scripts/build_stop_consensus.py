@@ -2,112 +2,105 @@ import sqlite3
 
 DB = "src/database/dmv_bus_stops.db"
 
+MIN_REVIEWS = 4
+AGREEMENT_THRESHOLD = 0.75
+
+
+def pct(value, total):
+    return value / total if total else 0
+
 
 conn = sqlite3.connect(DB)
+conn.row_factory = sqlite3.Row
+
 cur = conn.cursor()
 
 
-stops = cur.execute("""
-SELECT
-    stop_id
-FROM stop_reviews
-GROUP BY stop_id
-HAVING COUNT(
-    DISTINCT COALESCE(
-        reviewer_id,
-        CAST(user_id AS TEXT),
-        anonymous_email
-    )
-) >= 3
-""").fetchall()
+# clear old consensus
+cur.execute(
+    "DELETE FROM stop_consensus"
+)
 
 
-updated = 0
+stops = cur.execute(
+    """
+    SELECT DISTINCT physical_stop_id
+    FROM stop_observations
+    """
+).fetchall()
 
 
-for (stop_id,) in stops:
+for row in stops:
+
+    stop_id = row["physical_stop_id"]
+
 
     reviews = cur.execute(
         """
-        SELECT
-            has_shelter,
-            has_bench,
-            bench_location_feasible,
-            curb_access_clear,
-            bus_ramp_access_clear,
-            landing_zone_clear,
-            rear_clear_zone_clear
-        FROM stop_reviews
-        WHERE stop_id = ?
+        SELECT *
+        FROM stop_observations
+        WHERE physical_stop_id=?
         """,
         (stop_id,)
     ).fetchall()
 
 
-    def majority(index):
+    reviewers = {
+        r["reviewer_id"]
+        for r in reviews
+        if r["reviewer_id"] is not None
+    }
 
-        values = [
-            r[index]
-            for r in reviews
-            if r[index] is not None
-        ]
 
-        if not values:
-            return None, 0
+    count = len(reviewers)
 
-        yes_count = sum(
-            1 for x in values if x == 1
+
+    if count < MIN_REVIEWS:
+        continue
+
+
+    def agreement(field):
+
+        values = {}
+
+        for r in reviews:
+            reviewer = r["reviewer_id"]
+
+            if reviewer not in values:
+                values[reviewer] = r[field]
+
+
+        yes = sum(
+            1
+            for v in values.values()
+            if v == "yes"
         )
 
-        no_count = sum(
-            1 for x in values if x == 0
-        )
-
-        total = yes_count + no_count
-
-        if total == 0:
-            return None, 0
-
-        confidence = max(
-            yes_count,
-            no_count
-        ) / total
-
-        return (
-            1 if yes_count > no_count else 0,
-            confidence
-        )
+        return pct(yes, len(values))
 
 
-    shelter, shelter_conf = majority(0)
-    bench, bench_conf = majority(1)
-    feasible, feasible_conf = majority(2)
+    bench_pct = agreement(
+        "bench_present"
+    )
 
-    curb, curb_conf = majority(3)
-    ramp, ramp_conf = majority(4)
-    landing, landing_conf = majority(5)
-    rear, rear_conf = majority(6)
+    shelter_pct = agreement(
+        "shelter_present"
+    )
 
+    feasible_pct = agreement(
+        "bench_feasible"
+    )
 
-    confidence_values = [
-        x for x in [
-            shelter_conf,
-            bench_conf,
-            feasible_conf,
-            curb_conf,
-            ramp_conf,
-            landing_conf,
-            rear_conf,
-        ]
-        if x
-    ]
+    ada_pct = agreement(
+        "ada_clearance_possible"
+    )
 
 
-    confidence = (
-        sum(confidence_values) /
-        len(confidence_values)
-        if confidence_values
-        else 0
+    confidence = max(
+        bench_pct,
+        shelter_pct,
+        feasible_pct,
+        ada_pct
     )
 
 
@@ -117,54 +110,29 @@ for (stop_id,) in stops:
         (
             stop_id,
             reviewer_count,
-            has_shelter,
             has_bench,
+            has_shelter,
             bench_feasible,
             ada_accessible,
             confidence,
             consensus_status
         )
-        VALUES (?,?,?,?,?,?,?,?)
-        ON CONFLICT(stop_id)
-        DO UPDATE SET
-
-            reviewer_count=excluded.reviewer_count,
-            has_shelter=excluded.has_shelter,
-            has_bench=excluded.has_bench,
-            bench_feasible=excluded.bench_feasible,
-            ada_accessible=excluded.ada_accessible,
-            confidence=excluded.confidence,
-            consensus_status='verified',
-            updated_at=CURRENT_TIMESTAMP
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             stop_id,
-            len(reviews),
-            shelter,
-            bench,
-            feasible,
-            (
-                1
-                if (
-                    curb == 1
-                    and ramp == 1
-                    and landing == 1
-                    and rear == 1
-                )
-                else 0
-            ),
+            count,
+            bench_pct >= AGREEMENT_THRESHOLD,
+            shelter_pct >= AGREEMENT_THRESHOLD,
+            feasible_pct >= AGREEMENT_THRESHOLD,
+            ada_pct >= AGREEMENT_THRESHOLD,
             confidence,
-            "verified",
+            "verified"
         )
     )
 
-    updated += 1
-
 
 conn.commit()
-
-print(
-    f"Consensus records updated: {updated}"
-)
-
 conn.close()
+
+print("Consensus rebuilt")
