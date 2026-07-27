@@ -51,15 +51,13 @@ def export_priority_report():
 
             io.opportunity_score,
 
-            sii.impact_level,
+            sii.priority_level,
 
             rc.evidence_status,
 
             rc.confidence_level,
 
-            GROUP_CONCAT(
-                DISTINCT ir.recommendation_type
-            ),
+            sii.recommendations,
 
             so.notes
 
@@ -75,10 +73,6 @@ def export_priority_report():
 
             ON io.physical_stop_id = sii.physical_stop_id
 
-
-        LEFT JOIN improvement_recommendations ir
-
-            ON io.physical_stop_id = ir.physical_stop_id
 
 
         LEFT JOIN (
@@ -107,7 +101,7 @@ def export_priority_report():
             io.physical_stop_id,
             ps.primary_name,
             io.opportunity_score,
-            sii.impact_level,
+            sii.priority_level,
             so.notes
 
 
@@ -136,7 +130,7 @@ def export_priority_report():
                 "stop_id",
                 "location",
                 "opportunity_score",
-                "impact_level",
+                "priority_level",
                 "evidence_status",
                 "confidence_level",
                 "recommendations",

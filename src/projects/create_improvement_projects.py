@@ -77,9 +77,9 @@ def create_projects():
 
             recommendation_type
 
-        FROM improvement_recommendations
+        FROM project_priorities
 
-        ORDER BY physical_stop_id;
+        ORDER BY priority_rank;
 
         """
     )

@@ -30,7 +30,7 @@ def setup_table(cursor):
 
             physical_stop_id INTEGER NOT NULL,
 
-            daily_riders REAL,
+            daily_route_exposure REAL,
 
             opportunity_score REAL,
 
@@ -115,7 +115,7 @@ def generate_impact_summary():
 
         (
             stop_id,
-            daily_riders,
+            daily_route_exposure,
             opportunity_score,
             assessment_json,
             recommendations
@@ -155,9 +155,38 @@ def generate_impact_summary():
             )
 
 
+        # Generate opportunity-based recommendations
+        # when no volunteer recommendations exist yet.
+
+        if not recommendation_list:
+
+            assessment_score = (
+                assessment
+                .get("route_exposure", {})
+                .get(
+                    "combined_route_weekday_boardings",
+                    0
+                )
+            )
+
+
+            if opportunity_score >= 70:
+
+                recommendation_list.append(
+                    "priority_review"
+                )
+
+
+            if assessment_score > 0:
+
+                recommendation_list.append(
+                    "ridership_based_improvement_review"
+                )
+
+
         summary = (
-            f"Bus stop serving "
-            f"{round(daily_riders):,} daily weekday riders."
+            f"Bus stop with "
+            f"{round(daily_route_exposure):,} combined weekday boardings across serving routes."
         )
 
 
@@ -177,7 +206,7 @@ def generate_impact_summary():
             INSERT INTO stop_improvement_impact
             (
                 physical_stop_id,
-                daily_riders,
+                daily_route_exposure,
                 opportunity_score,
                 impact_level,
                 recommendations,
@@ -189,7 +218,7 @@ def generate_impact_summary():
             """,
             (
                 stop_id,
-                daily_riders,
+                daily_route_exposure,
                 opportunity_score,
                 impact_level,
                 json.dumps(recommendation_list),

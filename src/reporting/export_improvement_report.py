@@ -46,7 +46,7 @@ def export_report():
 
             io.opportunity_score,
 
-            sii.impact_level,
+            sii.priority_level,
 
             sii.recommendations
 
@@ -85,7 +85,7 @@ def export_report():
                 "location",
                 "priority_rank",
                 "opportunity_score",
-                "impact_level",
+                "priority_level",
                 "recommendations"
             ]
         )

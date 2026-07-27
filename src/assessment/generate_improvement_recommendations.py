@@ -79,7 +79,15 @@ def generate_recommendations():
 
             COALESCE(ose.osm_shelter,0),
 
-            COALESCE(ste.gtfs_bus_stop,0)
+            COALESCE(ste.gtfs_bus_stop,0),
+
+            COALESCE(sc.has_bench, NULL),
+
+            COALESCE(sc.has_shelter, NULL),
+
+            COALESCE(sc.ada_accessible, NULL),
+
+            COALESCE(sc.confidence,0)
 
 
         FROM improvement_opportunities io
@@ -91,6 +99,10 @@ def generate_recommendations():
         LEFT JOIN stop_transit_evidence ste
 
             ON ste.stop_id = io.physical_stop_id
+
+        LEFT JOIN stop_consensus sc
+
+            ON sc.stop_id = io.physical_stop_id
 
         ORDER BY io.opportunity_score DESC;
 
@@ -110,14 +122,27 @@ def generate_recommendations():
             opportunity_score,
             osm_bench,
             osm_shelter,
-            gtfs_bus_stop
+            gtfs_bus_stop,
+
+            consensus_bench,
+
+            consensus_shelter,
+
+            consensus_ada,
+
+            consensus_confidence
+
         ) = row
 
 
         recommendations = []
 
 
-        if opportunity_score >= 70 and not osm_bench:
+        if (
+            opportunity_score >= 70
+            and not osm_bench
+            and consensus_bench != 1
+        ):
 
             recommendations.append(
                 {
@@ -141,7 +166,11 @@ def generate_recommendations():
             )
 
 
-        if opportunity_score >= 80 and not osm_shelter:
+        if (
+            opportunity_score >= 80
+            and not osm_shelter
+            and consensus_shelter != 1
+        ):
 
             recommendations.append(
                 {

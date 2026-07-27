@@ -43,7 +43,7 @@ def create_project_priorities():
 
             opportunity_score REAL,
 
-            impact_level TEXT,
+            priority_level TEXT,
 
             priority_rank INTEGER,
 
@@ -68,34 +68,35 @@ def create_project_priorities():
         """
         SELECT
 
-            ir.physical_stop_id,
+            io.physical_stop_id,
 
-            ir.recommendation_type,
+            'improvement_opportunity',
 
             ps.primary_name,
 
             io.opportunity_score,
 
-            sii.impact_level,
+            COALESCE(
+                sii.priority_level,
+                'high'
+            ),
 
             io.priority_rank
 
-        FROM improvement_recommendations ir
+        FROM improvement_opportunities io
 
 
-        JOIN improvement_opportunities io
+        LEFT JOIN stop_improvement_impact sii
 
-            ON ir.physical_stop_id = io.physical_stop_id
-
-
-        JOIN stop_improvement_impact sii
-
-            ON ir.physical_stop_id = sii.physical_stop_id
+            ON io.physical_stop_id = sii.physical_stop_id
 
 
-        JOIN physical_stops ps
+        LEFT JOIN physical_stops ps
 
-            ON ir.physical_stop_id = ps.id
+            ON io.physical_stop_id = ps.id
+
+
+        WHERE io.opportunity_score >= 70
 
 
         ORDER BY
@@ -135,7 +136,7 @@ def create_project_priorities():
                 recommendation_type,
                 location_name,
                 opportunity_score,
-                impact_level,
+                priority_level,
                 priority_rank,
                 justification
             )

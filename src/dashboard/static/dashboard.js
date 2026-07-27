@@ -474,3 +474,288 @@ document.addEventListener(
 
     }
 );
+
+
+// -------------------------------
+// Review queue loader
+// -------------------------------
+
+function loadReviewQueue(){
+
+    fetch("/api/review-queue")
+    .then(r => r.json())
+    .then(data => {
+
+        const container =
+            document.getElementById("reviewQueue");
+
+        if (!container){
+            console.log(
+                "reviewQueue container missing"
+            );
+            return;
+        }
+
+
+        container.innerHTML = "";
+
+
+        data.queue.forEach(stop => {
+
+            container.innerHTML += `
+
+            <div class="review-card">
+
+                <h4>
+                ${stop.location_name || "Bus Stop"}
+                </h4>
+
+                <p>
+                Priority:
+                ${stop.priority}
+                </p>
+
+                <p>
+                Opportunity:
+                ${stop.evidence.opportunity_score}
+                </p>
+
+                <button
+                onclick="window.location='/survey-page/${stop.stop_id}'">
+                Review Stop
+                </button>
+
+            </div>
+
+            `;
+
+        });
+
+    });
+
+}
+
+
+document.addEventListener(
+"DOMContentLoaded",
+function(){
+
+    if(
+        document.getElementById(
+            "reviewQueue"
+        )
+    ){
+        loadReviewQueue();
+    }
+
+});
+
+
+
+// -----------------------------
+// Pipeline table
+// -----------------------------
+
+let pipelineData = [];
+
+
+function loadPipeline(){
+
+    fetch("/pipeline/geography")
+    .then(r => r.json())
+    .then(data => {
+
+        pipelineData = data;
+
+        renderPipeline(data);
+
+    });
+
+}
+
+
+function renderPipeline(rows){
+
+    const body =
+        document.getElementById("pipelineBody");
+
+
+    body.innerHTML = "";
+
+
+    rows.forEach(row => {
+
+        body.innerHTML += `
+
+        <tr>
+
+        <td>${row.type}</td>
+
+        <td>${row.geography}</td>
+
+        <td>${row.stops}</td>
+
+        <td>${row.queued}</td>
+
+        <td>${row.assigned}</td>
+
+        <td>${row.reviewed}</td>
+
+        <td>${row.consensus}</td>
+
+        <td>
+
+        <progress
+        value="${row.completion_pct}"
+        max="100">
+        </progress>
+
+        ${row.completion_pct}%
+
+        </td>
+
+        </tr>
+
+        `;
+
+    });
+
+}
+
+
+
+function filterPipeline(type){
+
+    if(type===""){
+
+        renderPipeline(pipelineData);
+        return;
+
+    }
+
+
+    renderPipeline(
+        pipelineData.filter(
+            x => x.type === type
+        )
+    );
+
+}
+
+
+
+function searchPipeline(){
+
+    let q =
+        document
+        .getElementById("pipelineSearch")
+        .value
+        .toLowerCase();
+
+
+    renderPipeline(
+
+        pipelineData.filter(
+            x =>
+            x.geography
+            .toLowerCase()
+            .includes(q)
+        )
+
+    );
+
+}
+
+
+// -----------------------------
+// Review Queue
+// -----------------------------
+
+function loadReviewQueue(){
+
+    fetch("/api/review-queue")
+
+    .then(r=>r.json())
+
+    .then(data=>{
+
+
+        let div =
+        document.getElementById(
+            "reviewQueue"
+        );
+
+
+        div.innerHTML = "";
+
+
+        data.queue.forEach(item=>{
+
+            div.innerHTML += `
+
+            <div class="review-card">
+
+            <b>
+            ${item.type}
+            </b>
+
+            <br>
+
+            Stop:
+            ${item.stop_id}
+
+            <br>
+
+            Score:
+            ${item.evidence.opportunity_score}
+
+            <br>
+
+            ${item.reasons.join("<br>")}
+
+            <br>
+
+            <a href="/stops/${item.stop_id}">
+            Open stop
+            </a>
+
+            </div>
+
+            `;
+
+        });
+
+
+    });
+
+}
+
+
+
+document.addEventListener(
+"DOMContentLoaded",
+()=>{
+
+    loadPipeline();
+
+    loadReviewQueue();
+
+
+    const params =
+        new URLSearchParams(
+            window.location.search
+        );
+
+
+    if(params.get("review")){
+
+        console.log(
+            "Review mode:",
+            params.get("review")
+        );
+
+    }
+
+});
+
+

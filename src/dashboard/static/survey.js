@@ -94,16 +94,6 @@ Bench present:
 
 
 <div class="question">
-Trash present:
-
-<br>
-
-<select id="trash">
-<option value="yes">Yes</option>
-<option value="no">No</option>
-<option value="unknown">Unknown</option>
-</select>
-
 </div>
 
 

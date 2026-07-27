@@ -76,6 +76,8 @@ CREATE TABLE IF NOT EXISTS stop_observations (
 
     bench_feasible TEXT,
 
+    concrete_pad_needed TEXT,
+
     ada_clearance_possible TEXT,
 
     notes TEXT,
@@ -91,6 +93,18 @@ CREATE TABLE IF NOT EXISTS stop_observations (
     streetview_checked BOOLEAN,
 
     osm_checked BOOLEAN,
+
+    review_mode TEXT,
+
+    rider_activity TEXT,
+
+    usage_times TEXT,
+
+    property_owner_outreach TEXT,
+
+    steward_email TEXT,
+
+    steward_candidate BOOLEAN DEFAULT 0,
 
     FOREIGN KEY(physical_stop_id)
         REFERENCES physical_stops(id)

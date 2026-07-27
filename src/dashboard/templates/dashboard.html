@@ -289,7 +289,13 @@ z-index:9999;
 
 <div id="reviewForm" style="display:none;">
 
+
 <h3>Community Stop Review</h3>
+
+<div id="reviewQueue">
+Loading review queue...
+</div>
+
 
 <label>Email (optional)</label>
 <input id="reviewEmail" type="email">
@@ -380,64 +386,90 @@ $geography_totals
 Top Counties
 </h3>
 
-<table class="geo-table">
-<tr>
-<th>State</th>
-<th>County</th>
-<th>Stops</th>
-</tr>
-$county_list
-</table>
 
 
-<h3>
-Top Municipalities
-</h3>
+<h2>
+Pipeline Coverage
+</h2>
 
-<table class="geo-table">
-<tr>
-<th>State</th>
-<th>Municipality</th>
-<th>Stops</th>
-</tr>
-$municipality_list
-</table>
+<div class="pipeline-controls">
 
+<button onclick="filterPipeline('')">
+All
+</button>
 
-<h3>
+<button onclick="filterPipeline('DC Ward')">
 DC Wards
-</h3>
+</button>
 
-<table class="geo-table">
+<button onclick="filterPipeline('ANC')">
+ANC
+</button>
+
+<button onclick="filterPipeline('County')">
+Counties
+</button>
+
+<button onclick="filterPipeline('Municipality')">
+Municipalities
+</button>
+
+<input
+id="pipelineSearch"
+placeholder="Search geography..."
+onkeyup="searchPipeline()"
+/>
+
+</div>
+
+
+<div class="pipeline-table-container">
+
+<table id="pipelineTable">
+
+<thead>
+
 <tr>
-<th>Ward</th>
+<th>Type</th>
+<th>Geography</th>
 <th>Stops</th>
+<th>Queued</th>
+<th>Assigned</th>
+<th>Reviewed</th>
+<th>Consensus</th>
+<th>Progress</th>
 </tr>
 
-$ward_list
+</thead>
+
+<tbody id="pipelineBody">
+
+<tr>
+<td colspan="8">
+Loading pipeline...
+</td>
+</tr>
+
+</tbody>
 
 </table>
 
-
-<h3>
-DC Advisory Neighborhood Commissions
-</h3>
-
-<table class="geo-table">
-<tr>
-<th>ANC</th>
-<th>Stops</th>
-</tr>
-
-$anc_list
-
-</table>
+</div>
 
 
+<h2>
+Community Review Queue
+</h2>
 
 
+<div id="reviewQueue">
 
-<script src="static/dashboard.js"></script>
+Loading review queue...
+
+</div>
+
+
+<script src="/static/dashboard.js"></script>
 
 
 

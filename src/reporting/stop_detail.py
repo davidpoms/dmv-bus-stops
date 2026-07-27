@@ -36,7 +36,7 @@ def get_stop_detail(stop_id):
 
             io.opportunity_score,
 
-            sii.impact_level
+            sii.priority_level
 
         FROM physical_stops ps
 

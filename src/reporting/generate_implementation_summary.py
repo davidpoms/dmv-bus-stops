@@ -74,12 +74,12 @@ def generate_summary():
     cursor.execute(
         """
         SELECT
-            impact_level,
+            priority_level,
             COUNT(*)
 
         FROM stop_improvement_impact
 
-        GROUP BY impact_level;
+        GROUP BY priority_level;
         """
     )
 
@@ -99,7 +99,7 @@ def generate_summary():
 
             sii.opportunity_score,
 
-            sii.impact_level
+            sii.priority_level
 
         FROM stop_improvement_impact sii
 
@@ -135,7 +135,7 @@ def generate_summary():
         "project_status":
             status_counts,
 
-        "impact_levels":
+        "priority_levels":
             impact_counts,
 
         "top_priority_stops":
@@ -168,7 +168,7 @@ def generate_summary():
                 "stop_id",
                 "location",
                 "opportunity_score",
-                "impact_level"
+                "priority_level"
             ]
         )
 
