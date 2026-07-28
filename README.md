@@ -1,164 +1,150 @@
-# DMV Bus Stops
+# DMV Bus Stop Intelligence
 
-## Community-powered bus stop experience analysis for the Washington DC region
+## Community-powered analysis of bus stop experiences across the Washington DC region
 
-DMV Bus Stops is a civic data project analyzing Metrobus stops across Washington DC, Maryland, and Virginia.
+DMV Bus Stop Intelligence is a civic data project focused on understanding whether bus stops provide riders with the safe, comfortable, and accessible waiting environments they deserve.
 
-The project originally focused on identifying bus stops without benches. During development, this framing was found to be incomplete.
-
-WMATA shelters generally include standardized built-in curved seating. The question is not whether a bench exists, but whether the existing waiting environment adequately supports the riders who use the stop.
-
-The project has therefore evolved into:
-
-> Identifying high-demand bus stops where existing waiting conditions may not adequately support riders.
+The project analyzes Metrobus stops across Washington DC, Maryland, and Virginia by combining transit data, public datasets, imagery review, and community observations.
 
 ---
 
-# Project Goals
+# Why this project exists
 
-The project seeks to combine:
+Public transportation does not begin when a bus arrives.
 
-- transit infrastructure data
+For many riders, the bus stop itself is part of the transit experience:
+
+- Is there somewhere safe to wait?
+- Is there protection from weather?
+- Is there a place to sit during a long wait?
+- Can older adults, disabled riders, and people carrying groceries or children comfortably use the stop?
+- Does the physical environment match the number of people relying on the service?
+
+DMV Bus Stop Intelligence exists to help communities identify places where the waiting environment may not meet rider needs.
+
+---
+
+# Primary project focus
+
+The initial volunteer effort focuses on identifying high-priority opportunities for improved seating at bus stops.
+
+This includes understanding:
+
+- where riders are likely waiting frequently
+- where seating may be insufficient
+- where a bench installation may be feasible
+- where accessibility considerations require attention
+
+The project does not assume that every stop without a standalone bench needs one.
+
+For example:
+
+- a shelter may already provide seating
+- a bench may not fit without a concrete pad or other site improvement
+- accessibility space may require thoughtful placement
+- some locations may need further review before recommending improvements
+
+---
+
+# Data philosophy
+
+The project separates:
+
+## Evidence
+
+What we know:
+
+- transit service
 - ridership context
+- existing infrastructure
+- imagery observations
+- volunteer reviews
+- public datasets
+
+## Interpretation
+
+What we think the evidence may mean:
+
+- possible seating need
+- accessibility concern
+- opportunity for further review
+- advocacy opportunity
+
+Recommendations should always remain connected to the underlying evidence.
+
+---
+
+# Current system
+
+DMV Bus Stop Intelligence combines:
+
+- transit and stop data
+- ridership information
+- geographic analysis
 - open data sources
 - imagery review
 - volunteer observations
-- community input
+- community feedback
 
-to identify locations where additional investigation or improvement may be warranted.
-
-The system is designed to complement, not duplicate, WMATA capital improvement programs.
+The system is designed to help communities surface important questions and priorities. It is not intended to replace agency planning processes.
 
 ---
 
-# Current Prototype
+# Volunteer review
 
-The current application includes:
+Volunteers help answer questions that public datasets cannot answer alone.
 
-## Backend
+Examples:
 
-- Flask API
+- What seating exists today?
+- How comfortable does the waiting environment appear?
+- Could a bench fit safely?
+- Would additional site improvements likely be needed?
+- Are there accessibility concerns?
+
+Volunteer observations help create a clearer picture of rider experience.
+
+---
+
+# Project principles
+
+## Riders deserve quality transit environments
+
+A bus stop is not just a sign on a sidewalk.
+
+It is a place where people:
+
+- wait
+- rest
+- transfer
+- begin and end trips
+- depend on public transportation
+
+The goal of this project is to help communities advocate for bus stops that reflect the importance of the riders who use them.
+
+---
+
+# Development
+
+Current components:
+
+- Flask application
 - SQLite database
-- stop-level analysis
-- evidence storage
-- volunteer review workflow
+- dashboard
+- volunteer review tools
+- recommendation pipeline
+- geographic analysis tools
 
-## Frontend
-
-- interactive map dashboard
-- stop prioritization visualization
-- reviewer tools
-- community action concepts
-
-## Data Sources
-
-Current and planned sources include:
-
-- WMATA stop data
-- GTFS transit data
-- ridership information
-- OpenStreetMap evidence
-- Google Street View imagery
-- volunteer observations
+The project is actively evolving through community feedback.
 
 ---
 
-# Core Conceptual Model
+# Documentation
 
-The project evaluates stops across three dimensions.
+Additional documentation:
 
-## 1. Infrastructure
+- `docs/DMV_Bus_Stop_Intelligence_Handbook.md`
+- `docs/Volunteer_Review_Handbook.md`
+- `docs/DATABASE_SCHEMA.md`
+- `docs/ROADMAP.md`
 
-What physically exists?
-
-Examples:
-
-- shelter presence
-- shelter type
-- seating availability
-- seating capacity
-- lighting
-- ADA features
-- sidewalk conditions
-
----
-
-## 2. Passenger Experience
-
-What is the rider actually experiencing?
-
-Examples:
-
-- ability to sit while waiting
-- comfort
-- weather protection
-- accessibility
-- crowding
-- suitability for long waits
-
----
-
-## 3. Improvement Opportunity
-
-Where should attention be directed?
-
-Examples:
-
-- high ridership with limited amenities
-- accessibility concerns
-- unclear conditions requiring review
-- technically compliant but inadequate passenger experience
-
----
-
-# Design Principles
-
-## Avoid false conclusions
-
-The project should not claim:
-
-"this stop has no bench"
-
-when the actual condition is:
-
-"this stop has a shelter with limited seating capacity relative to demand."
-
----
-
-## Separate evidence from interpretation
-
-Raw observations should be stored separately from recommendations.
-
-Example:
-
-Evidence:
-
-- shelter exists
-- built-in seating exists
-- 600 daily riders
-
-Interpretation:
-
-- possible seating capacity mismatch
-- recommended review
-
----
-
-# Current Questions
-
-The project is actively evaluating:
-
-- How should rider experience be measured?
-- How can volunteers provide useful evidence?
-- How should WMATA improvement projects affect recommendations?
-- What findings would be actionable for transit agencies?
-
----
-
-# Development Philosophy
-
-The goal is not to create another infrastructure inventory.
-
-The goal is to create an evidence-based system that helps answer:
-
-> Where are the busiest stops where the waiting environment may not match rider needs?
