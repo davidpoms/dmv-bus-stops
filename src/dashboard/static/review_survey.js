@@ -25,7 +25,7 @@ document.addEventListener(
             }
 
 
-            return "remote";
+            return "";
         }
 
 
@@ -35,9 +35,25 @@ document.addEventListener(
             const mode = getReviewMode();
 
 
+            const survey =
+                document.getElementById(
+                    "surveyContent"
+                );
+
+
+            if(survey){
+
+                survey.style.display =
+                    mode
+                    ? "block"
+                    : "none";
+
+            }
+
+
             document
             .querySelectorAll(
-                ".survey-section"
+                ".survey-group"
             )
             .forEach(section => {
 
@@ -94,6 +110,159 @@ document.addEventListener(
         });
 
 
+        
+function evaluateCondition(condition){
+
+    let operator = null;
+    let field = null;
+    let expected = null;
+
+
+    if(condition.includes(" contains ")){
+
+        [field, expected] =
+            condition.split(" contains ");
+
+        operator = "contains";
+
+    }
+
+    else if(condition.includes("!=")){
+
+        [field, expected] =
+            condition.split("!=");
+
+        operator = "!=";
+
+    }
+
+    else if(condition.includes("=")){
+
+        [field, expected] =
+            condition.split("=");
+
+        operator = "=";
+
+    }
+
+
+    if(!field){
+        return true;
+    }
+
+
+    const values = [];
+
+
+    document
+    .querySelectorAll(
+        `[name="${field}[]"]:checked`
+    )
+    .forEach(input => {
+
+        values.push(input.value);
+
+    });
+
+
+    const single =
+        document.querySelector(
+            `[name="${field}"]:checked`
+        );
+
+
+    if(single){
+        values.push(single.value);
+    }
+
+
+    const select =
+        document.querySelector(
+            `[name="${field}"]`
+        );
+
+
+    if(select){
+        values.push(select.value);
+    }
+
+
+
+    if(operator === "contains"){
+
+        return values.includes(expected);
+
+    }
+
+
+    if(operator === "!="){
+
+        return !values.includes(expected);
+
+    }
+
+
+    if(operator === "="){
+
+        return values.includes(expected);
+
+    }
+
+
+    return true;
+
+}
+
+
+function updateQuestionVisibility(){
+
+            document
+            .querySelectorAll(
+                ".survey-question"
+            )
+            .forEach(question => {
+
+                const condition =
+                    question.dataset.condition;
+
+
+                if(!condition){
+
+                    return;
+
+                }
+
+
+                question.style.display =
+                    evaluateCondition(condition)
+                    ? "block"
+                    : "none";
+
+            });
+
+        }
+
+
+
+        document
+        .querySelectorAll(
+            "input, select"
+        )
+        .forEach(control => {
+
+            control.addEventListener(
+                "change",
+                updateQuestionVisibility
+            );
+
+        });
+
+
+
+        updateQuestionVisibility();
+
+
+
         updateSections();
 
     }
@@ -125,10 +294,7 @@ async function loadReviewStopInfo(){
             await response.json();
 
 
-        const container =
-            document.getElementById(
-                "stopInfo"
-            );
+        const container = null;
 
 
         if(!container){
@@ -160,19 +326,7 @@ async function loadReviewStopInfo(){
         }
 
 
-        container.innerHTML =
-            `
-            <strong>${info.name || "Bus Stop"}</strong>
-            <br>
-            Stop ID: ${info.stop_id}
-            <br>
-            Coordinates:
-            ${info.lat.toFixed(5)},
-            ${info.lon.toFixed(5)}
-            <br>
-            Jurisdiction:
-            ${geography}
-            `;
+        // stopInfo rendering moved to review_info_loader.js
 
 
     } catch(err){

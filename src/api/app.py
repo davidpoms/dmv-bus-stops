@@ -4,9 +4,17 @@ import json
 DMV Bus Stops Improvement API
 """
 
-from flask import Flask, jsonify, send_from_directory, request, render_template
+from flask import Flask, jsonify, send_from_directory, request, render_template, redirect
 import sqlite3
 from pathlib import Path
+
+
+from src.review.assignment_router import (
+    get_or_create_reviewer,
+    assign_stop,
+)
+
+from src.spatial.nearest_road import RoadSpatialIndex
 
 from src.assessment.interpretation import (
     summarize_stop_evidence,
@@ -30,6 +38,57 @@ DATABASE_PATH = (
     / "database"
     / "dmv_bus_stops.db"
 )
+
+
+
+
+def get_wmata_history(stop_id):
+
+    conn = sqlite3.connect(DATABASE_PATH)
+    conn.row_factory = sqlite3.Row
+
+    rows = conn.execute(
+        '''
+        SELECT
+            statuses,
+            explanation,
+            high_confidence_count,
+            medium_confidence_count
+        FROM stop_wmata_history_summary
+        WHERE physical_stop_id = ?
+        ''',
+        (stop_id,)
+    ).fetchall()
+
+    conn.close()
+
+    return [dict(row) for row in rows]
+
+
+def get_wmata_evidence(stop_id):
+
+    conn = sqlite3.connect(DATABASE_PATH)
+    conn.row_factory = sqlite3.Row
+
+    row = conn.execute(
+        '''
+        SELECT
+            wmata_status,
+            wmata_bench,
+            wmata_shelter,
+            wmata_accessible,
+            match_confidence,
+            match_distance_m
+        FROM stop_wmata_evidence
+        WHERE physical_stop_id = ?
+        ''',
+        (stop_id,)
+    ).fetchone()
+
+    conn.close()
+
+    return dict(row) if row else None
+
 
 
 def query_db(sql, params=()):
@@ -104,10 +163,65 @@ def get_stop_evidence_summary(stop_id):
     }
 
 
+road_index = None
+
+
+def get_road_index():
+
+    global road_index
+
+    if road_index is not None:
+        return road_index
+
+
+    rows = query_db(
+        """
+        SELECT geometry, road_class
+        FROM road_centerlines
+        """
+    )
+
+
+    roads = []
+
+    for row in rows:
+
+        geometry = json.loads(row[0])
+
+        roads.append(
+            {
+                "geometry": geometry["coordinates"],
+                "road_class": row[1]
+            }
+        )
+
+
+    road_index = RoadSpatialIndex(
+        roads
+    )
+
+    return road_index
+
+
+
 @app.route("/observations/create", methods=["POST"])
 def create_observation():
 
     data = request.json
+
+
+    if isinstance(data.get("seating_type"), list):
+        data["seating_type"] = ",".join(
+            data["seating_type"]
+        )
+
+
+
+
+    if isinstance(data.get("seating_type"), list):
+        data["seating_type"] = ",".join(
+            data["seating_type"]
+        )
 
     conn = sqlite3.connect(DATABASE_PATH)
 
@@ -156,6 +270,27 @@ VALUES
 
     conn.commit()
     conn.close()
+
+    streetview = get_road_index().nearest_road(
+        row[3],
+        row[2]
+    )
+
+
+    heading = 0
+
+    if streetview and streetview["heading"] is not None:
+        heading = streetview["heading"]
+
+
+    streetview_url = (
+        "https://www.google.com/maps/@?api=1"
+        "&map_action=pano"
+        f"&viewpoint={road['road_lat']},{road['road_lon']}"
+        f"&heading={heading}"
+        "&pitch=0"
+        "&fov=90"
+    )
 
     return jsonify(
         {
@@ -622,6 +757,11 @@ def stop_detail(stop_id):
     )
 
 
+    wmata_history = get_wmata_history(stop_id)
+
+    wmata_evidence = get_wmata_evidence(stop_id)
+
+
     return jsonify(
         {
             "stop":
@@ -652,7 +792,11 @@ def stop_detail(stop_id):
 
             "bench_status": bench_status,
 
-            "review_priority": review_priority
+            "review_priority": review_priority,
+
+            "wmata_history": wmata_history,
+
+            "wmata_evidence": wmata_evidence
         }
     )
 
@@ -661,13 +805,62 @@ def stop_detail(stop_id):
 
 
 
+
+
+@app.route("/stops/<int:stop_id>/amenities")
+def stop_amenities(stop_id):
+
+    wmata = query_db(
+        """
+        SELECT
+            wmata_shelter,
+            wmata_bench,
+            wmata_accessible,
+            match_confidence
+        FROM stop_wmata_evidence
+        WHERE physical_stop_id = ?
+        """,
+        (stop_id,)
+    )
+
+    osm = query_db(
+        """
+        SELECT
+            osm_shelter,
+            osm_bench
+        FROM stop_osm_evidence
+        WHERE stop_id = ?
+        """,
+        (stop_id,)
+    )
+
+    return jsonify(
+        {
+            "wmata": (
+                {
+                    "shelter": wmata[0][0],
+                    "bench": wmata[0][1],
+                    "accessible": wmata[0][2],
+                    "confidence": wmata[0][3],
+                }
+                if wmata else None
+            ),
+            "osm": (
+                {
+                    "shelter": osm[0][0],
+                    "bench": osm[0][1],
+                }
+                if osm else None
+            )
+        }
+    )
+
+
 @app.route("/survey-page/<int:stop_id>")
 def survey_page(stop_id):
 
-    from flask import render_template
-
-    return render_template(
-        "survey.html"
+    return redirect(
+        f"/review/{stop_id}"
     )
 
 @app.route("/survey/<int:stop_id>")
@@ -693,14 +886,117 @@ def survey(stop_id):
 
     row = stop[0]
 
+
+    wmata_evidence = query_db(
+        '''
+        SELECT
+            wmata_status,
+            wmata_bench,
+            wmata_shelter,
+            wmata_accessible,
+            match_confidence,
+            match_distance_m
+        FROM stop_wmata_evidence
+        WHERE physical_stop_id = ?
+        ''',
+        (stop_id,)
+    )
+
+
+    ridership = query_db(
+        '''
+        SELECT
+            SUM(rs.weekday_boardings) AS total_boardings,
+            COUNT(DISTINCT r.route_id) AS route_count,
+            GROUP_CONCAT(DISTINCT r.route_id) AS routes
+
+        FROM stop_routes sr
+
+        JOIN routes r
+            ON sr.route_id = r.route_id
+
+        JOIN ridership_snapshots rs
+            ON r.route_id = rs.route_id
+
+        WHERE sr.stop_id = ?
+
+        AND rs.period = (
+            SELECT MAX(period)
+            FROM ridership_snapshots
+        )
+
+        GROUP BY sr.stop_id
+        ''',
+        (stop_id,)
+    )
+
+
+    ridership_exposure = (
+        {
+            "weekday_boardings":
+                round(ridership[0][0])
+                if ridership[0][0]
+                else 0,
+
+            "route_count":
+                ridership[0][1]
+                or 0,
+
+            "routes":
+                ridership[0][2].split(",")
+                if ridership[0][2]
+                else []
+        }
+        if ridership
+        else None
+    )
+
+
+    road = get_road_index().nearest_road(
+        row[3],
+        row[2]
+    )
+
+
+    heading = 0
+
+    if road and road["heading"] is not None:
+        heading = road["heading"]
+
+
+    streetview_url = (
+        "https://www.google.com/maps/@?api=1"
+        "&map_action=pano"
+        f"&viewpoint={road['road_lat']},{road['road_lon']}"
+        f"&heading={heading}"
+        "&pitch=0"
+        "&fov=90"
+    )
+
     return jsonify(
         {
             "stop_id": row[0],
             "location": row[1],
             "lat": row[2],
             "lon": row[3],
-            "streetview_url":
-                f"https://www.google.com/maps/@?api=1&map_action=pano&viewpoint={row[2]},{row[3]}"
+            "heading": heading,
+            "streetview_url": streetview_url,
+
+            "wmata_evidence": (
+                {
+                    "status": wmata_evidence[0][0],
+                    "bench": wmata_evidence[0][1],
+                    "shelter": wmata_evidence[0][2],
+                    "accessible": wmata_evidence[0][3],
+                    "confidence": wmata_evidence[0][4],
+                    "distance_meters": wmata_evidence[0][5]
+                }
+                if wmata_evidence
+                else None
+            ),
+
+            "ridership_exposure":
+                ridership_exposure
         }
     )
 
@@ -710,6 +1006,63 @@ def survey(stop_id):
 
 
 
+
+
+
+@app.route("/review/start")
+def review_start():
+
+    scenario = request.args.get(
+        "mode",
+        request.args.get(
+            "scenario",
+            "opportunity"
+        )
+    )
+
+    reviewer_id, reviewer_key = (
+        get_or_create_reviewer()
+    )
+
+
+    stop_id_requested = request.args.get(
+        "stop_id"
+    )
+
+    latitude = request.args.get("lat")
+    longitude = request.args.get("lon")
+
+
+    if stop_id_requested:
+
+        result = assign_stop(
+            reviewer_id,
+            scenario,
+            stop_id=int(stop_id_requested)
+        )
+
+    else:
+
+        result = assign_stop(
+            reviewer_id,
+            scenario,
+            latitude=latitude,
+            longitude=longitude
+        )
+
+
+    if not result:
+        return {
+            "error": "No available review stops"
+        }, 404
+
+
+    assignment_id, stop_id = result
+
+
+    return redirect(
+        f"/review/{stop_id}?assignment={assignment_id}"
+    )
 
 
 @app.route("/review/<int:stop_id>")
@@ -736,16 +1089,9 @@ def review_page(stop_id):
 
     stop_row = list(stop[0])
 
-    # Fallback jurisdiction from coordinates
-    if not stop_row[4]:
-        lon = stop_row[3]
-
-        if lon < -77.05:
-            stop_row[4] = "Virginia"
-        elif lon > -76.95:
-            stop_row[4] = "Maryland"
-        else:
-            stop_row[4] = "District of Columbia"
+    # Normalize displayed jurisdiction from state field
+    if stop_row[4] == "MD/VA":
+        stop_row[4] = "Maryland / Virginia"
 
     return render_template(
         "review.html",
@@ -762,17 +1108,31 @@ def review_stop_info(stop_id):
     stop = query_db(
         """
         SELECT
-            id,
-            primary_name,
-            latitude,
-            longitude,
-            state,
-            dc_ward,
-            dc_anc,
-            county,
-            municipality
-        FROM physical_stops
-        WHERE id=?
+            p.id,
+            p.primary_name,
+            p.latitude,
+            p.longitude,
+            p.jurisdiction,
+            p.dc_ward,
+            p.dc_anc,
+            p.county,
+            p.municipality,
+
+            w.wmata_stop_id,
+            w.wmata_status,
+            w.wmata_heading,
+            w.wmata_bench,
+            w.wmata_shelter,
+            w.wmata_accessible,
+            w.match_distance_m,
+            w.match_confidence
+
+        FROM physical_stops p
+
+        LEFT JOIN stop_wmata_evidence w
+        ON p.id = w.physical_stop_id
+
+        WHERE p.id=?
         """,
         (stop_id,)
     )
@@ -782,6 +1142,26 @@ def review_stop_info(stop_id):
 
     row = stop[0]
 
+
+    streetview = get_road_index().nearest_road(
+        row[2],
+        row[3]
+    )
+
+    heading = None
+
+    if streetview and streetview["heading"] is not None:
+        heading = streetview["heading"]
+
+
+    streetview_url = (
+        "https://www.google.com/maps/@?"
+        f"api=1&map_action=pano"
+        f"&viewpoint={row[2]},{row[3]}"
+        f"&heading={heading or 0}"
+    )
+
+
     return jsonify(
         {
             "stop_id": row[0],
@@ -789,39 +1169,95 @@ def review_stop_info(stop_id):
             "lat": row[2],
             "lon": row[3],
             "state": row[4],
+            "jurisdiction": row[4],
             "ward": row[5],
             "anc": row[6],
             "county": row[7],
             "municipality": row[8],
-            "streetview_url":
-                f"https://www.google.com/maps/@?api=1&map_action=pano&viewpoint={row[2]},{row[3]}"
+
+            "streetview_url": streetview_url,
+
+            "wmata": {
+                "availability":
+                    "confirmed"
+                    if row[9]
+                    else "unavailable",
+
+                "stop_id": row[9],
+                "status": row[10],
+                "bench": row[12],
+                "shelter": row[13],
+                "accessible": row[14],
+                "match_distance_m": row[15],
+                "match_confidence": row[16]
+            },
+
+            "wmata_evidence": {
+                "wmata_stop_id": row[9],
+                "wmata_status": row[10],
+                "wmata_heading": row[11],
+                "wmata_bench": row[12],
+                "wmata_shelter": row[13],
+                "wmata_accessible": row[14],
+                "match_distance_m": row[15],
+                "match_confidence": row[16]
+            }
         }
     )
+
 
 
 
 @app.route("/review/<int:stop_id>/assignment")
 def review_assignment(stop_id):
 
-    assignment = query_db(
-        """
-        SELECT
-            id,
-            reviewer_id,
-            stop_id
-
-        FROM stop_review_assignments
-
-        WHERE stop_id=?
-
-        ORDER BY id
-
-        LIMIT 1
-        """,
-        (
-            stop_id,
-        )
+    assignment_id = request.args.get(
+        "assignment_id"
     )
+
+
+    if assignment_id:
+
+        assignment = query_db(
+            """
+            SELECT
+                id,
+                reviewer_id,
+                stop_id
+
+            FROM stop_review_assignments
+
+            WHERE id=?
+            """,
+            (
+                assignment_id,
+            )
+        )
+
+    else:
+
+        assignment = query_db(
+            """
+            SELECT
+                id,
+                reviewer_id,
+                stop_id
+
+            FROM stop_review_assignments
+
+            WHERE stop_id=?
+
+            AND status='assigned'
+
+            ORDER BY id
+
+            LIMIT 1
+            """,
+            (
+                stop_id,
+            )
+        )
+
 
     if not assignment:
 
@@ -853,6 +1289,13 @@ def submit_review():
     data = request.json
 
 
+    if isinstance(data.get("seating_type"), list):
+        data["seating_type"] = ",".join(
+            data["seating_type"]
+        )
+
+
+
     data["shelter_type"] = (
         data.get("shelter_type")
         or data.get("shelter_protection")
@@ -876,6 +1319,12 @@ def submit_review():
         or data.get("waiting_environment_rating")
         or ""
     )
+
+    if isinstance(data.get("usage_times"), list):
+        data["usage_times"] = ",".join(
+            data["usage_times"]
+        )
+
 
     data["property_owner_outreach"] = data.get(
         "steward_interest",
@@ -1205,6 +1654,42 @@ def geography_municipalities():
     )
 
 
+@app.route("/geography/dc-ancs")
+def geography_dc_ancs():
+
+    dc_ward = request.args.get("dc_ward")
+    dc_anc = request.args.get("dc_anc")
+
+
+    rows = query_db(
+        """
+        SELECT DISTINCT dc_anc
+        FROM stop_jurisdiction
+        WHERE dc_anc IS NOT NULL
+
+        AND (
+            ? IS NULL
+            OR dc_ward = ?
+        )
+
+        ORDER BY dc_anc
+        """,
+        (
+            dc_ward,
+            dc_ward
+        )
+    )
+
+
+    return jsonify(
+        [
+            row[0]
+            for row in rows
+        ]
+    )
+
+
+
 @app.route("/geography/dc-wards")
 def geography_dc_wards():
 
@@ -1233,6 +1718,7 @@ def map_stops():
     county = request.args.get("county")
     municipality = request.args.get("municipality")
     dc_ward = request.args.get("dc_ward")
+    dc_anc = request.args.get("dc_anc")
 
     review_mode = request.args.get("review")
     action_filter = request.args.get("action")
@@ -1325,6 +1811,11 @@ def map_stops():
 
             AND (
                 ? IS NULL
+                OR sj.dc_anc = ?
+            )
+
+            AND (
+                ? IS NULL
 
                 OR (
                     ? = 'opportunity'
@@ -1362,6 +1853,8 @@ def map_stops():
                 municipality,
                 dc_ward,
                 dc_ward,
+                dc_anc,
+                dc_anc,
                 review_mode,
                 review_mode,
                 review_mode,
@@ -1446,6 +1939,11 @@ def map_stops():
 
             AND (
                 ? IS NULL
+                OR sj.dc_anc = ?
+            )
+
+            AND (
+                ? IS NULL
 
                 OR (
                     ? = 'opportunity'
@@ -1482,6 +1980,8 @@ def map_stops():
                 municipality,
                 dc_ward,
                 dc_ward,
+                dc_anc,
+                dc_anc,
                 review_mode,
                 review_mode,
                 review_mode,
@@ -1831,6 +2331,64 @@ def dashboard():
 
 
 
+
+@app.route("/api/evidence-summary")
+def evidence_summary():
+
+    summary = query_db(
+        """
+        SELECT
+
+        COUNT(*) AS total,
+
+        SUM(
+            CASE
+            WHEN
+                COALESCE(w.wmata_shelter,'') != ''
+                OR COALESCE(o.osm_shelter,0)=1
+            THEN 1 ELSE 0
+            END
+        ) AS likely_shelter,
+
+        SUM(
+            CASE
+            WHEN
+                COALESCE(w.wmata_bench,'') != ''
+                OR COALESCE(o.osm_bench,0)=1
+            THEN 1 ELSE 0
+            END
+        ) AS likely_bench,
+
+        SUM(
+            CASE
+            WHEN
+                COALESCE(w.wmata_shelter,'')=''
+                AND COALESCE(o.osm_shelter,0)=0
+            THEN 1 ELSE 0
+            END
+        ) AS no_shelter_evidence
+
+        FROM physical_stops p
+
+        LEFT JOIN stop_wmata_evidence w
+        ON p.id=w.physical_stop_id
+
+        LEFT JOIN stop_osm_evidence o
+        ON p.id=o.stop_id
+
+        """
+    )[0]
+
+
+    return {
+        "total": summary[0] if isinstance(summary, tuple) else summary.get("total", 0),
+        "likely_shelter": summary[1] if isinstance(summary, tuple) else summary.get("likely_shelter", 0),
+        "likely_bench": summary[2] if isinstance(summary, tuple) else summary.get("likely_bench", 0),
+        "no_shelter_evidence": summary[3] if isinstance(summary, tuple) else summary.get("no_shelter_evidence", 0)
+    }
+
+
+
 @app.route("/api/status")
 def api_status():
 
@@ -2077,11 +2635,49 @@ def pipeline_geography():
 
 
 
+
+
+@app.route("/handbook")
+def community_handbook():
+
+    from pathlib import Path
+    import markdown
+
+    path = Path("docs/DMV_Bus_Stop_Intelligence_Handbook.md")
+
+    html = markdown.markdown(
+        path.read_text(),
+        extensions=["tables"]
+    )
+
+    return html
+
+
+
+@app.route("/volunteer-handbook")
+def volunteer_handbook():
+
+    from pathlib import Path
+    import markdown
+
+    path = Path("docs/Volunteer_Review_Handbook.md")
+
+    html = markdown.markdown(
+        path.read_text(),
+        extensions=["tables"]
+    )
+
+    return html
+
+
+
+
 if __name__ == "__main__":
 
     app.run(
         host="0.0.0.0",
         port=8000,
-        debug=True
+        debug=False,
+        use_reloader=False
     )
 

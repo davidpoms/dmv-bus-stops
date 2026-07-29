@@ -33,19 +33,81 @@ document.addEventListener(
             const data =
                 await response.json();
 
+            console.log(
+                "Survey data:",
+                data
+            );
+
+
+            const streetview =
+                `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${data.lat},${data.lon}`;
+
 
             info.innerHTML = `
                 <strong>${data.location}</strong>
-                <br>
+                <br><br>
+
                 Stop ID: ${data.stop_id}
+
+                <br><br>
+
+                Existing stop information:
                 <br>
                 Coordinates:
                 ${data.lat.toFixed(5)},
                 ${data.lon.toFixed(5)}
+
+                ${
+                    data.wmata_evidence
+                    ?
+                    `
+                    <br><br>
+
+                    <strong>WMATA-reported stop amenities</strong>
+                    <br><br>
+
+                    Shelter:
+                    ${
+                        data.wmata_evidence.shelter === "1"
+                        ? "Yes"
+                        : "No"
+                    }
+
+                    <br>
+
+                    Bench:
+                    ${
+                        data.wmata_evidence.bench === "1"
+                        ? "Yes"
+                        : "No"
+                    }
+
+                    <br>
+
+                    Accessible:
+                    ${
+                        data.wmata_evidence.accessible === "Y"
+                        ? "Yes"
+                        : "No"
+                    }
+
+                    <br>
+
+                    Data match confidence:
+                    ${data.wmata_evidence.confidence}
+
+                    `
+                    :
+                    ""
+                }
+
                 <br><br>
-                <a href="${data.streetview_url}"
-                   target="_blank">
-                   Open Street View
+
+                <a
+                href="${streetview}"
+                target="_blank"
+                class="stop-review-button">
+                Open Street View
                 </a>
             `;
 

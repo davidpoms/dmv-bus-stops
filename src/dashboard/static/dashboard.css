@@ -144,3 +144,285 @@ td, th {
 
 }
 
+
+
+.dashboard-links {
+    display:flex;
+    gap:12px;
+    margin-bottom:20px;
+}
+
+
+.dashboard-button {
+    display:inline-block;
+    padding:10px 16px;
+    border-radius:8px;
+    background:#f2f2f2;
+    text-decoration:none;
+    font-weight:bold;
+}
+
+
+.dashboard-button:hover {
+    opacity:0.85;
+}
+
+
+
+
+.volunteer-card {
+    padding:20px;
+    margin-bottom:25px;
+}
+
+
+.review-options {
+    display:flex;
+    gap:20px;
+    flex-wrap:wrap;
+}
+
+
+.review-option {
+    flex:1;
+    min-width:250px;
+    padding:15px;
+    border:1px solid #ddd;
+    border-radius:10px;
+}
+
+
+.review-option a {
+    font-size:18px;
+    font-weight:bold;
+    text-decoration:none;
+}
+
+
+.review-option p {
+    margin-top:10px;
+    line-height:1.4;
+}
+
+
+
+
+/* Pipeline review table frame */
+
+.pipeline-table-container {
+
+    max-height: 420px;
+    overflow-y: auto;
+    overflow-x: auto;
+    border-radius: 12px;
+
+}
+
+
+/* Keep pipeline headers visible while scrolling */
+
+#pipelineTable thead th {
+
+    position: sticky;
+    top: 0;
+    background: white;
+    z-index: 5;
+
+}
+
+
+
+/* Map filter controls */
+
+.map-filter-card {
+
+    display: block;
+    width: calc(100% - 40px);
+
+}
+
+
+.filter-row {
+
+    display: flex;
+    gap: 15px;
+    flex-wrap: wrap;
+    align-items: end;
+
+}
+
+
+.filter-row label {
+
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+
+}
+
+
+.filter-row select,
+.filter-row button {
+
+    padding: 8px;
+    font-size: 14px;
+
+}
+
+
+
+/* Stop popup action button */
+
+.stop-review-button {
+
+    display: inline-block;
+    padding: 10px 14px;
+    background: #333;
+    color: white;
+    border-radius: 8px;
+    text-decoration: none;
+
+}
+
+
+.stop-review-button:hover {
+
+    opacity: 0.85;
+
+}
+
+
+.stop-review-button {
+
+    display:inline-block;
+    margin-top:10px;
+    padding:10px 16px;
+    background:#2c7be5;
+    color:white;
+    text-decoration:none;
+    border-radius:6px;
+    font-weight:bold;
+
+}
+
+
+.stop-review-button:hover {
+
+    background:#1a5fb4;
+
+}
+
+
+
+
+
+/* Community review survey */
+
+
+.survey-intro {
+
+    background: #f5f7f9;
+    padding: 20px;
+    border-radius: 10px;
+    margin-bottom: 25px;
+
+}
+
+
+.survey-intro h2 {
+
+    margin-top: 0;
+
+}
+
+
+.survey-intro p {
+
+    line-height: 1.5;
+
+}
+
+
+
+.survey-section {
+
+    margin-bottom: 30px;
+
+}
+
+
+
+.survey-question {
+
+    margin-bottom: 24px;
+    padding: 20px;
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 10px;
+
+}
+
+
+
+.survey-question > label {
+
+    display: block;
+    font-weight: 600;
+    font-size: 16px;
+    margin-bottom: 12px;
+
+}
+
+
+
+.survey-question select,
+.survey-question textarea,
+.survey-question input[type="text"],
+.survey-question input[type="email"] {
+
+    width: 100%;
+    box-sizing: border-box;
+    padding: 12px;
+    font-size: 16px;
+    border-radius: 6px;
+    border: 1px solid #bbb;
+
+}
+
+
+
+.survey-question textarea {
+
+    min-height: 120px;
+    resize: vertical;
+
+}
+
+
+
+.survey-question input[type="radio"] {
+
+    margin-right: 8px;
+
+}
+
+
+
+.survey-question label:has(input[type="radio"]) {
+
+    font-weight: normal;
+    margin-bottom: 10px;
+
+}
+
+
+
+
+.wmata-confirmed {
+    font-weight: bold;
+}
+
+.wmata-unavailable {
+    font-style: italic;
+}
+
