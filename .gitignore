@@ -14,3 +14,15 @@ data/raw/
 
 # Dashboard patch history
 scripts/archive/
+
+# Databases
+*.db
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Temporary backups
+*.backup*
+*.broken_backup
+
