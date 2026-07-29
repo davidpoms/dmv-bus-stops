@@ -13,7 +13,6 @@ data/raw/
 *.save
 
 # Dashboard patch history
-scripts/archive/
 
 # Databases
 *.db
@@ -26,3 +25,6 @@ __pycache__/
 *.backup*
 *.broken_backup
 
+
+# Keep archived scripts
+!scripts/

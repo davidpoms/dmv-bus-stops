@@ -4,11 +4,11 @@ import sqlite3
 DB = "src/database/dmv_bus_stops.db"
 
 
-def query(sql):
+def query(sql, params=()):
     conn = sqlite3.connect(DB)
     conn.row_factory = sqlite3.Row
 
-    rows = conn.execute(sql).fetchall()
+    rows = conn.execute(sql, params).fetchall()
 
     conn.close()
 
@@ -543,4 +543,38 @@ def bench_priority_metrics():
 
         """
     )[0]
+
+
+
+def wmata_history_for_stop(stop_id):
+
+    return query(
+        '''
+        SELECT
+            statuses,
+            explanation,
+            high_confidence_count,
+            medium_confidence_count
+        FROM stop_wmata_history_summary
+        WHERE physical_stop_id = ?
+        ''',
+        (stop_id,)
+    )
+
+
+
+def wmata_history_for_stop(stop_id):
+
+    return query(
+        """
+        SELECT
+            statuses,
+            explanation,
+            high_confidence_count,
+            medium_confidence_count
+        FROM stop_wmata_history_summary
+        WHERE physical_stop_id = ?
+        """,
+        (stop_id,)
+    )
 

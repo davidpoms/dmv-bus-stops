@@ -104,8 +104,26 @@ class RoadSpatialIndex:
 
         for road in roads:
 
+            geometry = road["geometry"]
+
+            # Normalize coordinate nesting
+            # Expected:
+            # [[lon, lat], [lon, lat], ...]
+            #
+            # Also accepts:
+            # [[[lon, lat], [lon, lat], ...]]
+
+            if (
+                geometry
+                and isinstance(geometry[0], list)
+                and isinstance(geometry[0][0], list)
+            ):
+                geometry = geometry[0]
+
+            road["geometry"] = geometry
+
             all_points.extend(
-                road["geometry"]
+                geometry
             )
 
         self.lon0 = (
@@ -251,22 +269,50 @@ class RoadSpatialIndex:
 
         distance = math.sqrt(best_dist)
 
-        dx = px - best[0]
+        edge = self.edges[idx]
 
-        dy = py - best[1]
+        ax, ay, bx, by = edge
 
-        if dx == 0 and dy == 0:
 
-            heading = None
-
-        else:
-
-            heading = (
-                math.degrees(
-                    math.atan2(dx, dy)
+        heading = (
+            math.degrees(
+                math.atan2(
+                    bx - ax,
+                    by - ay
                 )
-                % 360
             )
+            % 360
+        )
+
+        road_lon = None
+        road_lat = None
+
+        if self.lon0 is not None and self.lat0 is not None:
+
+            road_lon = (
+                self.lon0
+                +
+                math.degrees(
+                    best[0]
+                    /
+                    (
+                        EARTH_RADIUS_METERS
+                        *
+                        math.cos(math.radians(self.lat0))
+                    )
+                )
+            )
+
+            road_lat = (
+                self.lat0
+                +
+                math.degrees(
+                    best[1]
+                    /
+                    EARTH_RADIUS_METERS
+                )
+            )
+
 
         return {
 
@@ -274,6 +320,11 @@ class RoadSpatialIndex:
 
             "distance_m": distance,
 
-            "road_class": best_class
+            "road_class": best_class,
+
+            "road_lat": road_lat,
+
+            "road_lon": road_lon
 
         }
+

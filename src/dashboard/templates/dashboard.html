@@ -26,370 +26,166 @@ src="https://unpkg.com/leaflet/dist/leaflet.js">
 <body>
 
 <h1>
-DMV Bus Stop Improvement Dashboard
+DMV Bus Stop Intelligence
 </h1>
 
 
-<div class="card">
-<h2>Consensus Verification Pipeline</h2>
+<div class="dashboard-links">
 
-<p>
-Completed reviews:
-${COMPLETED_REVIEWS}
-</p>
+<a href="/handbook" class="dashboard-button">
+📘 Community Handbook
+</a>
 
-<p>
-Pending assignments:
-${PENDING_REVIEWS}
-</p>
 
-<p>
-Stops reaching consensus:
-${VERIFIED_STOPS}
-</p>
+<a href="/volunteer-handbook" class="dashboard-button">
+🤝 Volunteer Handbook
+</a>
 
 </div>
 
 
 
-<div class="card">
-<h2>Community Verification Progress</h2>
-
-<p>
-Stops reviewed:
-${REVIEWED_STOPS}
-</p>
-
-<p>
-Consensus verified:
-${CONSENSUS_STOPS}
-</p>
-
-<p>
-Verification coverage:
-${VERIFICATION_COVERAGE}
-</p>
-
-</div>
 
 
-<div class="card">
-<h2>Bench Verification</h2>
-
-<p>
-Community confirmed benches:
-${COMMUNITY_BENCHES}
-</p>
-
-<p>
-Bench opportunities:
-${BENCH_OPPORTUNITIES}
-</p>
-
-<p>
-Stops needing bench review:
-${STOPS_NEEDING_REVIEW}
-</p>
-
-</div>
-
-
-<div class="card">
-<h2>Route Validation</h2>
-
-<p>
-Total routes:
-${TOTAL_ROUTES}
-</p>
-
-<p>
-Fully validated routes:
-${FULLY_VERIFIED_ROUTES}
-</p>
-
-<p>
-Partially validated routes:
-${PARTIAL_ROUTES}
-</p>
-
-</div>
-<div class="card">
-<h2>Community Review Network</h2>
-
-<p>
-Stops identified:
-${STOP_COUNT}
-</p>
-
-<p>
-Help validate where riders need better waiting conditions.
-</p>
-
-</div>
-
-
-<div class="card">
+<div class="card volunteer-card">
 
 <h2>
 How do you want to help?
 </h2>
 
+
 <p>
-Stops move from community review to bench candidate only after neighbors validate the need.
+Community review helps identify where riders would benefit most from better waiting conditions.
+Choose a review path below.
 </p>
 
 
-<a href="/dashboard?review=opportunity"
-class="volunteerLink">
+<div class="review-options">
 
+
+<div class="review-option">
+
+<a href="/review/start?mode=opportunity">
 ⭐ Highest Opportunity Stops
-
-<p>
-Review stops where community validation could unlock the most impact.
-</p>
-
-Start reviewing →
 </a>
 
+<p>
+Review stops where available evidence suggests the greatest potential improvement.
+</p>
 
-<a href="/dashboard?review=route"
-class="volunteerLink">
+</div>
 
+
+
+<div class="review-option">
+
+<a href="/review/start?mode=route">
 🚌 My Routes
-
-<p>
-Review stops along routes you ride or steward.
-</p>
-
-Choose a route →
 </a>
 
+<p>
+Review stops along routes you ride, use, or steward.
+</p>
 
-<a href="/dashboard?review=nearby"
-class="volunteerLink">
+</div>
 
+
+
+<div class="review-option">
+
+<a href="/review/start?mode=nearby">
 📍 Near Me
+</a>
 
 <p>
-Find stops close to you needing community review.
+Find stops near your current location that need community validation.
 </p>
 
-Find nearby stops →
-</a>
+</div>
 
 
 </div>
 
+</div>
+
+
+
+
+
+
+
+<div class="card map-filter-card">
 
 <h2>
-Live Priority Map
+Filter the map
 </h2>
 
+<div class="filter-row">
 
 <label>
-Route:
-</label>
-
-<select id="routeSelect">
-<option value="">
-All Routes
-</option>
+State
+<select id="stateFilter">
+<option value="">All</option>
+<option value="DC">DC</option>
+<option value="Maryland">Maryland</option>
+<option value="Virginia">Virginia</option>
 </select>
-
-
-<label>
-State:
 </label>
-
-<select id="stateSelect">
-<option value="">
-All States
-</option>
-</select>
 
 
 <label>
-County:
-</label>
-
-<select id="countySelect">
-<option value="">
-All Counties
-</option>
+County
+<select id="countyFilter">
+<option value="">All</option>
 </select>
+</label>
 
 
 <label>
-Municipality:
-</label>
-
-<select id="municipalitySelect">
-<option value="">
-All Municipalities
-</option>
+Ward
+<select id="wardFilter">
+<option value="">All</option>
 </select>
+</label>
 
 
 <label>
-DC Ward:
+ANC
+<select id="ancFilter">
+<option value="">All</option>
+</select>
 </label>
 
-<select id="wardSelect">
-<option value="">
-All Wards
-</option>
+
+<label>
+Municipality
+<select id="municipalityFilter">
+<option value="">All</option>
 </select>
+</label>
 
 
-<div id="routeStatus">
-Showing all routes
-</div>
-
-
-<div id="validationPanel">
-
-<h3>Help Verify Transit Improvements</h3>
-
-<p>
-Join other volunteers reviewing stops before improvements are recommended.
-
-<br><br>
-
-⭐ Highest opportunities
-<br>
-
-🚌 Stops on your favorite routes
-<br>
-
-📍 Stops near you
-
-</p>
-
-
-<div id="validationList">
-Loading...
-</div>
-
-</div>
-
-
-<div id="surveyModal" style="
-display:none;
-position:fixed;
-top:10%;
-left:10%;
-width:80%;
-background:white;
-border:1px solid black;
-padding:20px;
-z-index:9999;
-">
-
-<div id="surveyContent"></div>
-
-<div id="reviewForm" style="display:none;">
-
-
-<h3>Community Stop Review</h3>
-
-<div id="reviewQueue">
-Loading review queue...
-</div>
-
-
-<label>Email (optional)</label>
-<input id="reviewEmail" type="email">
-
-
-<label>Waiting area type</label>
-<select id="waitingArea">
-<option value="sidewalk">Sidewalk</option>
-<option value="platform">Platform</option>
-<option value="grass">Grass</option>
-<option value="other">Other</option>
-</select>
-
-
-<label>Concrete pad present?</label>
-<select id="padPresent">
-<option value="true">Yes</option>
-<option value="false">No</option>
-</select>
-
-
-<label>Bench location feasible?</label>
-<select id="benchFeasible">
-<option value="true">Yes</option>
-<option value="false">No</option>
-</select>
-
-
-<label>Sun exposure</label>
-<select id="sunExposure">
-<option value="shade">Shade</option>
-<option value="partial">Partial</option>
-<option value="full_sun">Full sun</option>
-</select>
-
-
-<label>Confidence</label>
-<select id="confidence">
-<option value="0.5">Medium</option>
-<option value="0.8">High</option>
-<option value="1.0">Certain</option>
-</select>
-
-
-<label>Notes</label>
-
-<textarea id="reviewNotes"></textarea>
-
-
-<button onclick="submitCurrentReview()">
-Submit Review
+<button id="applyMapFilters">
+Apply Filters
 </button>
 
-
 </div>
-
-
 
 </div>
 
 
 <div id="map"></div>
 
-
-
-
-
-<ul>
-$status_list
-</ul>
-
-
-<h2>
-Geography Overview
-</h2>
-
-
-<h3>
-Stops by State
-</h3>
-
-<div class="geo-grid">
-$geography_totals
 </div>
 
 
-<h3>
-Top Counties
-</h3>
+
+
 
 
 
 <h2>
-Pipeline Coverage
+Review Pipeline Coverage
 </h2>
 
 <div class="pipeline-controls">
@@ -434,9 +230,11 @@ onkeyup="searchPipeline()"
 <th>Geography</th>
 <th>Stops</th>
 <th>Queued</th>
-<th>Assigned</th>
 <th>Reviewed</th>
 <th>Consensus</th>
+<th>WMATA Evidence</th>
+<th>OSM Benches</th>
+<th>OSM Shelters</th>
 <th>Progress</th>
 </tr>
 
@@ -457,17 +255,6 @@ Loading pipeline...
 </div>
 
 
-<h2>
-Community Review Queue
-</h2>
-
-
-<div id="reviewQueue">
-
-Loading review queue...
-
-</div>
-
 
 <script src="/static/dashboard.js"></script>
 
@@ -477,4 +264,5 @@ Loading review queue...
 </body>
 
 </html>
+
 

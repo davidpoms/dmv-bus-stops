@@ -44,6 +44,14 @@ def create_review_queue():
 
             review_questions JSON,
 
+            consensus_status TEXT DEFAULT 'pending',
+
+            resolution_reason TEXT,
+
+            verification_needed INTEGER DEFAULT 1,
+
+            community_review_available INTEGER DEFAULT 1,
+
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 
         );
@@ -109,10 +117,13 @@ def create_review_queue():
                 opportunity_score,
                 location_name,
                 review_status,
-                review_questions
+                review_questions,
+                consensus_status,
+                verification_needed,
+                community_review_available
             )
 
-            VALUES (?, ?, ?, ?, ?, ?);
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             (
                 physical_stop_id,
@@ -120,7 +131,10 @@ def create_review_queue():
                 score,
                 location_name,
                 "pending",
-                json.dumps(questions)
+                json.dumps(questions),
+                "pending",
+                1,
+                1
             )
         )
 

@@ -54,27 +54,34 @@ existing = conn.execute(
 print("Existing WMATA evidence:", existing)
 
 
+from scipy.spatial import cKDTree
+import numpy as np
+
+
 rows = []
 
+# Build spatial index once instead of comparing every WMATA stop
+# against every physical stop.
+physical_coords = physical[["latitude", "longitude"]].values
 
-for _, w in wmata.iterrows():
+tree = cKDTree(physical_coords)
 
-    best_id = None
-    best_distance = None
+wmata_coords = wmata[["lat", "lon"]].values
 
-    for _, p in physical.iterrows():
+distances, indexes = tree.query(
+    wmata_coords,
+    k=1
+)
 
-        d = distance_m(
-            w.lat,
-            w.lon,
-            p.latitude,
-            p.longitude
-        )
+physical_ids = physical["id"].values
 
-        if best_distance is None or d < best_distance:
-            best_distance = d
-            best_id = p.id
 
+for i, (_, w) in enumerate(wmata.iterrows()):
+
+    best_id = int(physical_ids[indexes[i]])
+
+    # Convert approximate degree distance to meters
+    best_distance = float(distances[i] * 111320)
 
     rows.append(
         (
@@ -85,7 +92,7 @@ for _, w in wmata.iterrows():
             w.wmata_bench,
             w.wmata_shelter,
             w.wmata_accessible,
-            float(best_distance),
+            best_distance,
             confidence(best_distance),
             "WMATA"
         )

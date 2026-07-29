@@ -87,7 +87,15 @@ def generate_recommendations():
 
             COALESCE(sc.ada_accessible, NULL),
 
-            COALESCE(sc.confidence,0)
+            COALESCE(sc.confidence,0),
+
+            COALESCE(sc.seating_type_consensus, NULL),
+
+            COALESCE(sc.rider_comfort_consensus, NULL),
+
+            COALESCE(sc.hostile_design_consensus, NULL),
+
+            COALESCE(sc.bench_feasible, NULL)
 
 
         FROM improvement_opportunities io
@@ -130,7 +138,15 @@ def generate_recommendations():
 
             consensus_ada,
 
-            consensus_confidence
+            consensus_confidence,
+
+            seating_type,
+
+            comfort_category,
+
+            hostile_design,
+
+            bench_feasible
 
         ) = row
 
@@ -138,60 +154,85 @@ def generate_recommendations():
         recommendations = []
 
 
-        if (
-            opportunity_score >= 70
-            and not osm_bench
-            and consensus_bench != 1
-        ):
 
-            recommendations.append(
-                {
-                    "type": "bench_review",
-                    "priority": "high",
-                    "confidence": "medium",
+        if opportunity_score >= 70:
 
-                    "evidence": {
-                        "opportunity_score": opportunity_score,
-                        "osm_bench": osm_bench,
-                        "osm_shelter": osm_shelter,
-        "gtfs_bus_stop": gtfs_bus_stop
-                    },
-
-                    "reasons": [
-                        "High route exposure opportunity score",
-                        ("No bench mapped at active transit stop" if gtfs_bus_stop == 1 else "No bench mapped at active transit stop" if gtfs_bus_stop else "No bench mapped in OSM"),
-                        "Volunteer verification needed"
-                    ]
-                }
-            )
+            evidence = {
+                "opportunity_score": opportunity_score,
+                "osm_bench": osm_bench,
+                "osm_shelter": osm_shelter,
+                "gtfs_bus_stop": gtfs_bus_stop,
+                "seating_type_consensus": seating_type,
+                "rider_comfort_consensus": comfort_category,
+                "hostile_design_consensus": hostile_design,
+                "bench_feasible": bench_feasible
+            }
 
 
-        if (
-            opportunity_score >= 80
-            and not osm_shelter
-            and consensus_shelter != 1
-        ):
+            if (
+                seating_type == "none"
+                or (
+                    consensus_bench is False
+                    and consensus_shelter is False
+                )
+                or (
+                    seating_type is None
+                    and not osm_bench
+                    and not osm_shelter
+                )
+            ):
 
-            recommendations.append(
-                {
-                    "type": "shelter_review",
-                    "priority": "high",
-                    "confidence": "medium",
+                recommendations.append(
+                    {
+                        "type": "bench_installation_candidate",
+                        "priority": "high",
+                        "confidence": "low",
+                        "evidence": evidence,
+                        "reasons": [
+                            "High rider exposure opportunity score",
+                            "No confirmed comfortable seating available",
+                            "Evaluate bench installation feasibility"
+                        ]
+                    }
+                )
 
-                    "evidence": {
-                        "opportunity_score": opportunity_score,
-                        "osm_bench": osm_bench,
-                        "osm_shelter": osm_shelter,
-        "gtfs_bus_stop": gtfs_bus_stop
-                    },
 
-                    "reasons": [
-                        "High route exposure opportunity score",
-                        ("No shelter mapped at active transit stop" if gtfs_bus_stop == 1 else "No shelter mapped at active transit stop" if gtfs_bus_stop else "No shelter mapped in OSM"),
-                        "Shelter opportunity requires review"
-                    ]
-                }
-            )
+            elif (
+                comfort_category in ("basic", "poor")
+                or hostile_design in ("separators", "sloped")
+                or seating_type == "shelter_bench"
+            ):
+
+                recommendations.append(
+                    {
+                        "type": "comfort_upgrade_candidate",
+                        "priority": "medium",
+                        "confidence": "medium",
+                        "evidence": evidence,
+                        "reasons": [
+                            "Existing seating is present but may not provide comfortable waiting conditions",
+                            "Shelter seating does not necessarily represent high-quality seating",
+                            "Evaluate opportunities for rider comfort improvements"
+                        ]
+                    }
+                )
+
+
+            elif seating_type in (None, "unknown"):
+
+                recommendations.append(
+                    {
+                        "type": "seating_review_needed",
+                        "priority": "medium",
+                        "confidence": "low",
+                        "evidence": evidence,
+                        "reasons": [
+                            "High rider exposure stop",
+                            "Seating conditions require additional verification"
+                        ]
+                    }
+                )
+
 
 
         for recommendation in recommendations:

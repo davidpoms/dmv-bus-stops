@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from string import Template
 
+from src.dashboard.render_docs import render_markdown_file
+
 from src.dashboard.data import (
     counties,
     municipalities,
@@ -48,11 +50,6 @@ def generate_dashboard():
     with open(INPUT_FILE) as f:
         data = json.load(f)
 
-
-    status_list = "\n".join(
-        f"<li>{status}: {count}</li>"
-        for status, count in data["project_status"].items()
-    )
 
 
     geography_totals = "\n".join(
@@ -115,6 +112,15 @@ def generate_dashboard():
     )
 
 
+    methodology_html = render_markdown_file(
+        "DMV_Bus_Stop_Intelligence_Handbook.md"
+    )
+
+    volunteer_review_html = render_markdown_file(
+        "Volunteer_Review_Handbook.md"
+    )
+
+
     template = Template(
         TEMPLATE_FILE.read_text()
     )
@@ -143,12 +149,15 @@ def generate_dashboard():
         COMPLETED_REVIEWS=f"{metrics['consensus']['completed_reviews']:,}",
         PENDING_REVIEWS=f"{metrics['consensus']['pending_reviews']:,}",
         VERIFIED_STOPS=f"{metrics['consensus']['verified_stops']:,}",
-        status_list=status_list,
         geography_totals=geography_totals,
         county_list=county_list,
         municipality_list=municipality_list,
         anc_list=anc_list,
         ward_list=ward_list,
+
+        METHODOLOGY_HTML=methodology_html,
+
+        VOLUNTEER_REVIEW_HTML=volunteer_review_html,
 
     )
 

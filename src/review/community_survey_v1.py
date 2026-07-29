@@ -48,6 +48,7 @@ SURVEY = {
         {
             "field": "seating_type",
             "label": "What seating is available for riders?",
+            "multiple": True,
             "options": [
                 ("full_bench", "Full bench suitable for multiple riders"),
                 ("shelter_bench", "Small shelter bench"),

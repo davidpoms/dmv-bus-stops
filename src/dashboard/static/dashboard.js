@@ -40,10 +40,59 @@ let markers = [];
 function loadEvidence(stopId) {
 
     return fetch(
-        `/api/stops/${stopId}/evidence`
+        `/stops/${stopId}`
     )
     .then(
-        response => response.json()
+        response => {
+
+            if(!response.ok){
+
+                return {
+                    osm: {},
+                    observations: []
+                };
+
+            }
+
+            return response.json();
+
+        }
+    )
+    .then(
+        data => {
+
+            return {
+
+                osm:
+                    data.evidence?.osm || {},
+
+                observations:
+                    data.evidence?.reviews || [],
+
+                wmata_history:
+                    data.wmata_history || [],
+
+                wmata_evidence:
+                    data.wmata_evidence || null
+
+            };
+
+        }
+    )
+    .catch(
+        error => {
+
+            console.warn(
+                "Evidence unavailable:",
+                error
+            );
+
+            return {
+                osm: {},
+                observations: []
+            };
+
+        }
     );
 
 }
@@ -66,8 +115,105 @@ function loadStops(route="") {
     let url = "/map/stops";
 
 
+    const params = new URLSearchParams();
+
+
     if (route) {
-        url += "?route=" + route;
+        params.append(
+            "route",
+            route
+        );
+    }
+
+
+    const pageParams =
+        new URLSearchParams(
+            window.location.search
+        );
+
+
+    [
+        "review",
+        "state",
+        "county",
+        "municipality",
+        "dc_ward",
+        "impact",
+        "priority",
+        "action"
+    ].forEach(
+        key => {
+
+            const value =
+                pageParams.get(key);
+
+            if(value){
+
+                params.append(
+                    key,
+                    value
+                );
+
+            }
+
+        }
+    );
+
+
+
+    const geoFilters = {
+
+        state:
+            document.getElementById(
+                "stateFilter"
+            )?.value,
+
+        county:
+            document.getElementById(
+                "countyFilter"
+            )?.value,
+
+        municipality:
+            document.getElementById(
+                "municipalityFilter"
+            )?.value,
+
+        dc_ward:
+            document.getElementById(
+                "wardFilter"
+            )?.value,
+
+        dc_anc:
+            document.getElementById(
+                "ancFilter"
+            )?.value
+
+    };
+
+
+    Object.entries(geoFilters)
+    .forEach(
+        ([key,value]) => {
+
+            if(value){
+
+                params.append(
+                    key,
+                    value
+                );
+
+            }
+
+        }
+    );
+
+
+    if(params.toString()){
+
+        url =
+            "/map/stops?" +
+            params.toString();
+
     }
 
 
@@ -167,28 +313,102 @@ function loadStops(route="") {
                     "click",
                     function() {
 
-                        fetch(
-                            `/stops/${props.stop_id}`
-                        )
+                        Promise.all([
+                            fetch(`/stops/${props.stop_id}`)
+                                .then(response => response.json()),
+
+                            fetch(`/stops/${props.stop_id}/amenities`)
+                                .then(response => {
+                                    if (!response.ok) {
+                                        return {
+                                            wmata: null,
+                                            osm: null
+                                        };
+                                    }
+
+                                    return response.json();
+                                })
+                        ])
 
                         .then(
-                            response => response.json()
-                        )
+                            ([detail, amenities]) => {
 
-                        .then(
-                            detail => {
+                                detail.amenities = amenities;
 
-                                return loadEvidence(props.stop_id)
-                                .then(
-                                    evidence => {
+                                const evidence = {
+
+                                    osm:
+                                        detail.evidence?.osm || {},
+
+                                    observations:
+                                        detail.evidence?.reviews || [],
+
+                                    wmata_evidence:
+                                        detail.wmata_evidence || null
+
+                                };
+
+
+                                let reviewReason =
+                                    "This stop has been identified as a possible opportunity for improvement. Community feedback will help determine whether riders would benefit from changes like seating, shelter, or other waiting area improvements.";
+
+
+                                if (
+                                    evidence.observations &&
+                                    evidence.observations.length > 0
+                                ) {
+
+                                    reviewReason =
+                                        "Community members have already provided feedback about this stop. Additional observations help confirm improvement needs.";
+
+                                }
+
+
+                                else if (
+                                    evidence.osm &&
+                                    evidence.osm.osm_shelter === 1 &&
+                                    evidence.osm.osm_bench === 0
+                                ) {
+
+                                    reviewReason =
+                                        "This stop appears to have a shelter, but seating information needs verification. Your review will help confirm whether riders have a place to sit while waiting.";
+
+                                }
+
+
+                                else if (
+                                    detail.amenities?.wmata?.shelter === "1"
+                                ) {
+
+                                    reviewReason =
+                                        "Available records indicate this stop has a shelter, but seating information or rider experience may need verification.";
+
+                                }
+
+
+                                else if (
+                                    detail.amenities?.wmata?.shelter !== "1" &&
+                                    evidence.osm &&
+                                    evidence.osm.osm_shelter === 0 &&
+                                    evidence.osm.osm_bench === 0
+                                ) {
+
+                                    reviewReason =
+                                        "Available records do not show a shelter or bench. Your review will help determine whether riders would benefit from improved waiting conditions.";
+
+                                }
+
+
 
                                 let popup = `
-                                <b>${props.location}</b><br><br>
+                                <b>${props.location.replace("+", " at ")}</b><br><br>
 
-                                Score: ${props.score}<br>
-                                Impact: ${props.impact}<br><br>
+                                <b>Why this stop is being reviewed</b><br>
 
-                                <b>Projects</b><br>
+                                ${reviewReason}
+                                <br><br>
+
+                                <b>Current improvement projects</b><br>
                                 `;
 
 
@@ -208,7 +428,7 @@ function loadStops(route="") {
                                 else {
 
                                     popup +=
-                                    "No active projects<br>";
+                                    "No active improvement projects<br>";
 
                                 }
 
@@ -222,30 +442,78 @@ function loadStops(route="") {
                                     <button
                                         class="adoptStopButton"
                                         data-stop="${props.stop_id}">
-                                        Adopt this stop
+                                        Become a community steward
                                     </button>
                                     `;
 
                                 }
 
 
-                                if (evidence.osm) {
+                                if (
+                                    evidence.osm ||
+                                    detail.amenities?.wmata
+                                ) {
 
                                     popup += `
                                     <br>
-                                    <b>OSM Evidence</b><br>
-
-                                    Bus stop mapped:
-                                    ${evidence.osm.osm_bus_stop === 1 ? "Yes" : "No"}<br>
-
-                                    Shelter:
-                                    ${evidence.osm.osm_shelter === 1 ? "Yes" : "No"}<br>
-
-                                    Bench:
-                                    ${evidence.osm.osm_bench === 1 ? "Yes" : "No"}<br>
+                                    <b>Existing stop information</b><br>
                                     `;
 
+
+                                    if (detail.amenities?.wmata) {
+
+                                        popup += `
+                                        Shelter:
+                                        ${
+                                            detail.amenities.wmata.shelter === "1"
+                                            ? "Yes"
+                                            : "No"
+                                        }
+                                        (WMATA inventory)<br>
+
+                                        Bench:
+                                        ${
+                                            detail.amenities.wmata.bench === "1"
+                                            ? "Yes"
+                                            : "No"
+                                        }
+                                        (WMATA inventory)<br>
+
+                                        Accessible boarding:
+                                        ${
+                                            detail.amenities.wmata.accessible === "Y"
+                                            ? "Yes"
+                                            : "No"
+                                        }<br>
+                                        `;
+
+                                    }
+
+
+                                    if (evidence.osm) {
+
+                                        popup += `
+                                        Public mapping evidence:<br>
+
+                                        Shelter mapped:
+                                        ${
+                                            evidence.osm.osm_shelter === 1
+                                            ? "Yes"
+                                            : "No"
+                                        }<br>
+
+                                        Bench mapped:
+                                        ${
+                                            evidence.osm.osm_bench === 1
+                                            ? "Yes"
+                                            : "No"
+                                        }<br>
+                                        `;
+
+                                    }
+
                                 }
+
 
 
                                 if (evidence.observations.length > 0) {
@@ -263,7 +531,7 @@ function loadStops(route="") {
                                             Reviewer:
                                             ${obs.observer || "Unknown"}<br>
 
-                                            Bench:
+                                            Field observation - bench present:
                                             ${obs.bench_present}<br>
 
                                             Feasible:
@@ -337,12 +605,26 @@ function loadStops(route="") {
                                 }
 
 
+                                
+
+
+                                popup += `
+
+                                <br><br>
+
+                                <a
+                                href="/review/start?stop_id=${props.stop_id}"
+                                class="stop-review-button">
+                                Review this stop
+                                </a>
+
+                                `;
+
+
+
                                 marker.bindPopup(
                                     popup
                                 ).openPopup();
-
-                                    }
-                                );
 
                             }
                         );
@@ -400,22 +682,28 @@ fetch("/routes")
 
 
 
-document
-.getElementById("routeSelect")
-.addEventListener(
-    "change",
-    function() {
+const routeSelect = document.getElementById("routeSelect");
 
-        loadStops(
-            this.value
-        );
+if(routeSelect){
 
-    }
-);
+    routeSelect.addEventListener(
+        "change",
+        function(){
+
+            loadStops(
+                this.value
+            );
+
+        }
+    );
+
+}
 
 
 
-loadStops();
+if(document.getElementById("map")){
+    loadStops();
+}
 
 
 document.addEventListener(
@@ -476,82 +764,6 @@ document.addEventListener(
 );
 
 
-// -------------------------------
-// Review queue loader
-// -------------------------------
-
-function loadReviewQueue(){
-
-    fetch("/api/review-queue")
-    .then(r => r.json())
-    .then(data => {
-
-        const container =
-            document.getElementById("reviewQueue");
-
-        if (!container){
-            console.log(
-                "reviewQueue container missing"
-            );
-            return;
-        }
-
-
-        container.innerHTML = "";
-
-
-        data.queue.forEach(stop => {
-
-            container.innerHTML += `
-
-            <div class="review-card">
-
-                <h4>
-                ${stop.location_name || "Bus Stop"}
-                </h4>
-
-                <p>
-                Priority:
-                ${stop.priority}
-                </p>
-
-                <p>
-                Opportunity:
-                ${stop.evidence.opportunity_score}
-                </p>
-
-                <button
-                onclick="window.location='/survey-page/${stop.stop_id}'">
-                Review Stop
-                </button>
-
-            </div>
-
-            `;
-
-        });
-
-    });
-
-}
-
-
-document.addEventListener(
-"DOMContentLoaded",
-function(){
-
-    if(
-        document.getElementById(
-            "reviewQueue"
-        )
-    ){
-        loadReviewQueue();
-    }
-
-});
-
-
-
 // -----------------------------
 // Pipeline table
 // -----------------------------
@@ -560,6 +772,13 @@ let pipelineData = [];
 
 
 function loadPipeline(){
+
+    const body = document.getElementById("pipelineBody");
+
+    if (!body) {
+        console.warn("Pipeline section missing");
+        return;
+    }
 
     fetch("/pipeline/geography")
     .then(r => r.json())
@@ -574,54 +793,71 @@ function loadPipeline(){
 }
 
 
+
+
 function renderPipeline(rows){
 
     const body =
         document.getElementById("pipelineBody");
 
 
-    body.innerHTML = "";
+    if(!body){
+        console.warn("Pipeline body missing");
+        return;
+    }
 
 
-    rows.forEach(row => {
+    body.innerHTML="";
+
+
+    rows.forEach(row=>{
 
         body.innerHTML += `
 
-        <tr>
+<tr>
 
-        <td>${row.type}</td>
+<td>${row.type}</td>
 
-        <td>${row.geography}</td>
+<td>${row.geography}</td>
 
-        <td>${row.stops}</td>
+<td>${row.stops}</td>
 
-        <td>${row.queued}</td>
+<td>${row.queued}</td>
 
-        <td>${row.assigned}</td>
+<td>${row.reviewed}</td>
 
-        <td>${row.reviewed}</td>
+<td>${row.consensus}</td>
 
-        <td>${row.consensus}</td>
+<td>
+${row.wmata_evidence || 0}
+</td>
 
-        <td>
+<td>
+${row.osm?.mapped_benches || 0}
+</td>
 
-        <progress
-        value="${row.completion_pct}"
-        max="100">
-        </progress>
+<td>
+${row.osm?.mapped_shelters || 0}
+</td>
 
-        ${row.completion_pct}%
+<td>
 
-        </td>
+<progress
+value="${row.completion_pct}"
+max="100">
+</progress>
 
-        </tr>
+${row.completion_pct}%
 
-        `;
+</td>
+
+</tr>
+
+`;
 
     });
 
 }
-
 
 
 function filterPipeline(type){
@@ -667,95 +903,542 @@ function searchPipeline(){
 }
 
 
-// -----------------------------
-// Review Queue
-// -----------------------------
+function loadEvidenceSummary(){
 
-function loadReviewQueue(){
+    fetch("/api/evidence-summary")
+    .then(r => r.json())
+    .then(data => {
 
-    fetch("/api/review-queue")
+        const shelter =
+            document.getElementById(
+                "likelyShelter"
+            );
 
-    .then(r=>r.json())
+        const bench =
+            document.getElementById(
+                "likelyBench"
+            );
 
-    .then(data=>{
-
-
-        let div =
-        document.getElementById(
-            "reviewQueue"
-        );
-
-
-        div.innerHTML = "";
+        const none =
+            document.getElementById(
+                "noShelterEvidence"
+            );
 
 
-        data.queue.forEach(item=>{
+        if (shelter){
+            shelter.textContent =
+                data.likely_shelter;
+        }
 
-            div.innerHTML += `
+        if (bench){
+            bench.textContent =
+                data.likely_bench;
+        }
 
-            <div class="review-card">
-
-            <b>
-            ${item.type}
-            </b>
-
-            <br>
-
-            Stop:
-            ${item.stop_id}
-
-            <br>
-
-            Score:
-            ${item.evidence.opportunity_score}
-
-            <br>
-
-            ${item.reasons.join("<br>")}
-
-            <br>
-
-            <a href="/stops/${item.stop_id}">
-            Open stop
-            </a>
-
-            </div>
-
-            `;
-
-        });
-
+        if (none){
+            none.textContent =
+                data.no_shelter_evidence;
+        }
 
     });
 
 }
 
 
-
 document.addEventListener(
 "DOMContentLoaded",
 ()=>{
 
-    loadPipeline();
+    loadEvidenceSummary();
 
-    loadReviewQueue();
+});
 
 
-    const params =
-        new URLSearchParams(
-            window.location.search
+document.addEventListener(
+    "DOMContentLoaded",
+    function(){
+
+        loadPipeline();
+
+    }
+);
+
+
+
+
+
+const applyMapFilters =
+    document.getElementById(
+        "applyMapFilters"
+    );
+
+
+if(applyMapFilters){
+
+    applyMapFilters.addEventListener(
+        "click",
+        function(){
+
+            const state =
+                document.getElementById(
+                    "stateFilter"
+                )?.value || "";
+
+
+            const county =
+                document.getElementById(
+                    "countyFilter"
+                )?.value || "";
+
+
+            const ward =
+                document.getElementById(
+                    "wardFilter"
+                )?.value || "";
+
+
+            const params =
+                new URLSearchParams();
+
+
+            if(state){
+                params.append(
+                    "state",
+                    state
+                );
+            }
+
+
+            if(county){
+                params.append(
+                    "county",
+                    county
+                );
+            }
+
+
+            if(ward){
+                params.append(
+                    "dc_ward",
+                    ward
+                );
+            }
+
+
+            const url =
+                "/dashboard?" +
+                params.toString();
+
+
+            window.location.href = url;
+
+        }
+    );
+
+}
+
+
+
+
+
+function populateSelect(id, items){
+
+    const select =
+        document.getElementById(id);
+
+    if(!select){
+        return;
+    }
+
+
+    select.innerHTML =
+        '<option value="">All</option>';
+
+
+    items.forEach(
+        item => {
+
+            const option =
+                document.createElement("option");
+
+            option.value = item;
+            option.textContent = item;
+
+            select.appendChild(option);
+
+        }
+    );
+
+}
+
+
+
+function loadGeographyFilters(){
+
+    fetch("/geography/states")
+    .then(r => r.json())
+    .then(data => {
+
+        populateSelect(
+            "stateFilter",
+            data
         );
 
+    });
 
-    if(params.get("review")){
 
-        console.log(
-            "Review mode:",
-            params.get("review")
+    fetch("/geography/dc-wards")
+    .then(r => r.json())
+    .then(data => {
+
+        populateSelect(
+            "wardFilter",
+            data
         );
+
+    });
+
+
+    function loadAncFilters(){
+
+        const ward =
+            document.getElementById(
+                "wardFilter"
+            )?.value || "";
+
+
+        let url =
+            "/geography/dc-ancs";
+
+
+        if(ward){
+
+            url +=
+                "?dc_ward=" +
+                encodeURIComponent(ward);
+
+        }
+
+
+        fetch(url)
+        .then(r => r.json())
+        .then(data => {
+
+            populateSelect(
+                "ancFilter",
+                data
+            );
+
+        });
 
     }
 
-});
+
+    loadAncFilters();
+
+
+    document
+    .getElementById("wardFilter")
+    ?.addEventListener(
+        "change",
+        loadAncFilters
+    );
+
+
+
+    function loadRegionalGeography(){
+
+        const state =
+            document.getElementById(
+                "stateFilter"
+            )?.value || "";
+
+
+        let countyUrl =
+            "/geography/counties";
+
+
+        let municipalityUrl =
+            "/geography/municipalities";
+
+
+        if(state){
+
+            countyUrl +=
+                "?state=" +
+                encodeURIComponent(state);
+
+
+            municipalityUrl +=
+                "?state=" +
+                encodeURIComponent(state);
+
+        }
+
+
+        fetch(countyUrl)
+        .then(r => r.json())
+        .then(data => {
+
+            populateSelect(
+                "countyFilter",
+                data
+            );
+
+        });
+
+
+        fetch(municipalityUrl)
+        .then(r => r.json())
+        .then(data => {
+
+            populateSelect(
+                "municipalityFilter",
+                data
+            );
+
+        });
+
+    }
+
+
+    function loadMunicipalityFilters(){
+
+        const state =
+            document.getElementById(
+                "stateFilter"
+            )?.value || "";
+
+
+        const county =
+            document.getElementById(
+                "countyFilter"
+            )?.value || "";
+
+
+        let url =
+            "/geography/municipalities";
+
+
+        const params =
+            new URLSearchParams();
+
+
+        if(state){
+            params.append(
+                "state",
+                state
+            );
+        }
+
+
+        if(county){
+            params.append(
+                "county",
+                county
+            );
+        }
+
+
+        if(params.toString()){
+
+            url +=
+                "?" +
+                params.toString();
+
+        }
+
+
+        fetch(url)
+        .then(r => r.json())
+        .then(data => {
+
+            populateSelect(
+                "municipalityFilter",
+                data
+            );
+
+        });
+
+    }
+
+
+    document
+    .getElementById("countyFilter")
+    ?.addEventListener(
+        "change",
+        loadMunicipalityFilters
+    );
+
+
+
+    loadRegionalGeography();
+
+
+    document
+    .getElementById("stateFilter")
+    ?.addEventListener(
+        "change",
+        loadRegionalGeography
+    );
+
+
+}
+
+
+
+loadGeographyFilters();
+
+
+
+
+
+function toggleGeoFilters(){
+
+    const state =
+        document.getElementById(
+            "stateFilter"
+        )?.value || "";
+
+
+    const normalized =
+        state.toLowerCase();
+
+
+    const county =
+        document.getElementById(
+            "countyFilter"
+        )?.closest("label");
+
+
+    const municipality =
+        document.getElementById(
+            "municipalityFilter"
+        )?.closest("label");
+
+
+    const ward =
+        document.getElementById(
+            "wardFilter"
+        )?.closest("label");
+
+
+    const anc =
+        document.getElementById(
+            "ancFilter"
+        )?.closest("label");
+
+
+    if(!county || !municipality || !ward || !anc){
+        return;
+    }
+
+
+    const isDC =
+        normalized.includes("dc")
+        ||
+        normalized.includes("district");
+
+
+    const isRegional =
+        normalized.includes("maryland")
+        ||
+        normalized.includes("virginia")
+        ||
+        normalized.includes("md")
+        ||
+        normalized.includes("va");
+
+
+    if(isDC){
+
+        county.style.display = "none";
+        municipality.style.display = "none";
+
+        ward.style.display = "flex";
+        anc.style.display = "flex";
+
+    }
+
+
+    else if(isRegional){
+
+        county.style.display = "flex";
+        municipality.style.display = "flex";
+
+        ward.style.display = "none";
+        anc.style.display = "none";
+
+    }
+
+
+    else {
+
+        county.style.display = "flex";
+        municipality.style.display = "flex";
+
+        ward.style.display = "flex";
+        anc.style.display = "flex";
+
+    }
+
+}
+
+
+
+
+const stateFilter =
+    document.getElementById(
+        "stateFilter"
+    );
+
+
+if(stateFilter){
+
+    stateFilter.addEventListener(
+        "change",
+        toggleGeoFilters
+    );
+
+}
+
+
+window.addEventListener(
+    "load",
+    toggleGeoFilters
+);
+
+
+
+// geoMapFiltersConnected
+
+[
+    "stateFilter",
+    "countyFilter",
+    "municipalityFilter",
+    "wardFilter",
+    "ancFilter"
+].forEach(
+    id => {
+
+        const filter =
+            document.getElementById(id);
+
+
+        if(filter){
+
+            filter.addEventListener(
+                "change",
+                function(){
+
+                    loadStops();
+
+                }
+            );
+
+        }
+
+    }
+);
 
 

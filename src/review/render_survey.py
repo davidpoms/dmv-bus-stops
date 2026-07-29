@@ -35,6 +35,11 @@ def render_question(question):
         "select"
     )
 
+    multiple = question.get(
+        "multiple",
+        False
+    )
+
     condition = question.get(
         "condition",
         ""
@@ -65,6 +70,23 @@ def render_question(question):
                 <input
                     type="radio"
                     name="{escape(field)}"
+                    value="{escape(value)}">
+                {escape(label)}
+                </label>
+                """
+            )
+
+
+    elif multiple:
+
+        for value, label in question.get("options", []):
+
+            html.append(
+                f"""
+                <label class="checkbox-option">
+                <input
+                    type="checkbox"
+                    name="{escape(field)}[]"
                     value="{escape(value)}">
                 {escape(label)}
                 </label>
@@ -176,8 +198,42 @@ def render_survey():
     # In-person review adds additional observations.
     # Steward questions are available to all reviewers.
 
+
+    html.append(
+        """
+        <div id="surveyContent" style="display:none;">
+        """
+    )
+
+
+
+    html.append(
+        """
+        <div class="survey-group" data-review-mode="remote">
+        <h2 class="survey-section-title">
+        What can be seen from this stop
+        </h2>
+        """
+    )
+
     html.append(
         render_section("remote")
+    )
+
+    html.append(
+        """
+        </div>
+        """
+    )
+
+
+    html.append(
+        """
+        <div class="survey-group" data-review-mode="in_person">
+        <h2 class="survey-section-title">
+        Observations from visiting this stop
+        </h2>
+        """
     )
 
     html.append(
@@ -185,8 +241,47 @@ def render_survey():
     )
 
     html.append(
+        """
+        </div>
+        """
+    )
+
+
+    html.append(
+        """
+        <div class="survey-group" data-review-mode="steward">
+        <h2 class="survey-section-title">
+        Community involvement
+        </h2>
+        """
+    )
+
+    html.append(
         render_section("steward")
     )
+
+    html.append(
+        """
+        </div>
+        """
+    )
+
+
+
+
+    html.append(
+        render_question(
+            SURVEY["notes"]
+        )
+    )
+
+    html.append(
+        """
+        </div>
+        """
+    )
+
+
 
 
     return "\n".join(html)
