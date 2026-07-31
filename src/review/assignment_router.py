@@ -163,8 +163,16 @@ def assign_stop(
 
 
     if existing and scenario == "opportunity":
-        conn.close()
-        return existing[0], existing[1]
+
+        status = cur.execute(
+            "SELECT status FROM stop_review_assignments WHERE id=?",
+            (existing[0],)
+        ).fetchone()
+
+
+        if status and status[0] == "assigned":
+            conn.close()
+            return existing[0], existing[1]
 
 
     if stop_id:
@@ -186,14 +194,26 @@ def assign_stop(
             FROM review_queue rq
             LEFT JOIN stop_wmata_evidence w
                 ON rq.physical_stop_id = w.physical_stop_id
+
             WHERE rq.verification_needed=1
+
             AND (
                 w.wmata_status IS NULL
                 OR w.wmata_status != 'ABS'
             )
+
+            AND rq.physical_stop_id NOT IN
+            (
+                SELECT stop_id
+                FROM stop_review_assignments
+                WHERE reviewer_id=?
+                AND status='completed'
+            )
+
             ORDER BY rq.priority_rank
             LIMIT 1
-            """
+            """,
+            (reviewer_id,)
         ).fetchone()
 
 

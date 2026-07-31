@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+<title>Bus Stop Review</title>
+
+<link rel="stylesheet" href="/static/dashboard.css">
+
+</head>
+
+
+<body>
+
+
+<h1>
+Community Bus Stop Review
+</h1>
+
+
+<div id="stopInfo">
+Loading stop information...
+</div>
+
+
+
+<form id="reviewForm">
+
+<input type="hidden" name="reviewer_id" id="reviewer_id">
+
+<input type="hidden" name="assignment_id" id="assignment_id">
+
+
+
+
+
+
+{{ survey_html|safe }}
+<br><br>
+
+
+<button type="submit">
+Submit Review
+</button>
+
+
+</form>
+
+
+
+<script src="/static/review_info_loader.js"></script>
+<script src="/static/review_survey.js"></script>
+<!-- disabled duplicate review_stop.js -->
+
+<script>
+
+const stopId =
+window.location.pathname.split("/").pop();
+
+
+async function loadAssignment(){
+
+    const params =
+        new URLSearchParams(
+            window.location.search
+        );
+
+
+    const assignmentId =
+        params.get("assignment");
+
+
+    if (!assignmentId) {
+
+        console.error(
+            "Missing assignment id"
+        );
+
+        return;
+
+    }
+
+
+    const response =
+        await fetch(
+            `/review/${stopId}/assignment?assignment_id=${assignmentId}`
+        );
+
+    const data =
+        await response.json();
+
+
+    document
+    .getElementById("assignment_id")
+    .value =
+        data.assignment_id;
+
+
+    document
+    .getElementById("reviewer_id")
+    .value =
+        data.reviewer_id;
+
+}
+
+
+loadAssignment();
+
+
+document
+.getElementById("reviewForm")
+.addEventListener(
+"submit",
+async e => {
+
+e.preventDefault();
+
+
+let form =
+new FormData(e.target);
+
+
+let payload = {};
+
+
+for (const [key, value] of form.entries()) {
+
+    const cleanKey =
+        key.endsWith("[]")
+        ? key.slice(0, -2)
+        : key;
+
+
+    if (payload[cleanKey]) {
+
+        if (!Array.isArray(payload[cleanKey])) {
+
+            payload[cleanKey] =
+                [
+                    payload[cleanKey]
+                ];
+
+        }
+
+
+        payload[cleanKey].push(value);
+
+    }
+
+    else {
+
+        payload[cleanKey] =
+            value;
+
+    }
+
+}
+
+
+payload.stop_id =
+stopId;
+
+
+const response =
+await fetch(
+"/review/submit",
+{
+method:"POST",
+headers:{
+"Content-Type":"application/json"
+},
+body:
+JSON.stringify(payload)
+}
+);
+
+const result =
+await response.json();
+
+console.log(result);
+
+if(!response.ok){
+
+    alert(
+        JSON.stringify(result)
+    );
+
+    return;
+
+}
+
+document.body.innerHTML = `
+
+<div class="completion-card">
+
+<h1>
+Thank you for helping improve bus stops!
+</h1>
+
+<p>
+Your review has been recorded.
+</p>
+
+<p>
+You have completed
+<strong>${result.review_count}</strong>
+review(s).
+</p>
+
+<div class="completion-actions">
+
+<a href="/review/start?mode=opportunity">
+Review another stop
+</a>
+
+<a href="/dashboard">
+Return to dashboard
+</a>
+
+</div>
+
+</div>
+
+`;
+
+
+});
+
+</script>
+
+
+</body>
+
+</html>

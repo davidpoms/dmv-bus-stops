@@ -4,7 +4,7 @@ import json
 DMV Bus Stops Improvement API
 """
 
-from flask import Flask, jsonify, send_from_directory, request, render_template, redirect
+from flask import Flask, jsonify, send_from_directory, request, render_template, redirect, session
 import sqlite3
 from pathlib import Path
 
@@ -29,6 +29,8 @@ app = Flask(
     static_folder=None,
     template_folder="../dashboard/templates"
 )
+
+app.secret_key = "dmv-bus-stops-review-secret"
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 
@@ -1020,9 +1022,19 @@ def review_start():
         )
     )
 
-    reviewer_id, reviewer_key = (
-        get_or_create_reviewer()
+    reviewer_key = session.get(
+        "reviewer_key"
     )
+
+
+    reviewer_id, reviewer_key = (
+        get_or_create_reviewer(
+            reviewer_key
+        )
+    )
+
+
+    session["reviewer_key"] = reviewer_key
 
 
     stop_id_requested = request.args.get(
@@ -1423,9 +1435,23 @@ def submit_review():
     )
 
 
+    review_count = query_db(
+        """
+        SELECT COUNT(*)
+        FROM stop_review_assignments
+        WHERE reviewer_id=?
+        AND status='completed'
+        """,
+        (reviewer_id,)
+    )[0][0]
+
+
     return {
         "success": True,
-        "stop_id": stop_id
+        "stop_id": stop_id,
+        "assignment_id": assignment_id,
+        "reviewer_id": reviewer_id,
+        "review_count": review_count
     }
 
 
