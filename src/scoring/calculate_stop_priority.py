@@ -185,9 +185,17 @@ def calculate_scores():
         FROM bus_stops b
 
 
-        JOIN stop_routes sr
+JOIN gtfs_stop_map gm
 
-            ON b.gtfs_stop_id = sr.stop_id
+    ON gm.bus_stop_id = b.id
+
+
+JOIN stop_routes sr
+
+    ON sr.stop_id = gm.gtfs_stop_id
+
+
+	
 
 
         LEFT JOIN route_daily rd
@@ -223,6 +231,10 @@ def calculate_scores():
         for row in rows
 
     )
+
+
+    if max_score_base == 0:
+        max_score_base = 1
 
 
     max_routes = max(
@@ -276,7 +288,7 @@ def calculate_scores():
             *
             100
 
-        )
+        ) if max_routes else 0
 
 
         priority_score = (

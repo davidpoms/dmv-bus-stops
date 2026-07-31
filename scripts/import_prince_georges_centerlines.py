@@ -50,18 +50,16 @@ while True:
             INSERT INTO road_centerlines
             (
                 source,
-                county,
                 road_name,
                 road_class,
                 speed_limit,
                 lanes,
                 geometry
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
             (
                 "prince_georges",
-                "Prince George's",
                 row.get("fullname"),
                 row.get("rdtype") or row.get("fcc"),
                 int(float(row["speed"])) if row.get("speed") else None,

@@ -50,15 +50,20 @@ def get_wmata_history(stop_id):
     conn.row_factory = sqlite3.Row
 
     rows = conn.execute(
-        '''
+        """
         SELECT
-            statuses,
-            explanation,
-            high_confidence_count,
-            medium_confidence_count
-        FROM stop_wmata_history_summary
+            wmata_stop_id,
+            wmata_status,
+            wmata_heading,
+            wmata_bench,
+            wmata_shelter,
+            wmata_accessible,
+            match_confidence,
+            created_at
+        FROM stop_wmata_evidence
         WHERE physical_stop_id = ?
-        ''',
+        ORDER BY created_at DESC
+        """,
         (stop_id,)
     ).fetchall()
 
@@ -168,6 +173,7 @@ def get_stop_evidence_summary(stop_id):
 road_index = None
 
 
+
 def get_road_index():
 
     global road_index
@@ -176,34 +182,50 @@ def get_road_index():
         return road_index
 
 
-    rows = query_db(
-        """
-        SELECT geometry, road_class
-        FROM road_centerlines
-        """
-    )
+    try:
 
-
-    roads = []
-
-    for row in rows:
-
-        geometry = json.loads(row[0])
-
-        roads.append(
-            {
-                "geometry": geometry["coordinates"],
-                "road_class": row[1]
-            }
+        rows = query_db(
+            """
+            SELECT geometry, road_class
+            FROM road_centerlines
+            """
         )
 
 
-    road_index = RoadSpatialIndex(
-        roads
-    )
+        roads = []
+
+        for row in rows:
+
+            geometry = json.loads(row[0])
+
+            roads.append(
+                {
+                    "geometry": geometry["coordinates"],
+                    "road_class": row[1]
+                }
+            )
+
+
+        road_index = RoadSpatialIndex(
+            roads
+        )
+
+
+    except Exception as e:
+
+        print("Road centerlines index build failed:", e)
+
+
+        class EmptyRoadIndex:
+
+            def nearest_road(self, lat, lon):
+                return None
+
+
+        road_index = EmptyRoadIndex()
+
 
     return road_index
-
 
 
 @app.route("/observations/create", methods=["POST"])
@@ -373,28 +395,42 @@ def validation_queue():
             ps.primary_name,
             ps.latitude AS lat,
             ps.longitude AS lon,
-            sii.opportunity_score,
-            sii.priority_level,
-            sv.status
+            sii.priority_score,
+            
+    CASE
+        WHEN sii.priority_score >= 80 THEN 'very_high'
+        WHEN sii.priority_score >= 60 THEN 'high'
+        WHEN sii.priority_score >= 40 THEN 'medium'
+        ELSE 'low'
+    END
+    ,
+            ca.confidence
 
         FROM stop_validation sv
 
-        JOIN stop_improvement_impact sii
-            ON sv.physical_stop_id = sii.physical_stop_id
+        LEFT JOIN stop_priority_snapshots sii
+            ON ca.stop_id = sii.stop_id
 
         JOIN physical_stops ps
-            ON ps.id = sv.physical_stop_id
+            ON ps.id = ca.stop_id
 
-        WHERE sv.status = 'needs_validation'
+        WHERE ca.confidence = 'needs_validation'
 
         ORDER BY
-            CASE sii.priority_level
+            CASE 
+    CASE
+        WHEN sii.priority_score >= 80 THEN 'very_high'
+        WHEN sii.priority_score >= 60 THEN 'high'
+        WHEN sii.priority_score >= 40 THEN 'medium'
+        ELSE 'low'
+    END
+    
                 WHEN 'P1' THEN 1
                 WHEN 'P2' THEN 2
                 WHEN 'P3' THEN 3
                 ELSE 4
             END,
-            sii.opportunity_score DESC
+            sii.priority_score DESC
 
         LIMIT 75;
         '''
@@ -527,7 +563,7 @@ def community_status(stop_id):
             steward,
             installed_date,
             notes
-        FROM community_actions
+        FROM stop_observations
         WHERE physical_stop_id = ?
         """,
         (stop_id,)
@@ -674,13 +710,20 @@ def stop_detail(stop_id):
             ps.primary_name,
             ps.latitude AS lat,
             ps.longitude AS lon,
-            sii.opportunity_score,
-            sii.priority_level
+            sii.priority_score,
+            
+    CASE
+        WHEN sii.priority_score >= 80 THEN 'very_high'
+        WHEN sii.priority_score >= 60 THEN 'high'
+        WHEN sii.priority_score >= 40 THEN 'medium'
+        ELSE 'low'
+    END
+    
 
         FROM physical_stops ps
 
-        JOIN stop_improvement_impact sii
-            ON ps.id = sii.physical_stop_id
+        LEFT JOIN stop_priority_snapshots sii
+            ON ps.id = sii.stop_id
 
         WHERE ps.id = ?;
         """,
@@ -688,18 +731,7 @@ def stop_detail(stop_id):
     )
 
 
-    projects = query_db(
-        """
-        SELECT
-            recommendation_type,
-            project_status
-
-        FROM improvement_projects
-
-        WHERE physical_stop_id = ?;
-        """,
-        (stop_id,)
-    )
+    projects = []
 
 
     recommendations = query_db(
@@ -1089,7 +1121,7 @@ def review_page(stop_id):
             primary_name,
             latitude,
             longitude,
-            jurisdiction
+            state
         FROM physical_stops
         WHERE id=?
         """,
@@ -1100,10 +1132,6 @@ def review_page(stop_id):
         return "Stop not found", 404
 
     stop_row = list(stop[0])
-
-    # Normalize displayed jurisdiction from state field
-    if stop_row[4] == "MD/VA":
-        stop_row[4] = "Maryland / Virginia"
 
     return render_template(
         "review.html",
@@ -1124,7 +1152,7 @@ def review_stop_info(stop_id):
             p.primary_name,
             p.latitude,
             p.longitude,
-            p.jurisdiction,
+            p.state,
             p.dc_ward,
             p.dc_anc,
             p.county,
@@ -1464,27 +1492,25 @@ def review_queue():
     rows = conn.execute(
         """
         SELECT
-            ir.physical_stop_id,
+            rq.physical_stop_id,
             ps.latitude AS lat,
             ps.longitude AS lon,
-            ir.recommendation_type,
-            ir.priority,
-            ir.confidence,
-            ir.reasons,
-            ir.evidence
+            rq.priority_rank,
+            rq.opportunity_score,
+            rq.location_name,
+            rq.review_status,
+            rq.consensus_status
 
-        FROM improvement_recommendations ir
+        FROM review_queue rq
 
         JOIN physical_stops ps
-            ON ps.id = ir.physical_stop_id
+            ON ps.id = rq.physical_stop_id
+
+        WHERE rq.review_status = 'pending'
 
         ORDER BY
-            CASE ir.priority
-                WHEN 'high' THEN 1
-                WHEN 'medium' THEN 2
-                ELSE 3
-            END,
-            ir.physical_stop_id
+            rq.priority_rank,
+            rq.physical_stop_id
 
         """
     ).fetchall()
@@ -1499,15 +1525,11 @@ def review_queue():
                     "stop_id": row["physical_stop_id"],
                     "lat": row["lat"],
                     "lon": row["lon"],
-                    "type": row["recommendation_type"],
-                    "priority": row["priority"],
-                    "confidence": row["confidence"],
-                    "reasons": json.loads(row["reasons"])
-                        if row["reasons"]
-                        else [],
-                    "evidence": json.loads(row["evidence"])
-                        if row["evidence"]
-                        else {}
+                    "location_name": row["location_name"],
+                    "priority_rank": row["priority_rank"],
+                    "opportunity_score": row["opportunity_score"],
+                    "review_status": row["review_status"],
+                    "consensus_status": row["consensus_status"]
                 }
                 for row in rows
             ]
@@ -1587,16 +1609,30 @@ def top_priorities():
             ps.primary_name,
             ps.latitude AS lat,
             ps.longitude AS lon,
-            sii.opportunity_score,
-            sii.priority_level,
-            sii.priority_level
+            sii.priority_score,
+            
+    CASE
+        WHEN sii.priority_score >= 80 THEN 'very_high'
+        WHEN sii.priority_score >= 60 THEN 'high'
+        WHEN sii.priority_score >= 40 THEN 'medium'
+        ELSE 'low'
+    END
+    ,
+            
+    CASE
+        WHEN sii.priority_score >= 80 THEN 'very_high'
+        WHEN sii.priority_score >= 60 THEN 'high'
+        WHEN sii.priority_score >= 40 THEN 'medium'
+        ELSE 'low'
+    END
+    
 
         FROM stop_improvement_impact sii
 
         JOIN physical_stops ps
-            ON sii.physical_stop_id = ps.id
+            ON sii.stop_id = ps.id
 
-        ORDER BY sii.opportunity_score DESC
+        ORDER BY sii.priority_score DESC
 
         LIMIT 10;
         """
@@ -1760,29 +1796,41 @@ def map_stops():
                 ps.primary_name,
                 ps.latitude AS lat,
                 ps.longitude AS lon,
-                sii.opportunity_score,
-                sii.priority_level,
-                sii.priority_level,
+                sii.priority_score,
+                
+    CASE
+        WHEN sii.priority_score >= 80 THEN 'very_high'
+        WHEN sii.priority_score >= 60 THEN 'high'
+        WHEN sii.priority_score >= 40 THEN 'medium'
+        ELSE 'low'
+    END
+    ,
+                
+    CASE
+        WHEN sii.priority_score >= 80 THEN 'very_high'
+        WHEN sii.priority_score >= 60 THEN 'high'
+        WHEN sii.priority_score >= 40 THEN 'medium'
+        ELSE 'low'
+    END
+    ,
                 COALESCE(
-                    sv.status,
+                    ca.confidence,
                     'needs_validation'
                 ),
 
                 COALESCE(
-                    ca.status,
+                    'none',
                     'none'
                 )
 
             FROM physical_stops ps
 
-            JOIN stop_improvement_impact sii
-                ON ps.id = sii.physical_stop_id
+            LEFT JOIN stop_priority_snapshots sii
+                ON ps.id = sii.stop_id
 
-            LEFT JOIN stop_validation sv
-                ON ps.id = sv.physical_stop_id
-
-            LEFT JOIN community_actions ca
-                ON ps.id = ca.physical_stop_id
+            
+            LEFT JOIN stop_consensus ca
+                ON ps.id = ca.stop_id
 
             JOIN physical_stop_members psm
                 ON ps.id = psm.physical_stop_id
@@ -1791,7 +1839,7 @@ def map_stops():
                 ON psm.bus_stop_id = bs.id
 
             JOIN stop_routes sr
-                ON bs.gtfs_stop_id = sr.stop_id
+                ON bs.id = sr.stop_id
 
             LEFT JOIN stop_jurisdiction sj
                 ON ps.id = sj.stop_id
@@ -1802,17 +1850,38 @@ def map_stops():
                 ? IS NULL
                 OR (
                     ? = 'high'
-                    AND sii.priority_level IN ('high', 'very_high')
+                    AND 
+                    CASE
+                        WHEN sii.priority_score >= 80 THEN 'very_high'
+                        WHEN sii.priority_score >= 60 THEN 'high'
+                        WHEN sii.priority_score >= 40 THEN 'medium'
+                        ELSE 'low'
+                    END IN ('high', 'very_high')
+        
                 )
                 OR (
                     ? = 'very_high'
-                    AND sii.priority_level = 'very_high'
+                    AND 
+                    CASE
+                        WHEN sii.priority_score >= 80 THEN 'very_high'
+                        WHEN sii.priority_score >= 60 THEN 'high'
+                        WHEN sii.priority_score >= 40 THEN 'medium'
+                        ELSE 'low'
+                    END = 'very_high'
+        
                 )
             )
 
             AND (
                 ? IS NULL
-                OR sii.priority_level = ?
+                OR 
+                    CASE
+                        WHEN sii.priority_score >= 80 THEN 'very_high'
+                        WHEN sii.priority_score >= 60 THEN 'high'
+                        WHEN sii.priority_score >= 40 THEN 'medium'
+                        ELSE 'low'
+                    END = ?
+        
             )
 
             AND (
@@ -1846,23 +1915,23 @@ def map_stops():
                 OR (
                     ? = 'opportunity'
                     AND (
-                        sv.status IS NULL
-                        OR sv.status = 'needs_validation'
+                        ca.confidence IS NULL
+                        OR ca.confidence = 'needs_validation'
                     )
                 )
 
                 OR (
                     ? = 'candidate'
-                    AND sv.status = 'validated'
+                    AND ca.confidence = 'validated'
                 )
             )
 
             AND (
                 ? IS NULL
-                OR COALESCE(ca.status, 'none') = ?
+                OR 'none' = ?
             )
 
-            ORDER BY sii.opportunity_score DESC;
+            ORDER BY sii.priority_score DESC;
             """,
             (
                 route,
@@ -1899,29 +1968,41 @@ def map_stops():
                 ps.primary_name,
                 ps.latitude AS lat,
                 ps.longitude AS lon,
-                sii.opportunity_score,
-                sii.priority_level,
-                sii.priority_level,
+                sii.priority_score,
+                
+    CASE
+        WHEN sii.priority_score >= 80 THEN 'very_high'
+        WHEN sii.priority_score >= 60 THEN 'high'
+        WHEN sii.priority_score >= 40 THEN 'medium'
+        ELSE 'low'
+    END
+    ,
+                
+    CASE
+        WHEN sii.priority_score >= 80 THEN 'very_high'
+        WHEN sii.priority_score >= 60 THEN 'high'
+        WHEN sii.priority_score >= 40 THEN 'medium'
+        ELSE 'low'
+    END
+    ,
                 COALESCE(
-                    sv.status,
+                    ca.confidence,
                     'needs_validation'
                 ),
 
                 COALESCE(
-                    ca.status,
+                    'none',
                     'none'
                 )
 
             FROM physical_stops ps
 
-            JOIN stop_improvement_impact sii
-                ON ps.id = sii.physical_stop_id
+            LEFT JOIN stop_priority_snapshots sii
+                ON ps.id = sii.stop_id
 
-            LEFT JOIN stop_validation sv
-                ON ps.id = sv.physical_stop_id
-
-            LEFT JOIN community_actions ca
-                ON ps.id = ca.physical_stop_id
+            
+            LEFT JOIN stop_consensus ca
+                ON ps.id = ca.stop_id
 
             LEFT JOIN stop_jurisdiction sj
                 ON ps.id = sj.stop_id
@@ -1930,17 +2011,38 @@ def map_stops():
                 ? IS NULL
                 OR (
                     ? = 'high'
-                    AND sii.priority_level IN ('high', 'very_high')
+                    AND 
+                    CASE
+                        WHEN sii.priority_score >= 80 THEN 'very_high'
+                        WHEN sii.priority_score >= 60 THEN 'high'
+                        WHEN sii.priority_score >= 40 THEN 'medium'
+                        ELSE 'low'
+                    END IN ('high', 'very_high')
+        
                 )
                 OR (
                     ? = 'very_high'
-                    AND sii.priority_level = 'very_high'
+                    AND 
+                    CASE
+                        WHEN sii.priority_score >= 80 THEN 'very_high'
+                        WHEN sii.priority_score >= 60 THEN 'high'
+                        WHEN sii.priority_score >= 40 THEN 'medium'
+                        ELSE 'low'
+                    END = 'very_high'
+        
                 )
             )
 
             AND (
                 ? IS NULL
-                OR sii.priority_level = ?
+                OR 
+                    CASE
+                        WHEN sii.priority_score >= 80 THEN 'very_high'
+                        WHEN sii.priority_score >= 60 THEN 'high'
+                        WHEN sii.priority_score >= 40 THEN 'medium'
+                        ELSE 'low'
+                    END = ?
+        
             )
 
             AND (
@@ -1974,23 +2076,23 @@ def map_stops():
                 OR (
                     ? = 'opportunity'
                     AND (
-                        sv.status IS NULL
-                        OR sv.status = 'needs_validation'
+                        ca.confidence IS NULL
+                        OR ca.confidence = 'needs_validation'
                     )
                 )
 
                 OR (
                     ? = 'candidate'
-                    AND sv.status = 'validated'
+                    AND ca.confidence = 'validated'
                 )
             )
 
             AND (
                 ? IS NULL
-                OR COALESCE(ca.status, 'none') = ?
+                OR 'none' = ?
             )
 
-            ORDER BY sii.opportunity_score DESC;
+            ORDER BY sii.priority_score DESC;
             """,
             (
                 impact,
@@ -2083,7 +2185,7 @@ def create_community_action(stop_id):
         SELECT
             id,
             status
-        FROM community_actions
+        FROM stop_observations
         WHERE physical_stop_id = ?
         AND status IN (
             'planned',
@@ -2205,7 +2307,7 @@ def community_action_summary():
         SELECT
             status,
             COUNT(*)
-        FROM community_actions
+        FROM stop_observations
         GROUP BY status
         """
     )
@@ -2295,30 +2397,30 @@ def routes():
         """
         SELECT
 
-            r.route_id,
-            r.route_name,
-            COUNT(DISTINCT ps.id)
+    r.route_id,
+    r.route_name,
+    COUNT(DISTINCT ps.id)
 
-        FROM routes r
+FROM routes r
 
-        JOIN stop_routes sr
-            ON r.route_id = sr.route_id
+JOIN stop_routes sr
+    ON r.route_id = sr.route_id
 
-        JOIN bus_stops bs
-            ON sr.stop_id = bs.gtfs_stop_id
+JOIN bus_stops bs
+    ON sr.stop_id = bs.id
 
-        JOIN physical_stop_members psm
-            ON bs.id = psm.bus_stop_id
+JOIN physical_stop_members psm
+    ON bs.id = psm.bus_stop_id
 
-        JOIN physical_stops ps
-            ON psm.physical_stop_id = ps.id
+JOIN physical_stops ps
+    ON psm.physical_stop_id = ps.id
 
-        GROUP BY
-            r.route_id,
-            r.route_name
+GROUP BY
+    r.route_id,
+    r.route_name
 
-        ORDER BY
-            r.route_id;
+ORDER BY
+    r.route_id;
         """
     )
 
@@ -2350,9 +2452,8 @@ def dashboard_static(filename):
 @app.route("/dashboard")
 def dashboard():
 
-    return send_from_directory(
-        BASE_DIR,
-        "dmv_bus_stops_dashboard.html"
+    return render_template(
+        "dashboard.html"
     )
 
 
@@ -2547,25 +2648,22 @@ def pipeline_geography():
                         SELECT COUNT(*)
                         FROM review_queue
                         WHERE physical_stop_id IN ({})
+                        AND review_status = 'pending'
                         """),
 
-                    "review": {
+                    "reviewed":
+                        count("""
+                        SELECT COUNT(DISTINCT physical_stop_id)
+                        FROM stop_observations
+                        WHERE physical_stop_id IN ({})
+                        """),
 
-                        "needs_review":
-                            count("""
-                            SELECT COUNT(*)
-                            FROM review_queue
-                            WHERE physical_stop_id IN ({})
-                            """),
-
-                        "completed":
-                            count("""
-                            SELECT COUNT(DISTINCT physical_stop_id)
-                            FROM stop_observations
-                            WHERE physical_stop_id IN ({})
-                            """),
-                    },
-
+                    "consensus":
+                        count("""
+                        SELECT COUNT(DISTINCT stop_id)
+                        FROM stop_consensus
+                        WHERE stop_id IN ({})
+                        """),
 
                     "osm": {
 
@@ -2626,7 +2724,7 @@ def pipeline_geography():
                         SELECT COUNT(*)
                         FROM stop_consensus
                         WHERE stop_id IN ({})
-                        AND consensus_status='verified'
+                        AND confidence IS NOT NULL
                         """),
 
                     "completion_pct":
