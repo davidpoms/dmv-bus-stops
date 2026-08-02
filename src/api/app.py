@@ -789,15 +789,15 @@ GROUP BY ps.id
 
     recommendation_payload = []
 
-    for row in recommendations:
+    for rec_row in recommendations:
 
         recommendation_payload.append(
             {
-                "type": row[0],
-                "priority": row[1],
-                "confidence": row[2],
-                "evidence": json.loads(row[3]) if row[3] else {},
-                "reasons": json.loads(row[4]) if row[4] else []
+                "type": rec_row[0],
+                "priority": rec_row[1],
+                "confidence": rec_row[2],
+                "evidence": json.loads(rec_row[3]) if rec_row[3] else {},
+                "reasons": json.loads(rec_row[4]) if rec_row[4] else []
             }
         )
 
@@ -826,6 +826,23 @@ GROUP BY ps.id
     wmata_history = get_wmata_history(stop_id)
 
     wmata_evidence = get_wmata_evidence(stop_id)
+
+
+    impact_summary = query_db(
+        """
+        SELECT
+            summary,
+            impact_level,
+            recommendations,
+            opportunity_score,
+            daily_route_exposure
+
+        FROM stop_improvement_impact
+
+        WHERE physical_stop_id = ?
+        """,
+        (stop_id,)
+    )
 
 
     ridership = query_db(
@@ -885,9 +902,12 @@ GROUP BY ps.id
     )
 
 
+    print("DEBUG STOP DETAIL ROW:", row)
+    print("DEBUG TYPES:", type(row[1]), type(row[2]))
+
     road = get_road_index().nearest_road(
-        row[3],
-        row[2]
+        row[2],
+        row[1]
     )
 
 
@@ -978,7 +998,22 @@ GROUP BY ps.id
                 wmata_evidence,
 
             "ridership_exposure":
-                ridership_exposure
+                ridership_exposure,
+
+
+            "impact_summary":
+                {
+                    "summary": impact_summary[0][0],
+                    "impact_level": impact_summary[0][1],
+                    "recommendations":
+                        json.loads(impact_summary[0][2])
+                        if impact_summary[0][2]
+                        else [],
+                    "opportunity_score": impact_summary[0][3],
+                    "daily_route_exposure": impact_summary[0][4]
+                }
+                if impact_summary
+                else None
         }
     )
 
