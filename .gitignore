@@ -29,3 +29,7 @@ __pycache__/
 
 # Keep archived scripts
 !scripts/
+
+*.bak
+*.backup*
+*_backup*
