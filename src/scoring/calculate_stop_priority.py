@@ -155,7 +155,7 @@ def calculate_scores():
 
         SELECT
 
-            b.id,
+            ps.id,
 
             COUNT(
                 DISTINCT sr.route_id
@@ -182,28 +182,39 @@ def calculate_scores():
             ) AS largest_monthly_route_total
 
 
-        FROM bus_stops b
+        
+FROM physical_stops ps
 
 
-JOIN gtfs_stop_map gm
+JOIN physical_stop_members pm
 
-    ON gm.bus_stop_id = b.id
+    ON pm.physical_stop_id = ps.id
 
 
 JOIN stop_routes sr
 
-    ON sr.stop_id = gm.gtfs_stop_id
+    ON sr.stop_id = pm.bus_stop_id
+
 
 
 	
 
 
-        LEFT JOIN route_daily rd
+        
+LEFT JOIN
+(
+    SELECT
+        route_id,
+        weekday_boardings / 21.0 AS daily_boardings,
+        weekday_boardings
+    FROM ridership_snapshots
+) rd
 
-            ON sr.route_id = rd.route_id
+ON sr.route_id = rd.route_id
 
 
-        GROUP BY b.id;
+
+        GROUP BY ps.id;
 
         """
     )

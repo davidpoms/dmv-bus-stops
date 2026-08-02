@@ -190,6 +190,53 @@ def generate_impact_summary():
         )
 
 
+        percentile = assessment.get(
+            "rider_exposure_percentile"
+        )
+
+
+        if percentile:
+
+            if percentile >= 95:
+
+                summary += (
+                    " This stop is among the highest "
+                    "rider exposure stops in the Metrobus network."
+                )
+
+            elif percentile >= 90:
+
+                summary += (
+                    f" This stop is in the top "
+                    f"{100-percentile}% of Metrobus stops "
+                    "by rider exposure."
+                )
+
+            else:
+
+                if percentile % 100 in (11, 12, 13):
+
+                    suffix = "th"
+
+                else:
+
+                    suffix = {
+                        1: "st",
+                        2: "nd",
+                        3: "rd"
+                    }.get(
+                        percentile % 10,
+                        "th"
+                    )
+
+
+                summary += (
+                    f" This stop ranks in the "
+                    f"{percentile}{suffix} percentile "
+                    "for rider exposure."
+                )
+
+
         if recommendation_list:
 
             summary += (

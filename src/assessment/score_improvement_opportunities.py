@@ -3,9 +3,10 @@ Score physical bus stop improvement opportunities.
 
 Creates a review priority ranking based on:
 
-- passenger demand
+- rider exposure from WMATA ridership
 - route connectivity
-- missing rider amenities
+- physical stop evidence
+- missing amenity evidence
 
 This is an evidence prioritization layer,
 not a final recommendation engine.
@@ -28,6 +29,7 @@ DATABASE_PATH = (
     /
     "dmv_bus_stops.db"
 )
+
 
 
 def setup_table(cursor):
@@ -68,11 +70,6 @@ def setup_table(cursor):
 
 def normalize(value, maximum):
 
-    """
-    Log normalization prevents extreme outliers
-    from crushing all other scores.
-    """
-
     if not value or maximum == 0:
         return 0
 
@@ -92,26 +89,14 @@ def calculate_amenity_gap(
     consensus_shelter
 ):
 
-    """
-    Higher score means greater missing amenity need.
-    """
-
     score = 0
 
 
-    # Bench evidence
-    if (
-        not osm_bench
-        and consensus_bench != 1
-    ):
+    if not osm_bench and consensus_bench != 1:
         score += 50
 
 
-    # Shelter evidence
-    if (
-        not osm_shelter
-        and consensus_shelter != 1
-    ):
+    if not osm_shelter and consensus_shelter != 1:
         score += 50
 
 
@@ -140,40 +125,62 @@ def score_opportunities():
     )
 
 
+
     cursor.execute(
         """
         SELECT
 
             oa.physical_stop_id,
 
-            oa.combined_route_weekday_boardings,
-
-            oa.highest_route_weekday_boardings,
+            COALESCE(
+                sps.factors,
+                '{}'
+            ) AS priority_factors,
 
             oa.routes_served,
 
             oa.wmata_stop_records,
 
-            COALESCE(ose.osm_bench,0),
+            COALESCE(
+                ose.osm_bench,
+                0
+            ),
 
-            COALESCE(ose.osm_shelter,0),
+            COALESCE(
+                ose.osm_shelter,
+                0
+            ),
 
-            COALESCE(sc.has_bench,NULL),
+            COALESCE(
+                sc.has_bench,
+                NULL
+            ),
 
-            COALESCE(sc.has_shelter,NULL)
+            COALESCE(
+                sc.has_shelter,
+                NULL
+            )
 
 
         FROM opportunity_assessments oa
 
 
+        LEFT JOIN stop_priority_snapshots sps
+
+            ON sps.stop_id =
+               oa.physical_stop_id
+
+
         LEFT JOIN stop_osm_evidence ose
 
-            ON ose.stop_id = oa.physical_stop_id
+            ON ose.stop_id =
+               oa.physical_stop_id
 
 
         LEFT JOIN stop_consensus sc
 
-            ON sc.stop_id = oa.physical_stop_id;
+            ON sc.stop_id =
+               oa.physical_stop_id
 
         """
     )
@@ -192,20 +199,14 @@ def score_opportunities():
 
 
 
-    max_daily = max(
-        row[1]
-        for row in rows
-    )
-
-
     max_routes = max(
-        row[3]
+        row[2]
         for row in rows
     )
 
 
     max_records = max(
-        row[4]
+        row[3]
         for row in rows
     )
 
@@ -221,11 +222,9 @@ def score_opportunities():
         (
             physical_stop_id,
 
-            total_daily,
+            priority_factors,
 
-            highest_route,
-
-            routes,
+            routes_served,
 
             records,
 
@@ -241,14 +240,41 @@ def score_opportunities():
 
 
 
-        route_exposure_score = normalize(
-            total_daily,
-            max_daily
-        )
+        ridership_score = 0
+
+        combined_weekday = 0
+
+        highest_route = 0
+
+
+        if priority_factors:
+
+            factors = json.loads(
+                priority_factors
+            )
+
+
+            ridership_score = factors.get(
+                "route_exposure_score",
+                0
+            )
+
+
+            combined_weekday = factors.get(
+                "combined_route_weekday_boardings",
+                0
+            )
+
+
+            highest_route = factors.get(
+                "highest_route_weekday_boardings",
+                0
+            )
+
 
 
         connectivity_score = normalize(
-            routes,
+            routes_served,
             max_routes
         )
 
@@ -267,22 +293,9 @@ def score_opportunities():
         )
 
 
-
-        # Rider exposure is the primary driver.
-        # Amenity gaps refine priorities but should not dominate
-        # because missing OSM data is common.
-
-        #
-        # Opportunity score:
-        # Measures where improvements matter most.
-        #
-        # Rider exposure dominates.
-        # Amenity uncertainty is a smaller modifier.
-        #
-
         opportunity_score = (
 
-            route_exposure_score * 0.65
+            ridership_score * 0.65
 
             +
 
@@ -295,52 +308,27 @@ def score_opportunities():
         )
 
 
-        #
-        # Verification priority:
-        # Determines where volunteers should review stops.
-        #
-        # High ridership + incomplete amenity evidence
-        # gets prioritized.
-        #
-
-        verification_priority_score = (
-
-            route_exposure_score * 0.50
-
-            +
-
-            amenity_gap_score * 0.50
-
-        )
-
-
         factors = {
-
-            "verification_priority": {
-
-                "score":
-                    round(
-                        verification_priority_score,
-                        2
-                    ),
-
-                "reason":
-                    "High rider exposure combined with incomplete amenity evidence"
-
-            },
-
-
 
             "route_exposure": {
 
                 "combined_route_weekday_boardings":
-                    round(total_daily,2),
+                    round(
+                        combined_weekday,
+                        2
+                    ),
 
                 "highest_route_weekday_boardings":
-                    round(highest_route,2),
+                    round(
+                        highest_route,
+                        2
+                    ),
 
                 "score":
-                    round(route_exposure_score,2)
+                    round(
+                        ridership_score,
+                        2
+                    )
 
             },
 
@@ -348,10 +336,13 @@ def score_opportunities():
             "network": {
 
                 "routes_served":
-                    routes,
+                    routes_served,
 
                 "score":
-                    round(connectivity_score,2)
+                    round(
+                        connectivity_score,
+                        2
+                    )
 
             },
 
@@ -362,7 +353,10 @@ def score_opportunities():
                     records,
 
                 "score":
-                    round(physical_score,2)
+                    round(
+                        physical_score,
+                        2
+                    )
 
             },
 
@@ -405,80 +399,54 @@ def score_opportunities():
     )
 
 
+    rank = 1
 
-    for rank, item in enumerate(
-        scored,
-        start=1
-    ):
 
+    for stop_id, score, factors in scored:
 
         cursor.execute(
             """
             INSERT INTO improvement_opportunities
-
             (
-
                 physical_stop_id,
-
                 opportunity_score,
-
                 priority_rank,
-
                 factors
-
             )
 
-            VALUES (?, ?, ?, ?);
+            VALUES (?, ?, ?, ?)
 
             """,
 
             (
-
-                item[0],
-
+                stop_id,
                 round(
-                    item[1],
+                    score,
                     2
                 ),
-
                 rank,
-
                 json.dumps(
-                    item[2]
+                    factors
                 )
-
             )
         )
+
+
+        rank += 1
 
 
 
     conn.commit()
 
-
     conn.close()
 
 
-
     print(
-        f"Scored {len(scored):,} physical stops"
+        f"Created {len(scored):,} improvement opportunities"
     )
-
-
-    print(
-        "Top 10 opportunities:"
-    )
-
-
-    for item in scored[:10]:
-
-        print(
-            item[0],
-            round(item[1],2)
-        )
 
 
 
 if __name__ == "__main__":
 
     score_opportunities()
-

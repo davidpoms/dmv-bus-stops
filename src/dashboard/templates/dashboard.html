@@ -22,7 +22,6 @@ src="https://unpkg.com/leaflet/dist/leaflet.js">
 </script>
 
 </head>
-
 <body>
 
 <h1>
@@ -31,6 +30,9 @@ DMV Bus Stop Intelligence
 
 
 <div class="dashboard-links">
+
+
+
 
 <a href="/handbook" class="dashboard-button">
 📘 Community Handbook
@@ -122,15 +124,35 @@ Filter the map
 
 <div class="filter-row">
 
-<label>
+<div class="filter-group">
+
+<label for="routeFilter">
+Route
+</label>
+
+<select id="routeFilter">
+<option value="">
+All routes
+</option>
+</select>
+
+</div>
+
+
+<div class="filter-group">
+
+<label for="stateFilter">
 State
+</label>
+
 <select id="stateFilter">
 <option value="">All</option>
 <option value="DC">DC</option>
 <option value="Maryland">Maryland</option>
 <option value="Virginia">Virginia</option>
 </select>
-</label>
+
+</div>
 
 
 <label>

@@ -756,6 +756,13 @@ GROUP BY ps.id
 )
 
 
+    if not stop:
+        return {"error": "Stop not found"}, 404
+
+
+    row = stop[0]
+
+
     projects = []
 
 
@@ -821,155 +828,17 @@ GROUP BY ps.id
     wmata_evidence = get_wmata_evidence(stop_id)
 
 
-    return jsonify(
-        {
-            "stop":
-                {
-                    "location": stop_row[0],
-                    "lat": stop_row[1],
-                    "lon": stop_row[2],
-                    "score": stop_row[3],
-                    "impact": stop_row[4],
-                    "routes": stop_row[5].split(",") if stop_row[5] else []
-                }
-                if stop_row else None,
-            "projects": [
-                {
-                    "recommendation": row[0],
-                    "status": row[1]
-                }
-                for row in projects
-            ],
-
-            "recommendations": recommendation_payload,
-
-            "evidence": evidence,
-
-            "evidence_summary": evidence_summary,
-
-            "review_actions": review_actions,
-
-            "bench_status": bench_status,
-
-            "review_priority": review_priority,
-
-            "wmata_history": wmata_history,
-
-            "wmata_evidence": wmata_evidence
-        }
-    )
-
-
-
-
-
-
-
-
-@app.route("/stops/<int:stop_id>/amenities")
-def stop_amenities(stop_id):
-
-    wmata = query_db(
-        """
-        SELECT
-            wmata_shelter,
-            wmata_bench,
-            wmata_accessible,
-            match_confidence
-        FROM active_wmata_evidence
-        WHERE physical_stop_id = ?
-        """,
-        (stop_id,)
-    )
-
-    osm = query_db(
-        """
-        SELECT
-            osm_shelter,
-            osm_bench
-        FROM stop_osm_evidence
-        WHERE stop_id = ?
-        """,
-        (stop_id,)
-    )
-
-    return jsonify(
-        {
-            "wmata": (
-                {
-                    "shelter": wmata[0][0],
-                    "bench": wmata[0][1],
-                    "accessible": wmata[0][2],
-                    "confidence": wmata[0][3],
-                }
-                if wmata else None
-            ),
-            "osm": (
-                {
-                    "shelter": osm[0][0],
-                    "bench": osm[0][1],
-                }
-                if osm else None
-            )
-        }
-    )
-
-
-@app.route("/survey-page/<int:stop_id>")
-def survey_page(stop_id):
-
-    return redirect(
-        f"/review/{stop_id}"
-    )
-
-@app.route("/survey/<int:stop_id>")
-def survey(stop_id):
-
-    stop = query_db(
-        """
-        SELECT
-            ps.id,
-            ps.primary_name,
-            ps.latitude AS lat,
-            ps.longitude
-
-        FROM physical_stops ps
-
-        WHERE ps.id = ?;
-        """,
-        (stop_id,)
-    )
-
-    if not stop:
-        return "Stop not found", 404
-
-    row = stop[0]
-
-
-    wmata_evidence = query_db(
-        '''
-        SELECT
-            wmata_status,
-            wmata_bench,
-            wmata_shelter,
-            wmata_accessible,
-            match_confidence,
-            match_distance_m
-        FROM active_wmata_evidence
-        WHERE physical_stop_id = ?
-        ''',
-        (stop_id,)
-    )
-
-
     ridership = query_db(
         '''
         SELECT
-            SUM(rs.weekday_boardings) AS total_boardings,
+            SUM(rs.weekday_boardings) AS weekday_total,
             COUNT(DISTINCT r.route_id) AS route_count,
             GROUP_CONCAT(DISTINCT r.route_id) AS routes
 
-        FROM stop_routes sr
+        FROM physical_stop_members psm
+
+        JOIN stop_routes sr
+            ON psm.bus_stop_id = sr.stop_id
 
         JOIN routes r
             ON sr.route_id = r.route_id
@@ -977,14 +846,14 @@ def survey(stop_id):
         JOIN ridership_snapshots rs
             ON r.route_id = rs.route_id
 
-        WHERE sr.stop_id = ?
+        WHERE psm.physical_stop_id = ?
 
         AND rs.period = (
             SELECT MAX(period)
             FROM ridership_snapshots
         )
 
-        GROUP BY sr.stop_id
+        GROUP BY psm.physical_stop_id
         ''',
         (stop_id,)
     )
@@ -992,8 +861,13 @@ def survey(stop_id):
 
     ridership_exposure = (
         {
-            "weekday_boardings":
+            "weekday_boardings_total":
                 round(ridership[0][0])
+                if ridership[0][0]
+                else 0,
+
+            "average_weekday_boardings":
+                round(ridership[0][0] / 23)
                 if ridership[0][0]
                 else 0,
 
@@ -1032,6 +906,64 @@ def survey(stop_id):
         "&fov=90"
     )
 
+
+    ridership = query_db(
+        '''
+        SELECT
+            SUM(rs.weekday_boardings) AS weekday_total,
+            COUNT(DISTINCT r.route_id) AS route_count,
+            GROUP_CONCAT(DISTINCT r.route_id) AS routes
+
+        FROM physical_stop_members psm
+
+        JOIN stop_routes sr
+            ON psm.bus_stop_id = sr.stop_id
+
+        JOIN routes r
+            ON sr.route_id = r.route_id
+
+        JOIN ridership_snapshots rs
+            ON r.route_id = rs.route_id
+
+        WHERE psm.physical_stop_id = ?
+
+        AND rs.period = (
+            SELECT MAX(period)
+            FROM ridership_snapshots
+        )
+
+        GROUP BY psm.physical_stop_id
+        ''',
+        (stop_id,)
+    )
+
+
+    ridership_exposure = (
+        {
+            "weekday_boardings_total":
+                round(ridership[0][0])
+                if ridership[0][0]
+                else 0,
+
+            "average_weekday_boardings":
+                round(ridership[0][0] / 23)
+                if ridership[0][0]
+                else 0,
+
+            "route_count":
+                ridership[0][1]
+                or 0,
+
+            "routes":
+                ridership[0][2].split(",")
+                if ridership[0][2]
+                else []
+        }
+        if ridership
+        else None
+    )
+
+
     return jsonify(
         {
             "stop_id": row[0],
@@ -1041,18 +973,9 @@ def survey(stop_id):
             "heading": heading,
             "streetview_url": streetview_url,
 
-            "wmata_evidence": (
-                {
-                    "status": wmata_evidence[0][0],
-                    "bench": wmata_evidence[0][1],
-                    "shelter": wmata_evidence[0][2],
-                    "accessible": wmata_evidence[0][3],
-                    "confidence": wmata_evidence[0][4],
-                    "distance_meters": wmata_evidence[0][5]
-                }
-                if wmata_evidence
-                else None
-            ),
+
+            "wmata_evidence":
+                wmata_evidence,
 
             "ridership_exposure":
                 ridership_exposure
@@ -1130,7 +1053,7 @@ def review_start():
 
 
     return redirect(
-        f"/review/{stop_id}?assignment={assignment_id}&mode={scenario}"
+        f"/review/{stop_id}?assignment_id={assignment_id}&mode={scenario}"
     )
 
 
@@ -1208,6 +1131,117 @@ def review_stop_info(stop_id):
     row = stop[0]
 
 
+
+    ridership = query_db(
+        '''
+        SELECT
+            SUM(rs.weekday_boardings) AS total_weekday_boardings,
+            COUNT(DISTINCT r.route_id) AS route_count,
+            GROUP_CONCAT(DISTINCT r.route_id) AS routes
+
+        FROM physical_stop_members psm
+
+        JOIN stop_routes sr
+            ON psm.bus_stop_id = sr.stop_id
+
+        JOIN routes r
+            ON sr.route_id = r.route_id
+
+        JOIN ridership_snapshots rs
+            ON r.route_id = rs.route_id
+
+        WHERE psm.physical_stop_id = ?
+
+        AND rs.period = (
+            SELECT MAX(period)
+            FROM ridership_snapshots
+        )
+
+        GROUP BY psm.physical_stop_id
+        ''',
+        (stop_id,)
+    )
+
+
+    ridership_exposure = (
+        {
+            "average_weekday_boardings":
+                round(ridership[0][0] / 23)
+                if ridership[0][0]
+                else 0,
+
+            "route_count":
+                ridership[0][1]
+                or 0,
+
+            "routes":
+                ridership[0][2].split(",")
+                if ridership[0][2]
+                else []
+        }
+        if ridership
+        else None
+    )
+
+
+
+    ridership = query_db(
+        '''
+        SELECT
+            SUM(rs.weekday_boardings) AS weekday_total,
+            COUNT(DISTINCT r.route_id) AS route_count,
+            GROUP_CONCAT(DISTINCT r.route_id) AS routes
+
+        FROM physical_stop_members psm
+
+        JOIN stop_routes sr
+            ON psm.bus_stop_id = sr.stop_id
+
+        JOIN routes r
+            ON sr.route_id = r.route_id
+
+        JOIN ridership_snapshots rs
+            ON r.route_id = rs.route_id
+
+        WHERE psm.physical_stop_id = ?
+
+        AND rs.period = (
+            SELECT MAX(period)
+            FROM ridership_snapshots
+        )
+
+        GROUP BY psm.physical_stop_id
+        ''',
+        (stop_id,)
+    )
+
+
+    ridership_exposure = (
+        {
+            "weekday_boardings_total":
+                round(ridership[0][0])
+                if ridership[0][0]
+                else 0,
+
+            "average_weekday_boardings":
+                round(ridership[0][0] / 23)
+                if ridership[0][0]
+                else 0,
+
+            "route_count":
+                ridership[0][1]
+                or 0,
+
+            "routes":
+                ridership[0][2].split(",")
+                if ridership[0][2]
+                else []
+        }
+        if ridership
+        else None
+    )
+
+
     streetview = get_road_index().nearest_road(
         row[2],
         row[3]
@@ -1226,7 +1260,8 @@ def review_stop_info(stop_id):
         f"&heading={heading or 0}"
     )
 
-
+    print("RIDERSHIP QUERY RESULT:", ridership)
+    print("RIDERSHIP EXPOSURE:", ridership_exposure)
     return jsonify(
         {
             "stop_id": row[0],
@@ -1267,6 +1302,12 @@ def review_stop_info(stop_id):
                 "match_distance_m": row[15],
                 "match_confidence": row[16]
             }
+
+
+            ,
+
+            "ridership_exposure":
+                ridership_exposure
         }
     )
 
@@ -1325,6 +1366,77 @@ def review_assignment(stop_id):
 
 
     if not assignment:
+
+        scenario = request.args.get(
+            "mode",
+            "opportunity"
+        )
+
+        query_db(
+            """
+            INSERT INTO stop_review_assignments
+            (
+                stop_id,
+                reviewer_id,
+                scenario,
+                status
+            )
+            VALUES
+            (?, ?, ?, 'assigned')
+            """,
+            (
+                stop_id,
+                "anonymous",
+                scenario
+            )
+        )
+
+
+        assignment = query_db(
+            """
+            SELECT
+                id,
+                reviewer_id,
+                stop_id
+
+            FROM stop_review_assignments
+
+            WHERE stop_id=?
+
+            AND status='assigned'
+
+            ORDER BY id DESC
+
+            LIMIT 1
+            """,
+            (
+                stop_id,
+            )
+        )
+
+        assignment = query_db(
+            """
+            SELECT
+                id,
+                reviewer_id,
+                stop_id
+
+            FROM stop_review_assignments
+
+            WHERE stop_id=?
+
+            AND status='assigned'
+
+            ORDER BY id DESC
+
+            LIMIT 1
+            """,
+            (
+                stop_id,
+            )
+        )
+
+
 
         return jsonify(
             {
@@ -1813,192 +1925,65 @@ def map_stops():
                 ps.latitude AS lat,
                 ps.longitude AS lon,
                 io.opportunity_score,
-                
-    CASE
-        WHEN io.opportunity_score >= 80 THEN 'very_high'
-        WHEN io.opportunity_score >= 60 THEN 'high'
-        WHEN io.opportunity_score >= 40 THEN 'medium'
-        ELSE 'low'
-    END
-    ,
-                
-    CASE
-        WHEN io.opportunity_score >= 80 THEN 'very_high'
-        WHEN io.opportunity_score >= 60 THEN 'high'
-        WHEN io.opportunity_score >= 40 THEN 'medium'
-        ELSE 'low'
-    END
-    ,
+
+                CASE
+                    WHEN io.opportunity_score >= 80 THEN 'very_high'
+                    WHEN io.opportunity_score >= 60 THEN 'high'
+                    WHEN io.opportunity_score >= 40 THEN 'medium'
+                    ELSE 'low'
+                END,
+
+                CASE
+                    WHEN io.opportunity_score >= 80 THEN 'very_high'
+                    WHEN io.opportunity_score >= 60 THEN 'high'
+                    WHEN io.opportunity_score >= 40 THEN 'medium'
+                    ELSE 'low'
+                END,
+
                 COALESCE(
                     ca.confidence,
                     'needs_validation'
                 ),
 
-                COALESCE(
-                    'none',
-                    'none'
-                )
+                'none'
 
             FROM physical_stops ps
-
-            JOIN physical_stop_members psm
-                ON ps.id = psm.physical_stop_id
 
             JOIN stop_transit_evidence ste
                 ON ps.id = ste.stop_id
                 AND ste.gtfs_bus_stop = 1
-
-            LEFT JOIN stop_wmata_evidence we
-                ON ps.id = we.physical_stop_id
 
             JOIN improvement_opportunities io
                 ON ps.id = io.physical_stop_id
 
-            
-            LEFT JOIN stop_consensus ca
-                ON ps.id = ca.stop_id
+            JOIN physical_stop_members psm
+                ON ps.id = psm.physical_stop_id
+
+            JOIN bus_stops bs
+                ON psm.bus_stop_id = bs.id
+
+            JOIN stop_routes sr
+                ON bs.id = sr.stop_id
 
             LEFT JOIN stop_wmata_evidence we
                 ON ps.id = we.physical_stop_id
 
-            JOIN stop_transit_evidence ste
-                ON ps.id = ste.stop_id
-                AND ste.gtfs_bus_stop = 1
-
-            JOIN physical_stop_members psm
-                ON ps.id = psm.physical_stop_id
-
-            LEFT JOIN bus_stops bs
-                ON psm.bus_stop_id = bs.id
-
-            LEFT JOIN stop_routes sr
-                ON bs.id = sr.stop_id
+            LEFT JOIN stop_consensus ca
+                ON ps.id = ca.stop_id
 
             LEFT JOIN stop_jurisdiction sj
                 ON ps.id = sj.stop_id
 
-            WHERE (
-                ? IS NULL
-                OR sr.route_id = ?
-            )
-
-            AND (
-                ? IS NULL
-                OR (
-                    ? = 'high'
-                    AND 
-                    CASE
-                        WHEN io.opportunity_score >= 80 THEN 'very_high'
-                        WHEN io.opportunity_score >= 60 THEN 'high'
-                        WHEN io.opportunity_score >= 40 THEN 'medium'
-                        ELSE 'low'
-                    END IN ('high', 'very_high')
-        
-                )
-                OR (
-                    ? = 'very_high'
-                    AND 
-                    CASE
-                        WHEN io.opportunity_score >= 80 THEN 'very_high'
-                        WHEN io.opportunity_score >= 60 THEN 'high'
-                        WHEN io.opportunity_score >= 40 THEN 'medium'
-                        ELSE 'low'
-                    END = 'very_high'
-        
-                )
-            )
-
-            AND (
-                ? IS NULL
-                OR 
-                    CASE
-                        WHEN io.opportunity_score >= 80 THEN 'very_high'
-                        WHEN io.opportunity_score >= 60 THEN 'high'
-                        WHEN io.opportunity_score >= 40 THEN 'medium'
-                        ELSE 'low'
-                    END = ?
-        
-            )
-
-            AND (
-                ? IS NULL
-                OR sj.state = ?
-            )
-
-            AND (
-                ? IS NULL
-                OR sj.county = ?
-            )
-
-            AND (
-                ? IS NULL
-                OR sj.municipality = ?
-            )
-
-            AND (
-                ? IS NULL
-                OR sj.dc_ward = ?
-            )
-
-            AND (
-                ? IS NULL
-                OR sj.dc_anc = ?
-            )
-
-            AND (
-                ? IS NULL
-
-                OR (
-                    ? = 'opportunity'
-                    AND (
-                        ca.confidence IS NULL
-                        OR ca.confidence = 'needs_validation'
-                    )
-                )
-
-                OR (
-                    ? = 'candidate'
-                    AND ca.confidence = 'validated'
-                )
-            )
-
-            AND (
-                ? IS NULL
-                OR 'none' = ?
-            )
+            WHERE sr.route_id = ?
 
             GROUP BY
-                ps.id,
-                ps.primary_name,
-                ps.latitude,
-                ps.longitude,
-                io.opportunity_score,
-                ca.confidence
+                ps.id
 
             ORDER BY io.opportunity_score DESC;
+
             """,
             (
                 route,
-                impact,
-                impact,
-                impact,
-                priority,
-                priority,
-                state,
-                state,
-                county,
-                county,
-                municipality,
-                municipality,
-                dc_ward,
-                dc_ward,
-                dc_anc,
-                dc_anc,
-                review_mode,
-                review_mode,
-                review_mode,
-                action_filter,
-                action_filter
             )
         )
 

@@ -59,6 +59,48 @@ document.addEventListener(
 
                     <br><br>
 
+
+                    ${
+                        info.ridership_exposure
+                        ?
+                        `
+                        <div class="evidence-card">
+
+                            <strong>
+                            Transit demand
+                            </strong>
+
+                            <br><br>
+
+                            Routes serving this stop carry approximately
+
+                            <strong>
+                            ${
+                                info.ridership_exposure.average_weekday_boardings.toLocaleString()
+                            }
+                            weekday boardings per day
+                            </strong>
+
+                            on average.
+
+                            <br><br>
+
+                            Routes:
+                            ${
+                                info.ridership_exposure.routes.length
+                                ? info.ridership_exposure.routes.join(", ")
+                                : "Unknown"
+                            }
+
+                        </div>
+
+                        <br>
+                        `
+                        :
+                        ""
+                    }
+
+
                     ${
                         info.wmata
                         ?

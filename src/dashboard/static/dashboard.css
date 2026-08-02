@@ -426,3 +426,82 @@ td, th {
     font-style: italic;
 }
 
+
+
+/* Map filter layout */
+
+.map-filter-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 20px;
+    align-items: end;
+}
+
+.map-filter-card label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+}
+
+.map-filter-card select {
+    width: 100%;
+    min-height: 42px;
+}
+
+.route-filter-card,
+.geo-filter-card {
+    margin-bottom: 20px;
+}
+
+
+
+/* Map filter spacing */
+.map-filter-card .filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    align-items: flex-end;
+}
+
+.map-filter-card .filter-group {
+    display: flex;
+    flex-direction: column;
+    min-width: 160px;
+}
+
+.map-filter-card label {
+    margin-bottom: 6px;
+}
+
+
+
+/* Final map filter cleanup */
+
+.map-filter-card .filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    align-items: flex-end;
+}
+
+
+.map-filter-card .filter-group,
+.map-filter-card label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 160px;
+}
+
+
+.map-filter-card select {
+    width: 180px;
+    height: 40px;
+}
+
+
+.map-filter-card button {
+    height: 40px;
+    margin-bottom: 0;
+}
+

@@ -51,6 +51,34 @@ document.addEventListener(
 
                 <br><br>
 
+
+                ${
+                    data.ridership_exposure
+                    ?
+                    `
+                    <strong>Transit demand</strong>
+                    <br><br>
+
+                    Routes serving this stop carry approximately
+
+                    <strong>
+                    ${data.ridership_exposure.average_weekday_boardings.toLocaleString()}
+                    weekday boardings per day
+                    </strong>
+
+                    on average.
+
+                    <br>
+
+                    Routes:
+                    ${data.ridership_exposure.routes.join(", ")}
+
+                    <br><br>
+                    `
+                    :
+                    ""
+                }
+
                 Existing stop information:
                 <br>
                 Coordinates:

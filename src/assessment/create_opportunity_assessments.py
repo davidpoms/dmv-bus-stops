@@ -1,17 +1,17 @@
+
 """
 Create physical stop opportunity assessments.
 
 Combines:
 
 - physical stop clusters
-- WMATA stop records
-- routes served
-- ridership evidence
+- route service
+- ridership exposure
+- priority scoring evidence
+- infrastructure evidence
 
-Creates an evidence layer for future
-bench/shelter/accessibility recommendations.
+Creates an evidence layer for improvement review.
 """
-
 
 import sqlite3
 import json
@@ -34,43 +34,28 @@ DATABASE_PATH = (
 WEEKDAY_DIVISOR = 31
 
 
-
 def setup_table(cursor):
 
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS opportunity_assessments (
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS opportunity_assessments (
 
-            id INTEGER PRIMARY KEY,
+        id INTEGER PRIMARY KEY,
 
-            physical_stop_id INTEGER NOT NULL,
+        physical_stop_id INTEGER NOT NULL,
 
-            combined_route_weekday_boardings REAL,
+        combined_route_weekday_boardings REAL,
 
-            highest_route_weekday_boardings REAL,
+        highest_route_weekday_boardings REAL,
 
-            routes_served INTEGER,
+        routes_served INTEGER,
 
-            wmata_stop_records INTEGER,
+        wmata_stop_records INTEGER,
 
-            assessment_json JSON,
+        assessment_json JSON,
 
-            created_at TIMESTAMP
-                DEFAULT CURRENT_TIMESTAMP
-
-        );
-        """
-    )
-
-
-    cursor.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_opportunity_stop
-        ON opportunity_assessments(
-            physical_stop_id
-        );
-        """
-    )
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
 
 
 
@@ -83,9 +68,7 @@ def create_assessments():
     cursor = conn.cursor()
 
 
-    setup_table(
-        cursor
-    )
+    setup_table(cursor)
 
 
     cursor.execute(
@@ -97,46 +80,37 @@ def create_assessments():
 
     cursor.execute(
         """
-        SELECT
-            id
-
+        SELECT id
         FROM physical_stops;
         """
     )
 
-
-    physical_stops = [
-        row[0]
-        for row in cursor.fetchall()
+    stops = [
+        r[0]
+        for r in cursor.fetchall()
     ]
 
 
     created = 0
 
 
-    for physical_stop_id in physical_stops:
+    for physical_stop_id in stops:
 
 
         cursor.execute(
             """
-            SELECT
-                COUNT(*)
-
+            SELECT COUNT(*)
             FROM physical_stop_members
-
             WHERE physical_stop_id = ?;
-
             """,
             (
                 physical_stop_id,
             )
         )
 
-
-        wmata_stop_records = (
+        wmata_records = (
             cursor.fetchone()[0]
         )
-
 
 
         cursor.execute(
@@ -151,7 +125,6 @@ def create_assessments():
                 ON sr.stop_id = pm.bus_stop_id
 
             WHERE pm.physical_stop_id = ?;
-
             """,
             (
                 physical_stop_id,
@@ -160,18 +133,16 @@ def create_assessments():
 
 
         routes = [
-            row[0]
-            for row in cursor.fetchall()
+            r[0]
+            for r in cursor.fetchall()
         ]
 
 
-        if not routes:
+        combined = 0
+        highest = 0
 
-            average_daily = 0
-            highest_route_daily = 0
 
-        else:
-
+        if routes:
 
             placeholders = ",".join(
                 "?"
@@ -182,9 +153,7 @@ def create_assessments():
             cursor.execute(
                 f"""
                 SELECT
-
                     route_id,
-
                     weekday_boardings
 
                 FROM ridership_snapshots
@@ -192,44 +161,61 @@ def create_assessments():
                 WHERE route_id IN
                 (
                     {placeholders}
-                )
-
-                ORDER BY weekday_boardings DESC;
-
+                );
                 """,
                 routes
             )
 
 
-            ridership_rows = (
-                cursor.fetchall()
+            ridership = cursor.fetchall()
+
+
+            values = [
+                row[1] / WEEKDAY_DIVISOR
+                for row in ridership
+                if row[1]
+            ]
+
+
+            if values:
+
+                combined = sum(values)
+
+                highest = max(values)
+
+
+
+        cursor.execute(
+            """
+            SELECT factors
+
+            FROM stop_priority_snapshots
+
+            WHERE stop_id = ?
+
+            ORDER BY calculated_date DESC
+
+            LIMIT 1;
+            """,
+            (
+                physical_stop_id,
             )
+        )
 
 
-            if ridership_rows:
+        priority_row = cursor.fetchone()
 
 
-                daily_values = [
-                    row[1] / WEEKDAY_DIVISOR
-                    for row in ridership_rows
-                    if row[1]
-                ]
+        priority_source = {}
 
+        if priority_row and priority_row[0]:
 
-                average_daily = sum(
-                    daily_values
+            try:
+                priority_source = json.loads(
+                    priority_row[0]
                 )
-
-
-                highest_route_daily = (
-                    max(daily_values)
-                )
-
-
-            else:
-
-                average_daily = 0
-                highest_route_daily = 0
+            except Exception:
+                pass
 
 
 
@@ -238,19 +224,12 @@ def create_assessments():
             "route_exposure": {
 
                 "combined_route_weekday_boardings":
-                    round(
-                        average_daily,
-                        2
-                    ),
+                    round(combined,2),
 
                 "highest_route_weekday_boardings":
-                    round(
-                        highest_route_daily,
-                        2
-                    )
+                    round(highest,2)
 
             },
-
 
             "network": {
 
@@ -262,56 +241,41 @@ def create_assessments():
 
             },
 
-
             "physical": {
 
                 "wmata_stop_records":
-                    wmata_stop_records
+                    wmata_records
 
-            }
+            },
+
+            "priority_source":
+                priority_source
 
         }
-
 
 
         cursor.execute(
             """
             INSERT INTO opportunity_assessments
             (
-
                 physical_stop_id,
-
                 combined_route_weekday_boardings,
-
                 highest_route_weekday_boardings,
-
                 routes_served,
-
                 wmata_stop_records,
-
                 assessment_json
-
             )
 
             VALUES (?, ?, ?, ?, ?, ?);
 
             """,
             (
-
                 physical_stop_id,
-
-                average_daily,
-
-                highest_route_daily,
-
+                combined,
+                highest,
                 len(routes),
-
-                wmata_stop_records,
-
-                json.dumps(
-                    assessment
-                )
-
+                wmata_records,
+                json.dumps(assessment)
             )
         )
 
@@ -321,7 +285,6 @@ def create_assessments():
 
 
     conn.commit()
-
     conn.close()
 
 

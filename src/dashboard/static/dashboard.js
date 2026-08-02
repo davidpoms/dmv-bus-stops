@@ -99,7 +99,7 @@ function loadEvidence(stopId) {
 
 
 
-function loadStops(route="") {
+function loadStops() {
 
 
     markers.forEach(
@@ -109,93 +109,74 @@ function loadStops(route="") {
 
     markers = [];
 
-    console.log("Loading route:", route);
+
+    let url =
+        "/map/stops";
 
 
-    let url = "/map/stops";
-
-
-    const params = new URLSearchParams();
-
-
-    if (route) {
-        params.append(
-            "route",
-            route
-        );
-    }
-
-
-    const pageParams =
-        new URLSearchParams(
-            window.location.search
-        );
-
-
-    [
-        "review",
-        "state",
-        "county",
-        "municipality",
-        "dc_ward",
-        "impact",
-        "priority",
-        "action"
-    ].forEach(
-        key => {
-
-            const value =
-                pageParams.get(key);
-
-            if(value){
-
-                params.append(
-                    key,
-                    value
-                );
-
-            }
-
-        }
-    );
+    const params =
+        new URLSearchParams();
 
 
 
-    const geoFilters = {
+    const filters = {
+
+        route:
+            document.getElementById(
+                "routeFilter"
+            )?.value,
+
 
         state:
             document.getElementById(
                 "stateFilter"
             )?.value,
 
+
         county:
             document.getElementById(
                 "countyFilter"
             )?.value,
+
 
         municipality:
             document.getElementById(
                 "municipalityFilter"
             )?.value,
 
+
         dc_ward:
             document.getElementById(
                 "wardFilter"
             )?.value,
 
+
         dc_anc:
             document.getElementById(
                 "ancFilter"
+            )?.value,
+
+
+        impact:
+            document.getElementById(
+                "impactFilter"
+            )?.value,
+
+
+        priority:
+            document.getElementById(
+                "priorityFilter"
             )?.value
 
     };
 
 
-    Object.entries(geoFilters)
+
+    Object.entries(filters)
     .forEach(
         ([key,value]) => {
 
-            if(value){
+            if(value && value !== "all"){
 
                 params.append(
                     key,
@@ -206,6 +187,7 @@ function loadStops(route="") {
 
         }
     );
+
 
 
     if(params.toString()){
@@ -215,6 +197,7 @@ function loadStops(route="") {
             params.toString();
 
     }
+
 
 
     fetch(url)
@@ -243,29 +226,7 @@ function loadStops(route="") {
 
 
                 let color = "gray";
-                let radius = 5;
-
-
-                if (
-                    props.impact === "very_high"
-                ) {
-                    color = "red";
-                    radius = 14;
-                }
-
-                else if (
-                    props.impact === "high"
-                ) {
-                    color = "orange";
-                    radius = 10;
-                }
-
-                else if (
-                    props.impact === "medium"
-                ) {
-                    color = "gold";
-                    radius = 7;
-                }
+                let radius = 7;
 
 
                 const marker = L.circleMarker(
@@ -278,14 +239,7 @@ function loadStops(route="") {
                         color:color,
                         fillOpacity:0.7,
 
-                        pane:
-                            props.impact === "very_high"
-                            ? "veryHighPriority"
-                            :
-                            props.impact === "high"
-                            ? "highPriority"
-                            :
-                            "markerPane"
+                        pane: "markerPane"
                     }
                 )
                 .addTo(map);
@@ -313,27 +267,16 @@ function loadStops(route="") {
                     "click",
                     function() {
 
-                        Promise.all([
-                            fetch(`/stops/${props.stop_id}`)
-                                .then(response => response.json()),
-
-                            fetch(`/stops/${props.stop_id}/amenities`)
-                                .then(response => {
-                                    if (!response.ok) {
-                                        return {
-                                            wmata: null,
-                                            osm: null
-                                        };
-                                    }
-
-                                    return response.json();
-                                })
-                        ])
+                        fetch(`/stops/${props.stop_id}`)
+                        .then(response => response.json())
 
                         .then(
-                            ([detail, amenities]) => {
+                            (detail) => {
 
-                                detail.amenities = amenities;
+                                detail.amenities = {
+                                    wmata:
+                                        detail.wmata_evidence
+                                };
 
                                 const evidence = {
 
@@ -350,10 +293,32 @@ function loadStops(route="") {
 
 
                                 let reviewReason =
-                                    "This stop has been identified as a possible opportunity for improvement. Community feedback will help determine whether riders would benefit from changes like seating, shelter, or other waiting area improvements.";
+                                    "This stop has been identified as a possible opportunity for improvement. Community feedback will help determine whether riders would benefit from better waiting conditions.";
 
 
                                 if (
+                                    detail.amenities?.wmata &&
+                                    evidence.osm &&
+                                    (
+                                        (
+                                            detail.amenities.wmata.shelter === "0" &&
+                                            evidence.osm.osm_shelter === 1
+                                        )
+                                        ||
+                                        (
+                                            detail.amenities.wmata.bench === "0" &&
+                                            evidence.osm.osm_bench === 1
+                                        )
+                                    )
+                                ) {
+
+                                    reviewReason =
+                                        "Available records disagree about existing amenities at this stop. Public mapping suggests some waiting amenities may be present, while WMATA inventory does not show them. Your review will help confirm current conditions and whether additional improvements are needed.";
+
+                                }
+
+
+                                else if (
                                     evidence.observations &&
                                     evidence.observations.length > 0
                                 ) {
@@ -365,29 +330,34 @@ function loadStops(route="") {
 
 
                                 else if (
+                                    detail.wmata_evidence &&
+                                    (
+                                        detail.wmata_evidence.wmata_shelter === "1" ||
+                                        detail.wmata_evidence.shelter === "1"
+                                    )
+                                ) {
+
+                                    reviewReason =
+                                        "Available records indicate this stop likely has a shelter. Your review will help determine whether additional improvements, such as seating, accessibility features, or other waiting area enhancements, would better support riders.";
+
+                                }
+
+
+                                else if (
                                     evidence.osm &&
                                     evidence.osm.osm_shelter === 1 &&
                                     evidence.osm.osm_bench === 0
                                 ) {
 
                                     reviewReason =
-                                        "This stop appears to have a shelter, but seating information needs verification. Your review will help confirm whether riders have a place to sit while waiting.";
+                                        "This stop appears to have a shelter, but seating information needs verification. Your review will help determine whether riders have adequate places to sit while waiting.";
 
                                 }
 
 
                                 else if (
-                                    detail.amenities?.wmata?.shelter === "1"
-                                ) {
-
-                                    reviewReason =
-                                        "Available records indicate this stop has a shelter, but seating information or rider experience may need verification.";
-
-                                }
-
-
-                                else if (
-                                    detail.amenities?.wmata?.shelter !== "1" &&
+                                    detail.wmata_evidence &&
+                                    detail.wmata_evidence.wmata_shelter === "0" &&
                                     evidence.osm &&
                                     evidence.osm.osm_shelter === 0 &&
                                     evidence.osm.osm_bench === 0
@@ -401,7 +371,45 @@ function loadStops(route="") {
 
 
                                 let popup = `
-                                <b>${props.location.replace("+", " at ")}</b><br><br>
+                                <b>${props.location.replace("+", " at ")}</b><br>
+
+                                <br>
+
+                                <b>Transit demand</b><br>
+
+                                Routes serving this stop carry approximately
+
+                                <b>
+                                ${
+                                    detail.ridership_exposure
+                                    ? detail.ridership_exposure.average_weekday_boardings.toLocaleString()
+                                    : "Unknown"
+                                }
+                                weekday boardings per day
+                                </b>
+
+                                on average.
+
+                                <br><br>
+
+
+                                Routes:
+                                ${
+                                    detail.ridership_exposure &&
+                                    detail.ridership_exposure.routes.length
+                                    ? detail.ridership_exposure.routes.join(", ")
+                                    : "Unknown"
+                                }
+
+                                <br><br>
+
+                                <b>WMATA Stop IDs:</b>
+				${
+				    props.wmata_stop_ids && props.wmata_stop_ids.length
+				        ? props.wmata_stop_ids.join(", ")
+				        : "Unknown"
+				}
+				<br><br>
 
                                 <b>Why this stop is being reviewed</b><br>
 
@@ -412,7 +420,7 @@ function loadStops(route="") {
                                 `;
 
 
-                                if (detail.projects.length > 0) {
+                                if (detail.projects && detail.projects.length > 0) {
 
                                     detail.projects.forEach(
                                         project => {
@@ -434,6 +442,7 @@ function loadStops(route="") {
 
 
                                 if (
+                                    !detail.projects ||
                                     detail.projects.length === 0
                                 ) {
 
@@ -479,11 +488,13 @@ function loadStops(route="") {
                                         }
                                         (WMATA inventory)<br>
 
-                                        Accessible boarding:
+                                        WMATA accessibility rating:
                                         ${
                                             detail.amenities.wmata.accessible === "Y"
-                                            ? "Yes"
-                                            : "No"
+                                            ? "Accessible"
+                                            : detail.amenities.wmata.accessible === "N"
+                                            ? "Not rated accessible"
+                                            : "Unknown"
                                         }<br>
                                         `;
 
@@ -508,6 +519,21 @@ function loadStops(route="") {
                                             ? "Yes"
                                             : "No"
                                         }<br>
+
+
+                                        ${
+                                            detail.amenities?.wmata &&
+                                            detail.amenities.wmata.shelter !==
+                                            (evidence.osm.osm_shelter === 1 ? "1" : "0")
+                                            ?
+                                            `
+                                            <br>
+                                            <b>Data note:</b><br>
+                                            WMATA inventory and public mapping sources differ on shelter status. A community review can help confirm current waiting conditions.<br>
+                                            `
+                                            :
+                                            ""
+                                        }
                                         `;
 
                                     }
@@ -613,7 +639,7 @@ function loadStops(route="") {
                                 <br><br>
 
                                 <a
-                                href="/review/start?stop_id=${props.stop_id}"
+                                href="/review/${props.stop_id}?mode=opportunity"
                                 class="stop-review-button">
                                 Review this stop
                                 </a>
@@ -635,64 +661,30 @@ function loadStops(route="") {
             }
         );
 
+
+
+        if(markers.length){
+
+            map.fitBounds(
+                L.featureGroup(markers).getBounds()
+            );
+
+        }
+
+
+
     }
 );
 
 }
 
-fetch("/routes")
+if(routeFilter){
 
-.then(
-    response => response.json()
-)
-
-.then(
-    routes => {
-
-        const select =
-            document.getElementById("routeSelect");
-
-
-        routes.forEach(
-            route => {
-
-                const option =
-                    document.createElement("option");
-
-
-                option.value =
-                    route.route_id;
-
-
-                option.text =
-                    route.route_id +
-                    " - " +
-                    route.route_name;
-
-
-                select.appendChild(
-                    option
-                );
-
-            }
-        );
-
-    }
-);
-
-
-
-const routeSelect = document.getElementById("routeSelect");
-
-if(routeSelect){
-
-    routeSelect.addEventListener(
+    routeFilter.addEventListener(
         "change",
         function(){
 
-            loadStops(
-                this.value
-            );
+            loadStops();
 
         }
     );
@@ -702,6 +694,13 @@ if(routeSelect){
 
 
 if(document.getElementById("map")){
+
+    map.createPane("markerPane");
+
+    map.getPane("markerPane").style.zIndex = 400;
+
+    map.getPane("popupPane").style.zIndex = 700;
+
     loadStops();
 }
 
@@ -1119,7 +1118,7 @@ function loadGeographyFilters(){
 
         }
 
-
+        console.log("REQUESTING MAP:", url);
         fetch(url)
         .then(r => r.json())
         .then(data => {
@@ -1442,3 +1441,66 @@ window.addEventListener(
 );
 
 
+
+
+
+
+
+
+function loadRouteFilter(){
+
+    fetch("/routes")
+
+    .then(
+        response => response.json()
+    )
+
+    .then(
+        routes => {
+
+            const selector =
+                document.getElementById(
+                    "routeFilter"
+                );
+
+            if(!selector){
+                return;
+            }
+
+
+            routes.forEach(
+                route => {
+
+                    const option =
+                        document.createElement(
+                            "option"
+                        );
+
+                    option.value =
+                        route.route_id;
+
+
+                    option.textContent =
+                        route.route_id +
+                        " - " +
+                        route.route_name;
+
+
+                    selector.appendChild(
+                        option
+                    );
+
+                }
+            );
+
+        }
+    );
+
+}
+
+
+
+window.addEventListener(
+    "load",
+    loadRouteFilter
+);
