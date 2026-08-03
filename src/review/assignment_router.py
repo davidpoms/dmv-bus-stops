@@ -172,15 +172,20 @@ def assign_stop(
 
             FROM review_queue rq
 
+            JOIN physical_stop_members psm
+                ON psm.physical_stop_id = rq.physical_stop_id
+
             JOIN stop_routes sr
+                ON sr.stop_id = psm.bus_stop_id
 
-                ON sr.stop_id = rq.physical_stop_id
+            JOIN community_reviewer_routes crr
+                ON crr.route_id = sr.route_id
 
+            WHERE crr.reviewer_id = ?
 
-            WHERE rq.review_status='pending'
+            AND rq.review_status='pending'
 
             AND rq.community_review_available=1
-
 
             AND rq.physical_stop_id NOT IN (
 
@@ -192,7 +197,6 @@ def assign_stop(
 
             )
 
-
             AND rq.physical_stop_id NOT IN (
 
                 SELECT stop_id
@@ -203,15 +207,16 @@ def assign_stop(
 
             )
 
-
             GROUP BY rq.physical_stop_id
 
             ORDER BY rq.priority_rank
 
             LIMIT 1
+
             """,
             (
                 reviewer_id,
+                reviewer_id
             )
         ).fetchone()
 

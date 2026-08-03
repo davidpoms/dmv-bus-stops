@@ -3163,6 +3163,146 @@ def priority_summary():
 
 
 
+
+
+@app.route("/reviewer/routes")
+def reviewer_routes():
+
+    reviewer_key = session.get(
+        "reviewer_key"
+    )
+
+    reviewer_id, reviewer_key = get_or_create_reviewer(
+        reviewer_key
+    )
+
+    session["reviewer_key"] = reviewer_key
+
+
+    routes = query_db(
+        """
+        SELECT
+            route_id,
+            route_name
+
+        FROM routes
+
+        ORDER BY route_id
+        """
+    )
+
+
+    selected = query_db(
+        """
+        SELECT route_id
+
+        FROM community_reviewer_routes
+
+        WHERE reviewer_id=?
+        """,
+        (
+            reviewer_id,
+        )
+    )
+
+
+    return jsonify(
+        {
+            "routes":
+                [
+                    {
+                        "route_id": r[0],
+                        "route_name": r[1]
+                    }
+                    for r in routes
+                ],
+
+            "selected":
+                [
+                    r[0]
+                    for r in selected
+                ]
+        }
+    )
+
+
+
+@app.route(
+    "/reviewer/routes",
+    methods=["POST"]
+)
+def save_reviewer_routes():
+
+    data = request.get_json()
+
+    reviewer_key = session.get(
+        "reviewer_key"
+    )
+
+    reviewer_id, reviewer_key = get_or_create_reviewer(
+        reviewer_key
+    )
+
+    session["reviewer_key"] = reviewer_key
+
+
+    routes = data.get(
+        "routes",
+        []
+    )
+
+
+    conn = sqlite3.connect(
+        DATABASE_PATH
+    )
+
+    cur = conn.cursor()
+
+
+    cur.execute(
+        """
+        DELETE FROM community_reviewer_routes
+
+        WHERE reviewer_id=?
+        """,
+        (
+            reviewer_id,
+        )
+    )
+
+
+    for route in routes:
+
+        cur.execute(
+            """
+            INSERT INTO community_reviewer_routes
+            (
+                reviewer_id,
+                route_id
+            )
+
+            VALUES (?,?)
+            """,
+            (
+                reviewer_id,
+                route
+            )
+        )
+
+
+    conn.commit()
+    conn.close()
+
+
+    return jsonify(
+        {
+            "success": True,
+            "routes": routes
+        }
+    )
+
+
+
 @app.route("/routes")
 def routes():
 
@@ -3221,6 +3361,16 @@ def dashboard_static(filename):
         BASE_DIR / "src" / "dashboard" / "static",
         filename
     )
+
+
+@app.route("/review/routes")
+def review_routes():
+
+    return render_template(
+        "review_routes.html"
+    )
+
+
 
 @app.route("/dashboard")
 def dashboard():
