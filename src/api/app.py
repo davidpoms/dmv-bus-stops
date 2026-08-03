@@ -790,6 +790,20 @@ def community_status(stop_id):
 
 
 
+@app.route("/stop/<int:stop_id>")
+def stop_page(stop_id):
+
+    try:
+        return render_template(
+            "stop_detail.html",
+            stop_id=stop_id
+        )
+
+    except Exception as e:
+        return f"TEMPLATE ERROR: {type(e).__name__}: {e}", 500
+
+
+
 @app.route("/stops/<int:stop_id>")
 def stop_detail(stop_id):
 
@@ -1181,10 +1195,16 @@ GROUP BY ps.id
 
     return jsonify(
         {
-            "stop_id": row[0],
-            "location": row[1],
-            "lat": row[2],
-            "lon": row[3],
+            "stop_id": stop_id,
+            "location": row[0],
+            "lat": row[1],
+            "lon": row[2],
+            "score": row[3],
+            "impact": row[4],
+            "routes":
+                row[5].split(",")
+                if row[5]
+                else [],
             "heading": heading,
             "streetview_url": streetview_url,
 
@@ -2669,9 +2689,8 @@ def map_stops():
 
             FROM physical_stops ps
 
-            JOIN stop_transit_evidence ste
-                ON ps.id = ste.stop_id
-                AND ste.gtfs_bus_stop = 1
+            JOIN active_wmata_evidence aw
+                ON ps.id = aw.physical_stop_id
 
             JOIN improvement_opportunities io
                 ON ps.id = io.physical_stop_id
@@ -2747,9 +2766,8 @@ def map_stops():
 
             FROM physical_stops ps
 
-            JOIN stop_transit_evidence ste
-                ON ps.id = ste.stop_id
-                AND ste.gtfs_bus_stop = 1
+            JOIN active_wmata_evidence aw
+                ON ps.id = aw.physical_stop_id
 
             LEFT JOIN physical_stop_members psm
                 ON ps.id = psm.physical_stop_id
@@ -3717,6 +3735,13 @@ def volunteer_handbook():
     return html
 
 
+
+
+
+
+@app.route("/test-route")
+def test_route():
+    return "hello"
 
 
 if __name__ == "__main__":

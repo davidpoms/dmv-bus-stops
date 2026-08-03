@@ -381,7 +381,9 @@ function loadStops() {
 
                                 <b>
                                 ${
-                                    detail.impact_summary
+                                    detail.impact_summary &&
+                                    detail.impact_summary.estimated_weekday_boardings !== null &&
+                                    detail.impact_summary.estimated_weekday_boardings !== undefined
                                     ? detail.impact_summary.estimated_weekday_boardings.toLocaleString()
                                     : "Unknown"
                                 }
@@ -396,6 +398,7 @@ function loadStops() {
                                 Routes:
                                 ${
                                     detail.impact_summary &&
+                                    detail.impact_summary.routes &&
                                     detail.impact_summary.routes.length
                                     ? detail.impact_summary.routes.join(", ")
                                     : "Unknown"
@@ -1605,4 +1608,3 @@ window.addEventListener(
     "load",
     enableNearbyReview
 );
-
