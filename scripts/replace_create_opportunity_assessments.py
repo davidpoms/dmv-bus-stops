@@ -211,8 +211,6 @@ def create_assessments():
             },
 
 
-            "priority_source":
-                factors
 
         }
 
