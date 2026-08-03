@@ -15,10 +15,55 @@ DB = (
 
 def get_or_create_reviewer(reviewer_key=None):
 
-    if not reviewer_key:
-        reviewer_key = uuid.uuid4().hex
+    conn = sqlite3.connect(DB)
 
-    return reviewer_key, reviewer_key
+    cur = conn.cursor()
+
+
+    if reviewer_key:
+
+        existing = cur.execute(
+            """
+            SELECT id
+            FROM community_reviewers
+            WHERE reviewer_key=?
+            """,
+            (reviewer_key,)
+        ).fetchone()
+
+
+        if existing:
+
+            conn.close()
+
+            return existing[0], reviewer_key
+
+
+
+    reviewer_key = uuid.uuid4().hex
+
+
+    cur.execute(
+        """
+        INSERT INTO community_reviewers
+        (
+            reviewer_key
+        )
+        VALUES (?)
+        """,
+        (
+            reviewer_key,
+        )
+    )
+
+
+    reviewer_id = cur.lastrowid
+
+    conn.commit()
+    conn.close()
+
+
+    return reviewer_id, reviewer_key
 
 
 
@@ -252,6 +297,11 @@ def assign_stop(
             FROM review_queue rq
 
 
+            LEFT JOIN opportunity_assessments oa
+
+                ON oa.physical_stop_id = rq.physical_stop_id
+
+
             WHERE rq.review_status='pending'
 
             AND rq.community_review_available=1
@@ -279,10 +329,15 @@ def assign_stop(
             )
 
 
-            ORDER BY rq.priority_rank
+            ORDER BY
+
+                oa.combined_route_weekday_boardings DESC,
+
+                rq.priority_rank ASC
 
 
             LIMIT 1
+
             """,
             (
                 reviewer_id,

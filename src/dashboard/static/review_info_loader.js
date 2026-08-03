@@ -6,6 +6,30 @@ document.addEventListener(
             window.location.pathname.split("/").pop();
 
 
+        function displayAmenity(value) {
+
+            if (
+                value === true ||
+                value === 1 ||
+                value === "yes" ||
+                value === "Yes"
+            ) {
+                return "Yes";
+            }
+
+            if (
+                value === false ||
+                value === 0 ||
+                value === "no" ||
+                value === "No"
+            ) {
+                return "No";
+            }
+
+            return "Not reported";
+        }
+
+
         const container =
             document.getElementById("stopInfo");
 
@@ -59,38 +83,121 @@ document.addEventListener(
 
                     <br><br>
 
+                    Serving direction:
 
+                    <strong>
                     ${
-                        info.ridership_exposure
+                        (() => {
+                            const heading = Number(
+                                info.serving_direction
+                            );
+
+                            if (isNaN(heading)) {
+                                return "Unknown";
+                            }
+
+                            if (heading < 22.5 || heading >= 337.5)
+                                return "North";
+
+                            if (heading < 67.5)
+                                return "Northeast";
+
+                            if (heading < 112.5)
+                                return "East";
+
+                            if (heading < 157.5)
+                                return "Southeast";
+
+                            if (heading < 202.5)
+                                return "South";
+
+                            if (heading < 247.5)
+                                return "Southwest";
+
+                            if (heading < 292.5)
+                                return "West";
+
+                            return "Northwest";
+
+                        })()
+                    }
+                    </strong>
+
+                    <br><br>
+                    ${
+                        info.impact_summary &&
+                        info.impact_summary.rider_exposure_percentile
                         ?
                         `
                         <div class="evidence-card">
 
                             <strong>
-                            Transit demand
+                            Why this stop was prioritized
                             </strong>
 
                             <br><br>
 
-                            Routes serving this stop carry approximately
+                            Verification priorities consider rider exposure
+                            and the need for better information about current
+                            stop conditions.
+
+                            <br><br>
+
+                            <strong>
+                            Rider exposure
+                            </strong>
+
+                            <br><br>
+
+                            The routes serving this stop carry more riders
+                            than approximately
 
                             <strong>
                             ${
-                                info.ridership_exposure.average_weekday_boardings.toLocaleString()
-                            }
-                            weekday boardings per day
+                                Math.min(
+                                    info.impact_summary.rider_exposure_percentile,
+                                    99
+                                )
+                            }%
                             </strong>
 
-                            on average.
+                            of stops in the region.
+
+                            <br><br>
+
+                            Estimated route exposure:
+
+                            <strong>
+                            ${
+                                info.impact_summary.estimated_weekday_boardings
+                                ? info.impact_summary.estimated_weekday_boardings.toLocaleString()
+                                : "Unknown"
+                            }
+                            weekday boardings across
+                            ${
+                                info.impact_summary.routes_served || 0
+                            }
+                            serving routes
+                            </strong>
 
                             <br><br>
 
                             Routes:
+
                             ${
-                                info.ridership_exposure.routes.length
-                                ? info.ridership_exposure.routes.join(", ")
+                                info.impact_summary.routes &&
+                                info.impact_summary.routes.length
+                                ? info.impact_summary.routes.join(", ")
                                 : "Unknown"
                             }
+
+                            <br><br>
+
+                            <small>
+                            Rider exposure is estimated using route-level
+                            ridership data associated with this stop.
+                            Stop-level boarding counts are not available.
+                            </small>
 
                         </div>
 
@@ -99,6 +206,37 @@ document.addEventListener(
                         :
                         ""
                     }
+
+
+                    ${
+                        info.impact_summary
+                        ?
+                        `
+                        <div class="evidence-card">
+
+                            <strong>
+                            Why this stop needs verification
+                            </strong>
+
+                            <br><br>
+
+                            Available records do not fully confirm current
+                            waiting conditions.
+
+                            <br><br>
+
+                            Your review helps improve the accuracy of stop
+                            information and identify where improvements may
+                            be needed.
+
+                        </div>
+
+                        <br>
+                        `
+                        :
+                        ""
+                    }
+
 
 
                     ${
@@ -195,6 +333,65 @@ document.addEventListener(
                                     : Math.round(info.wmata.match_distance_m)
                                 ) + " meters"
                                 : "Unknown"
+                            }
+
+                        </div>
+
+                        <br>
+                        `
+                        :
+                        ""
+                    }
+
+
+                    ${
+                        info.community_reviews &&
+                        info.community_reviews.review_count > 0
+                        ?
+                        `
+                        <div class="evidence-card">
+
+                            <strong>
+                            Community observations
+                            </strong>
+
+                            <br><br>
+
+                            ${info.community_reviews.review_count}
+                            observation(s)
+
+                            <br><br>
+
+                            ${
+                                info.community_reviews.reviews.map(
+                                    review => `
+                                    <strong>
+                                    ${review.date}
+                                    </strong>
+
+                                    <br><br>
+
+                                    Shelter:
+                                    ${displayAmenity(review.shelter)}
+
+                                    <br>
+
+                                    Bench:
+                                    ${displayAmenity(review.bench)}
+
+                                    <br><br>
+
+                                    Notes:
+                                    ${
+                                        review.notes &&
+                                        review.notes.trim()
+                                        ? review.notes
+                                        : "No notes provided."
+                                    }
+
+                                    <br><br>
+                                    `
+                                ).join("")
                             }
 
                         </div>

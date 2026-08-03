@@ -341,6 +341,86 @@ VALUES
         "&fov=90"
     )
 
+    reviewer_id = None
+
+    reviewer_key = session.get(
+        "reviewer_key"
+    )
+
+
+    if reviewer_key:
+
+        reviewer_id, reviewer_key = get_or_create_reviewer(
+            reviewer_key
+        )
+
+
+    reviewer_history = []
+
+
+    if reviewer_id:
+
+        reviewer_history = query_db(
+            """
+            SELECT
+                id,
+                observed_at
+
+            FROM stop_observations
+
+            WHERE physical_stop_id=?
+
+            AND reviewer_id=?
+
+            AND source='community_review'
+
+            ORDER BY observed_at DESC
+            """,
+            (
+                stop_id,
+                reviewer_id
+            )
+        )
+
+
+    total_reviews = query_db(
+        """
+        SELECT COUNT(*)
+
+        FROM stop_observations
+
+        WHERE physical_stop_id=?
+
+        AND source='community_review'
+        """,
+        (stop_id,)
+    )
+
+
+    community_review = {
+
+        "has_reviewed": bool(reviewer_history),
+
+        "review_count":
+            len(reviewer_history),
+
+        "total_stop_reviews":
+            total_reviews[0][0]
+            if total_reviews
+            else 0,
+
+        "latest_review_id":
+            reviewer_history[0][0]
+            if reviewer_history
+            else None,
+
+        "last_reviewed_at":
+            reviewer_history[0][1]
+            if reviewer_history
+            else None
+    }
+
+
     return jsonify(
         {
             "success": True,
@@ -876,6 +956,40 @@ GROUP BY ps.id
     )
 
 
+
+    rider_exposure = query_db(
+        '''
+        SELECT
+            assessment_json
+
+        FROM opportunity_assessments
+
+        WHERE physical_stop_id = ?
+        ''',
+        (stop_id,)
+    )
+
+    rider_exposure_percentile = None
+
+    if rider_exposure and rider_exposure[0][0]:
+
+        try:
+
+            assessment = json.loads(
+                rider_exposure[0][0]
+            )
+
+            rider_exposure_percentile = (
+                assessment.get(
+                    "rider_exposure_percentile"
+                )
+            )
+
+        except Exception:
+
+            pass
+
+
     ridership_exposure = (
         {
             "weekday_boardings_total":
@@ -984,6 +1098,87 @@ GROUP BY ps.id
     )
 
 
+    reviewer_key = session.get(
+        "reviewer_key"
+    )
+
+    reviewer_id, reviewer_key = get_or_create_reviewer(
+        reviewer_key
+    )
+
+    print(
+        "REVIEWER:",
+        reviewer_id,
+        reviewer_key
+    )
+
+    session["reviewer_key"] = reviewer_key
+
+
+    reviewer_history = query_db(
+        """
+        SELECT
+            id,
+            observed_at
+
+        FROM stop_observations
+
+        WHERE physical_stop_id=?
+
+        AND reviewer_id=?
+
+        AND source='community_review'
+
+        ORDER BY observed_at DESC
+        """,
+        (
+            stop_id,
+            reviewer_id
+        )
+    )
+
+
+    my_review_count = len(reviewer_history)
+
+
+    total_stop_reviews = query_db(
+        """
+        SELECT COUNT(*)
+
+        FROM stop_observations
+
+        WHERE physical_stop_id=?
+
+        AND source='community_review'
+        """,
+        (stop_id,)
+    )
+
+
+    community_review = {
+
+        "has_reviewed": bool(reviewer_history),
+
+        "my_review_count":
+            my_review_count,
+
+        "total_stop_reviews":
+            total_stop_reviews[0][0]
+            if total_stop_reviews
+            else 0,
+
+        "latest_review_id":
+            reviewer_history[0][0]
+            if reviewer_history
+            else None,
+
+        "last_reviewed_at":
+            reviewer_history[0][1]
+            if reviewer_history
+            else None
+    }
+
+
     return jsonify(
         {
             "stop_id": row[0],
@@ -997,23 +1192,29 @@ GROUP BY ps.id
             "wmata_evidence":
                 wmata_evidence,
 
-            "ridership_exposure":
-                ridership_exposure,
-
+            "community_review":
+                community_review,
 
             "impact_summary":
                 {
-                    "summary": impact_summary[0][0],
-                    "impact_level": impact_summary[0][1],
-                    "recommendations":
-                        json.loads(impact_summary[0][2])
-                        if impact_summary[0][2]
-                        else [],
-                    "opportunity_score": impact_summary[0][3],
-                    "daily_route_exposure": impact_summary[0][4]
+                    "rider_exposure_percentile":
+                        rider_exposure_percentile,
+
+                    "estimated_weekday_boardings":
+                        ridership_exposure["average_weekday_boardings"]
+                        if ridership_exposure
+                        else None,
+
+                    "routes_served":
+                        ridership_exposure["route_count"]
+                        if ridership_exposure
+                        else 0,
+
+                    "routes":
+                        ridership_exposure["routes"]
+                        if ridership_exposure
+                        else []
                 }
-                if impact_summary
-                else None
         }
     )
 
@@ -1116,11 +1317,35 @@ def review_page(stop_id):
 
     stop_row = list(stop[0])
 
+    reviewer_key = session.get("reviewer_key")
+
+    reviewer = None
+
+    if reviewer_key:
+        reviewer = query_db(
+            """
+            SELECT
+                display_name
+            FROM community_reviewers
+            WHERE reviewer_key=?
+            """,
+            (reviewer_key,)
+        )
+
+
+    reviewer_name = (
+        reviewer[0][0]
+        if reviewer and reviewer[0][0]
+        else None
+    )
+
+
     return render_template(
         "review.html",
         stop=stop_row,
         stop_id=stop_id,
-        survey_html=render_survey()
+        survey_html=render_survey(),
+        reviewer_name=reviewer_name
     )
 
 
@@ -1277,6 +1502,59 @@ def review_stop_info(stop_id):
     )
 
 
+    impact_summary = query_db(
+        '''
+        SELECT
+            summary,
+            impact_level,
+            recommendations,
+            opportunity_score,
+            daily_route_exposure
+
+        FROM stop_improvement_impact
+
+        WHERE physical_stop_id = ?
+        ''',
+        (stop_id,)
+    )
+
+
+    rider_exposure = query_db(
+        '''
+        SELECT
+            assessment_json
+
+        FROM opportunity_assessments
+
+        WHERE physical_stop_id = ?
+        ''',
+        (stop_id,)
+    )
+
+
+    rider_exposure_percentile = None
+
+
+    if rider_exposure and rider_exposure[0][0]:
+
+        try:
+
+            assessment = json.loads(
+                rider_exposure[0][0]
+            )
+
+            rider_exposure_percentile = (
+                assessment.get(
+                    "rider_exposure_percentile"
+                )
+            )
+
+        except Exception:
+
+            pass
+
+
+
     streetview = get_road_index().nearest_road(
         row[2],
         row[3]
@@ -1295,8 +1573,24 @@ def review_stop_info(stop_id):
         f"&heading={heading or 0}"
     )
 
-    print("RIDERSHIP QUERY RESULT:", ridership)
-    print("RIDERSHIP EXPOSURE:", ridership_exposure)
+
+    community_reviews = query_db(
+        """
+        SELECT
+            id,
+            observed_at,
+            shelter_present,
+            bench_present,
+            notes
+        FROM stop_observations
+        WHERE physical_stop_id=?
+        AND source='community_review'
+        ORDER BY observed_at DESC
+        """,
+        (stop_id,)
+    )
+
+
     return jsonify(
         {
             "stop_id": row[0],
@@ -1309,6 +1603,9 @@ def review_stop_info(stop_id):
             "anc": row[6],
             "county": row[7],
             "municipality": row[8],
+
+            "serving_direction":
+                row[11],
 
             "streetview_url": streetview_url,
 
@@ -1336,21 +1633,68 @@ def review_stop_info(stop_id):
                 "wmata_accessible": row[14],
                 "match_distance_m": row[15],
                 "match_confidence": row[16]
-            }
+            },
 
 
-            ,
+            "community_reviews": {
+                "review_count": len(community_reviews),
+
+                "reviews": [
+                    {
+                        "id": review[0],
+                        "date": review[1],
+                        "shelter": review[2],
+                        "bench": review[3],
+                        "notes": review[4].strip() if review[4] else ""
+                    }
+                    for review in community_reviews
+                ]
+            },
+
 
             "ridership_exposure":
-                ridership_exposure
+                ridership_exposure,
+
+            "impact_summary":
+                {
+                    "rider_exposure_percentile":
+                        rider_exposure_percentile,
+
+                    "estimated_weekday_boardings":
+                        ridership_exposure["average_weekday_boardings"]
+                        if ridership_exposure
+                        else None,
+
+                    "routes_served":
+                        ridership_exposure["route_count"]
+                        if ridership_exposure
+                        else 0,
+
+                    "routes":
+                        ridership_exposure["routes"]
+                        if ridership_exposure
+                        else []
+                }
         }
     )
 
 
 
 
+
 @app.route("/review/<int:stop_id>/assignment")
 def review_assignment(stop_id):
+
+    reviewer_key = session.get(
+        "reviewer_key"
+    )
+
+    reviewer_id, reviewer_key = get_or_create_reviewer(
+        reviewer_key
+    )
+
+    session["reviewer_key"] = reviewer_key
+
 
     assignment_id = request.args.get(
         "assignment_id"
@@ -1387,15 +1731,16 @@ def review_assignment(stop_id):
             FROM stop_review_assignments
 
             WHERE stop_id=?
-
+            AND reviewer_id=?
             AND status='assigned'
 
-            ORDER BY id
+            ORDER BY id DESC
 
             LIMIT 1
             """,
             (
                 stop_id,
+                reviewer_id
             )
         )
 
@@ -1416,12 +1761,12 @@ def review_assignment(stop_id):
                 scenario,
                 status
             )
-            VALUES
-            (?, ?, ?, 'assigned')
+
+            VALUES (?, ?, ?, 'assigned')
             """,
             (
                 stop_id,
-                "anonymous",
+                reviewer_id,
                 scenario
             )
         )
@@ -1437,7 +1782,7 @@ def review_assignment(stop_id):
             FROM stop_review_assignments
 
             WHERE stop_id=?
-
+            AND reviewer_id=?
             AND status='assigned'
 
             ORDER BY id DESC
@@ -1446,32 +1791,12 @@ def review_assignment(stop_id):
             """,
             (
                 stop_id,
-            )
-        )
-
-        assignment = query_db(
-            """
-            SELECT
-                id,
-                reviewer_id,
-                stop_id
-
-            FROM stop_review_assignments
-
-            WHERE stop_id=?
-
-            AND status='assigned'
-
-            ORDER BY id DESC
-
-            LIMIT 1
-            """,
-            (
-                stop_id,
+                reviewer_id
             )
         )
 
 
+    if not assignment:
 
         return jsonify(
             {
@@ -1495,10 +1820,58 @@ def review_assignment(stop_id):
     )
 
 
+
+
+@app.route("/stops/<int:stop_id>/community-reviews")
+def community_reviews(stop_id):
+
+    reviews = query_db(
+        """
+        SELECT
+            id,
+            observed_at,
+            shelter_present,
+            bench_present,
+            notes,
+            reviewer_id
+        FROM stop_observations
+        WHERE physical_stop_id=?
+        AND source='community_review'
+        ORDER BY observed_at DESC
+        """,
+        (stop_id,)
+    )
+
+
+    return jsonify(
+        {
+            "review_count":
+                len(reviews),
+
+            "reviews":
+                [
+                    {
+                        "id": row[0],
+                        "date": row[1],
+                        "shelter": row[2],
+                        "bench": row[3],
+                        "notes": row[4]
+                    }
+                    for row in reviews
+                ]
+        }
+    )
+
+
 @app.route("/review/submit", methods=["POST"])
 def submit_review():
 
     data = request.json
+
+    print(
+        "SUBMIT DATA:",
+        data
+    )
 
 
     if isinstance(data.get("seating_type"), list):
@@ -1551,14 +1924,106 @@ def submit_review():
 
 
     stop_id = data.get("stop_id")
-    reviewer_id = data.get("reviewer_id")
     assignment_id = data.get("assignment_id")
 
 
-    if not assignment_id or not reviewer_id:
+    reviewer_key = session.get(
+        "reviewer_key"
+    )
+
+    reviewer_id, reviewer_key = get_or_create_reviewer(
+        reviewer_key
+    )
+
+    session["reviewer_key"] = reviewer_key
+
+
+    display_name = data.get(
+        "display_name",
+        ""
+    ).strip()
+
+
+    if display_name:
+
+        query_db(
+            """
+            UPDATE community_reviewers
+            SET
+                display_name=?,
+                profile_created_at=CURRENT_TIMESTAMP
+            WHERE id=?
+            """,
+            (
+                display_name,
+                reviewer_id
+            )
+        )
+
+
+
+    if not assignment_id:
         return {
-            "error": "assignment_id and reviewer_id required"
+            "error": "valid assignment_id required"
         }, 400
+
+
+    existing_review = query_db(
+        """
+        SELECT id
+        FROM stop_observations
+        WHERE physical_stop_id=?
+        AND reviewer_id=?
+        AND source='community_review'
+        LIMIT 1
+        """,
+        (
+            stop_id,
+            reviewer_id
+        )
+    )
+
+
+    review_action = data.get(
+        "review_action",
+        "new"
+    )
+
+
+    if existing_review and review_action == "update":
+
+        query_db(
+            """
+            UPDATE stop_observations
+            SET
+                shelter_present=?,
+                bench_present=?,
+                trash_present=?,
+                bench_feasible=?,
+                ada_clearance_possible=?,
+                notes=?,
+                observed_at=CURRENT_TIMESTAMP
+            WHERE id=?
+            """,
+            (
+                data.get("shelter_present"),
+                data.get("bench_present"),
+                data.get("trash_present"),
+                data.get("bench_feasible"),
+                data.get("ada_clearance_possible"),
+                data.get("notes"),
+                existing_review[0][0]
+            )
+        )
+
+
+        return {
+            "success": True,
+            "message": "Review updated",
+            "stop_id": stop_id
+        }
+
+
 
 
     query_db(
@@ -1646,13 +2111,233 @@ def submit_review():
     )[0][0]
 
 
+    first_review = (
+        query_db(
+            """
+            SELECT COUNT(*)
+            FROM stop_review_assignments
+            WHERE stop_id=?
+            AND status='completed'
+            """,
+            (stop_id,)
+        )[0][0]
+        == 1
+    )
+
+
+    impact = query_db(
+        """
+        SELECT
+            daily_route_exposure
+        FROM stop_improvement_impact
+        WHERE physical_stop_id=?
+        """,
+        (stop_id,)
+    )
+
+
     return {
         "success": True,
         "stop_id": stop_id,
         "assignment_id": assignment_id,
         "reviewer_id": reviewer_id,
-        "review_count": review_count
+
+        "reviewer_stats": {
+
+            "display_name":
+                query_db(
+                    """
+                    SELECT display_name
+                    FROM community_reviewers
+                    WHERE id=?
+                    """,
+                    (reviewer_id,)
+                )[0][0],
+
+            "review_count":
+                review_count,
+
+            "first_review":
+                first_review,
+
+            "stops_reviewed":
+                query_db(
+                    """
+                    SELECT COUNT(DISTINCT stop_id)
+                    FROM stop_review_assignments
+                    WHERE reviewer_id=?
+                    AND status='completed'
+                    """,
+                    (reviewer_id,)
+                )[0][0],
+
+            "total_route_boardings_represented":
+                round(
+                    query_db(
+                        """
+                        SELECT
+                            COALESCE(
+                                SUM(unique_stops.daily_route_exposure),
+                                0
+                            )
+
+                        FROM (
+
+                            SELECT DISTINCT
+                                sra.stop_id,
+                                si.daily_route_exposure
+
+                            FROM stop_review_assignments sra
+
+                            LEFT JOIN stop_improvement_impact si
+
+                            ON sra.stop_id =
+                               si.physical_stop_id
+
+                            WHERE sra.reviewer_id=?
+
+                            AND sra.status='completed'
+
+                        ) unique_stops
+                        """,
+                        (reviewer_id,)
+                    )[0][0]
+                ),
+
+            "routes_covered":
+                (
+                    query_db(
+                        """
+                        SELECT
+                            GROUP_CONCAT(
+                                DISTINCT r.route_id
+                            )
+
+                        FROM stop_review_assignments sra
+
+                        JOIN physical_stop_members psm
+                        ON sra.stop_id =
+                           psm.physical_stop_id
+
+                        JOIN stop_routes sr
+                        ON psm.bus_stop_id =
+                           sr.stop_id
+
+                        JOIN routes r
+                        ON sr.route_id =
+                           r.route_id
+
+                        WHERE sra.reviewer_id=?
+
+                        AND sra.status='completed'
+                        """,
+                        (reviewer_id,)
+                    )[0][0].split(",")
+                    if query_db(
+                        """
+                        SELECT
+                            GROUP_CONCAT(
+                                DISTINCT r.route_id
+                            )
+
+                        FROM stop_review_assignments sra
+
+                        JOIN physical_stop_members psm
+                        ON sra.stop_id =
+                           psm.physical_stop_id
+
+                        JOIN stop_routes sr
+                        ON psm.bus_stop_id =
+                           sr.stop_id
+
+                        JOIN routes r
+                        ON sr.route_id =
+                           r.route_id
+
+                        WHERE sra.reviewer_id=?
+
+                        AND sra.status='completed'
+                        """,
+                        (reviewer_id,)
+                    )[0][0]
+                    else []
+                )
+
+        },
+
+"community_impact": {
+
+    "daily_route_exposure":
+        impact[0][0]
+        if impact
+        else None,
+
+    "routes":
+        (
+            query_db(
+                """
+                SELECT
+                    GROUP_CONCAT(DISTINCT r.route_id)
+
+                FROM physical_stop_members psm
+
+                JOIN stop_routes sr
+                    ON psm.bus_stop_id = sr.stop_id
+
+                JOIN routes r
+                    ON sr.route_id = r.route_id
+
+                WHERE psm.physical_stop_id=?
+
+                """,
+                (stop_id,)
+            )[0][0].split(",")
+            if query_db(
+                """
+                SELECT
+                    GROUP_CONCAT(DISTINCT r.route_id)
+
+                FROM physical_stop_members psm
+
+                JOIN stop_routes sr
+                    ON psm.bus_stop_id = sr.stop_id
+
+                JOIN routes r
+                    ON sr.route_id = r.route_id
+
+                WHERE psm.physical_stop_id=?
+
+                """,
+                (stop_id,)
+            )[0][0]
+            else []
+        )
     }
+    }
+
+
+def get_reviewer_impact(reviewer_id):
+
+    return query_db(
+        """
+        SELECT
+            COUNT(DISTINCT sra.stop_id),
+            COALESCE(SUM(si.daily_route_exposure),0)
+
+        FROM stop_review_assignments sra
+
+        LEFT JOIN stop_improvement_impact si
+            ON sra.stop_id = si.physical_stop_id
+
+        WHERE sra.reviewer_id=?
+
+        AND sra.status='completed'
+
+        """,
+        (reviewer_id,)
+    )[0]
+
+
 
 
 @app.route("/api/review-queue")

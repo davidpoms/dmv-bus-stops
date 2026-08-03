@@ -505,3 +505,20 @@ td, th {
     margin-bottom: 0;
 }
 
+
+
+.impact-section {
+    margin-top: 24px;
+    padding: 18px;
+    border-radius: 12px;
+    border: 1px solid #ddd;
+}
+
+.impact-section h2 {
+    margin-top: 0;
+}
+
+.current-review {
+    margin-top: 20px;
+}
+

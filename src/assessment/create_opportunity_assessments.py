@@ -203,20 +203,6 @@ def create_assessments():
         )
 
 
-        priority_row = cursor.fetchone()
-
-
-        priority_source = {}
-
-        if priority_row and priority_row[0]:
-
-            try:
-                priority_source = json.loads(
-                    priority_row[0]
-                )
-            except Exception:
-                pass
-
 
 
         assessment = {
@@ -248,8 +234,6 @@ def create_assessments():
 
             },
 
-            "priority_source":
-                priority_source
 
         }
 

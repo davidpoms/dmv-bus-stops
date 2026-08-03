@@ -293,7 +293,7 @@ function loadStops() {
 
 
                                 let reviewReason =
-                                    "This stop has been identified as a possible opportunity for improvement. Community feedback will help determine whether riders would benefit from better waiting conditions.";
+                                    "This stop has been prioritized for community verification because available information suggests additional review would be valuable. Community feedback will help confirm current waiting conditions and document where additional verification is valuable.";
 
 
                                 if (
@@ -313,7 +313,7 @@ function loadStops() {
                                 ) {
 
                                     reviewReason =
-                                        "Available records disagree about existing amenities at this stop. Public mapping suggests some waiting amenities may be present, while WMATA inventory does not show them. Your review will help confirm current conditions and whether additional improvements are needed.";
+                                        "Available records disagree about existing amenities at this stop. Public mapping suggests some waiting amenities may be present, while WMATA inventory does not show them. Your review will help confirm current conditions and identify whether improvements may be needed.";
 
                                 }
 
@@ -324,7 +324,7 @@ function loadStops() {
                                 ) {
 
                                     reviewReason =
-                                        "Community members have already provided feedback about this stop. Additional observations help confirm improvement needs.";
+                                        "Community members have already provided feedback about this stop. Additional observations help improve confidence in the available information.";
 
                                 }
 
@@ -338,7 +338,7 @@ function loadStops() {
                                 ) {
 
                                     reviewReason =
-                                        "Available records indicate this stop likely has a shelter. Your review will help determine whether additional improvements, such as seating, accessibility features, or other waiting area enhancements, would better support riders.";
+                                        "Available records indicate this stop likely has a shelter. Your review will help confirm current conditions and identify whether additional waiting area improvements could better support riders.";
 
                                 }
 
@@ -350,7 +350,7 @@ function loadStops() {
                                 ) {
 
                                     reviewReason =
-                                        "This stop appears to have a shelter, but seating information needs verification. Your review will help determine whether riders have adequate places to sit while waiting.";
+                                        "This stop appears to have a shelter, but seating information needs verification. Your review helps document current waiting conditions and available amenities.";
 
                                 }
 
@@ -364,7 +364,7 @@ function loadStops() {
                                 ) {
 
                                     reviewReason =
-                                        "Available records do not show a shelter or bench. Your review will help determine whether riders would benefit from improved waiting conditions.";
+                                        "Available records do not show a shelter or bench. Your review helps confirm current stop conditions and improve the accuracy of public information.";
 
                                 }
 
@@ -381,8 +381,8 @@ function loadStops() {
 
                                 <b>
                                 ${
-                                    detail.ridership_exposure
-                                    ? detail.ridership_exposure.average_weekday_boardings.toLocaleString()
+                                    detail.impact_summary
+                                    ? detail.impact_summary.estimated_weekday_boardings.toLocaleString()
                                     : "Unknown"
                                 }
                                 weekday boardings per day
@@ -395,11 +395,41 @@ function loadStops() {
 
                                 Routes:
                                 ${
-                                    detail.ridership_exposure &&
-                                    detail.ridership_exposure.routes.length
-                                    ? detail.ridership_exposure.routes.join(", ")
+                                    detail.impact_summary &&
+                                    detail.impact_summary.routes.length
+                                    ? detail.impact_summary.routes.join(", ")
                                     : "Unknown"
                                 }
+
+                                <br><br>
+
+                                <b>Rider exposure percentile:</b>
+                                ${
+                                    detail.impact_summary &&
+                                    detail.impact_summary.rider_exposure_percentile !== null
+                                    ? detail.impact_summary.rider_exposure_percentile + "th percentile"
+                                    : "Unknown"
+                                }
+
+
+                                <br><br>
+
+                                ${
+                                    detail.community_review &&
+                                    detail.community_review.has_reviewed
+                                    ?
+                                    `
+                                    <b>✅ You have reviewed this stop</b><br>
+                                    Community observations submitted:
+                                    ${detail.community_review.review_count}
+                                    `
+                                    :
+                                    `
+                                    <b>Community review status:</b><br>
+                                    No review submitted by you yet.
+                                    `
+                                }
+
 
                                 <br><br>
 
@@ -1504,3 +1534,75 @@ window.addEventListener(
     "load",
     loadRouteFilter
 );
+
+
+function enableNearbyReview(){
+
+    const link =
+        document.getElementById(
+            "nearbyReviewLink"
+        );
+
+
+    if(!link){
+        return;
+    }
+
+
+    link.addEventListener(
+        "click",
+        function(event){
+
+            event.preventDefault();
+
+
+            if(!navigator.geolocation){
+
+                alert(
+                    "Location services are not available."
+                );
+
+                return;
+            }
+
+
+            navigator.geolocation.getCurrentPosition(
+
+                function(position){
+
+                    const lat =
+                        position.coords.latitude;
+
+                    const lon =
+                        position.coords.longitude;
+
+
+                    window.location.href =
+                        `/review/start?mode=nearby`
+                        + `&lat=${lat}`
+                        + `&lon=${lon}`;
+
+                },
+
+
+                function(){
+
+                    alert(
+                        "Unable to get your location. Please allow location access."
+                    );
+
+                }
+
+            );
+
+        }
+    );
+
+}
+
+
+window.addEventListener(
+    "load",
+    enableNearbyReview
+);
+
