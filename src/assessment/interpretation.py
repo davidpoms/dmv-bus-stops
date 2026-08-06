@@ -113,6 +113,7 @@ def summarize_stop_evidence(evidence):
 
     osm = evidence.get("osm") or {}
     transit = evidence.get("transit") or {}
+    ddot = evidence.get("ddot") or []
     reviews = evidence.get("reviews") or []
 
     return {
@@ -129,6 +130,46 @@ def summarize_stop_evidence(evidence):
 
         "community_reviews":
             len(reviews),
+
+
+        "ddot_shelter": {
+
+            "records":
+                len(ddot),
+
+            "confirmed_active":
+                any(
+                    r.get("lifecycle_status")
+                    == "CONFIRMED_ACTIVE"
+                    for r in ddot
+                ),
+
+            "possible_new":
+                any(
+                    r.get("lifecycle_status")
+                    == "POSSIBLE_NEW_DDOT_SHELTER"
+                    for r in ddot
+                ),
+
+            "removed":
+                any(
+                    r.get("lifecycle_status")
+                    == "MATCHED_REMOVED"
+                    for r in ddot
+                ),
+
+            "routes":
+                sorted(
+                    {
+                        route
+                        for r in ddot
+                        for route in
+                        (r.get("route_ids") or "").split(",")
+                        if route
+                    }
+                )
+        },
+
 
         "data_sources": [
             source
@@ -175,3 +216,92 @@ def generate_review_action_summary(evidence, review_priority):
         "recommended_actions": actions
     }
 
+
+
+
+
+def interpret_ddot_evidence(ddot_records):
+
+    results = []
+
+    for record in ddot_records or []:
+
+        status = record.get(
+            "lifecycle_status"
+        )
+
+        if status == "CONFIRMED_ACTIVE":
+            finding = (
+                "DDOT records indicate an active "
+                "shelter installation at this stop."
+            )
+
+        elif status == "REMOVED_BUT_ROUTE_ACTIVE":
+            finding = (
+                "DDOT previously recorded shelter "
+                "infrastructure, but the lifecycle "
+                "status indicates it may no longer exist."
+            )
+
+        elif status == "POSSIBLE_NEW_DDOT_SHELTER":
+            finding = (
+                "DDOT records suggest a possible "
+                "new shelter location requiring validation."
+            )
+
+        else:
+            finding = (
+                "DDOT shelter inventory record available "
+                "for this stop."
+            )
+
+
+        source_label = (
+            "DDOT API shelter asset record"
+            if record.get("api_id")
+            else
+            "DDOT shelter procurement inventory July 2026"
+        )
+
+
+        results.append(
+            {
+                "source":
+                    source_label,
+
+                "source_type":
+                    (
+                        "api"
+                        if record.get("api_id")
+                        else
+                        "procurement"
+                    ),
+
+                "source_record":
+                    record.get("ddot_id")
+                    or record.get("api_id"),
+
+                "finding":
+                    finding,
+
+                "routes":
+                    record.get("routes", []),
+
+                "confidence":
+                    record.get("confidence"),
+
+                "details":
+                    (
+                        record.get("notes")
+                        .replace(
+                            "DDOT procurement shelter inventory.",
+                            "DDOT asset record."
+                        )
+                        if record.get("notes")
+                        else None
+                    )
+            }
+        )
+
+
+    return results

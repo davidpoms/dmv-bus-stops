@@ -201,6 +201,11 @@ JOIN stop_routes sr
 
 
         
+JOIN routes r
+
+    ON sr.route_id = r.id
+
+
 LEFT JOIN
 (
     SELECT
@@ -210,8 +215,7 @@ LEFT JOIN
     FROM ridership_snapshots
 ) rd
 
-ON sr.route_id = rd.route_id
-
+ON r.route_id = rd.route_id
 
 
         GROUP BY ps.id;

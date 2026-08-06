@@ -68,21 +68,15 @@ def generate_impact_summary():
 
             io.physical_stop_id,
 
-            oa.combined_route_weekday_boardings,
+            io.factors,
 
             io.opportunity_score,
-
-            oa.assessment_json,
 
             GROUP_CONCAT(
                 ir.recommendation_type
             )
 
         FROM improvement_opportunities io
-
-        JOIN opportunity_assessments oa
-
-            ON io.physical_stop_id = oa.physical_stop_id
 
         LEFT JOIN improvement_recommendations ir
 
@@ -92,11 +86,9 @@ def generate_impact_summary():
 
             io.physical_stop_id,
 
-            oa.combined_route_weekday_boardings,
+            io.factors,
 
-            io.opportunity_score,
-
-            oa.assessment_json
+            io.opportunity_score
 
         ORDER BY
 
@@ -115,15 +107,24 @@ def generate_impact_summary():
 
         (
             stop_id,
-            daily_route_exposure,
+            factors_json,
             opportunity_score,
-            assessment_json,
             recommendations
         ) = row
 
 
-        assessment = json.loads(
-            assessment_json
+        factors = json.loads(
+            factors_json
+        )
+
+
+        daily_route_exposure = (
+            factors
+            .get("route_exposure", {})
+            .get(
+                "combined_route_weekday_boardings",
+                0
+            )
         )
 
 
@@ -161,7 +162,7 @@ def generate_impact_summary():
         if not recommendation_list:
 
             assessment_score = (
-                assessment
+                factors
                 .get("route_exposure", {})
                 .get(
                     "combined_route_weekday_boardings",
@@ -190,7 +191,7 @@ def generate_impact_summary():
         )
 
 
-        percentile = assessment.get(
+        percentile = factors.get(
             "rider_exposure_percentile"
         )
 

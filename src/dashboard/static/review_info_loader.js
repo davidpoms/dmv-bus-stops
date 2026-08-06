@@ -132,7 +132,7 @@ document.addEventListener(
                         <div class="evidence-card">
 
                             <strong>
-                            Why this stop was prioritized
+                            Why this stop was selected
                             </strong>
 
                             <br><br>
@@ -215,7 +215,7 @@ document.addEventListener(
                         <div class="evidence-card">
 
                             <strong>
-                            Why this stop needs verification
+                            Community verification need
                             </strong>
 
                             <br><br>

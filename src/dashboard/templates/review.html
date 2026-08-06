@@ -23,6 +23,30 @@ Loading stop information...
 </div>
 
 
+<div class="panel volunteer-card">
+
+<h3>
+Want to help beyond this review?
+</h3>
+
+<p>
+Steward this stop and help track future improvements with other community members.
+</p>
+
+<button
+type="button"
+id="stewardStopButton"
+class="dashboard-button">
+
+Steward this stop
+
+</button>
+
+<p id="stewardStatus"></p>
+
+</div>
+
+
 
 <form id="reviewForm">
 
@@ -106,6 +130,49 @@ Submit Review
 
 
 </form>
+
+
+
+<script>
+
+document
+.getElementById("stewardStopButton")
+.addEventListener(
+"click",
+async function(){
+
+    const stopId =
+        window.location.pathname.split("/").pop();
+
+
+    const response =
+        await fetch(
+            /stops//steward,
+            {
+                method:"POST",
+
+                headers:{
+                    "Content-Type":"application/json"
+                },
+
+                body:
+                    JSON.stringify({})
+            }
+        );
+
+
+    const data =
+        await response.json();
+
+
+    document
+    .getElementById("stewardStatus")
+    .innerText =
+        "You are now a community steward for this stop!";
+
+});
+
+</script>
 
 
 
@@ -402,6 +469,23 @@ ${
 
 
 ${
+    result.reviewer_stats.stewarded_stops
+    ?
+    `
+    <p>
+    You are a community steward for
+    <strong>
+    ${result.reviewer_stats.stewarded_stops}
+    </strong>
+    stop(s).
+    </p>
+    `
+    :
+    ""
+}
+
+
+${
     result.reviewer_stats.total_route_boardings_represented
     ?
     `
@@ -442,6 +526,10 @@ ${
 
 <a href="/review/start?mode=opportunity">
 Review another stop
+</a>
+
+<a href="/reviewer/profile">
+View my community profile
 </a>
 
 <a href="/dashboard">

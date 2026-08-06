@@ -484,7 +484,7 @@ function loadStops() {
                                     <button
                                         class="adoptStopButton"
                                         data-stop="${props.stop_id}">
-                                        Become a community steward
+                                        Steward this stop
                                     </button>
                                     `;
 
@@ -753,7 +753,7 @@ document.addEventListener(
 
 
             fetch(
-                `/stops/${stopId}/community-action`,
+                `/stops/${stopId}/steward`,
                 {
                     method: "POST",
 
@@ -762,17 +762,7 @@ document.addEventListener(
                         "application/json"
                     },
 
-                    body: JSON.stringify(
-                        {
-                            status: "planned",
-                            project_type:
-                                "community_review",
-                            steward:
-                                "Dashboard Volunteer",
-                            notes:
-                                "Adopted through dashboard"
-                        }
-                    )
+                    body: JSON.stringify({})
                 }
             )
             .then(
@@ -782,7 +772,7 @@ document.addEventListener(
                 data => {
 
                     alert(
-                        "Stop adopted!"
+                        "You are now a community steward for this stop!"
                     );
 
                     location.reload();
@@ -842,9 +832,10 @@ function renderPipeline(rows){
     body.innerHTML="";
 
 
-    rows.forEach(row=>{
+    
+rows.forEach(row=>{
 
-        body.innerHTML += `
+body.innerHTML += `
 
 <tr>
 
@@ -852,42 +843,20 @@ function renderPipeline(rows){
 
 <td>${row.geography}</td>
 
-<td>${row.stops}</td>
+<td>${row.total_stops}</td>
 
-<td>${row.queued}</td>
+<td>${row.shelter_likely_confirmed}</td>
 
-<td>${row.reviewed}</td>
+<td>${row.bench_likely_confirmed}</td>
 
-<td>${row.consensus}</td>
-
-<td>
-${row.wmata_evidence || 0}
-</td>
-
-<td>
-${row.osm?.mapped_benches || 0}
-</td>
-
-<td>
-${row.osm?.mapped_shelters || 0}
-</td>
-
-<td>
-
-<progress
-value="${row.completion_pct}"
-max="100">
-</progress>
-
-${row.completion_pct}%
-
-</td>
+<td>${row.amenity_status_unknown}</td>
 
 </tr>
 
 `;
 
-    });
+});
+
 
 }
 
@@ -1608,3 +1577,71 @@ window.addEventListener(
     "load",
     enableNearbyReview
 );
+
+async function loadCommunityProfileCard(){
+
+    const card =
+        document.getElementById(
+            "communityProfileCard"
+        );
+
+
+    if(!card){
+        return;
+    }
+
+
+    try {
+
+        const response =
+            await fetch(
+                "/api/reviewer/status"
+            );
+
+
+        const data =
+            await response.json();
+
+
+        if(data.has_profile){
+
+            card.style.display =
+                "block";
+
+
+            const name =
+                document.getElementById(
+                    "communityProfileName"
+                );
+
+
+            if(name){
+
+                name.innerText =
+                    data.display_name ||
+                    "Community Volunteer";
+
+            }
+
+        }
+
+    }
+
+    catch(error){
+
+        console.error(
+            "Unable to load reviewer profile:",
+            error
+        );
+
+    }
+
+}
+
+
+
+window.addEventListener(
+    "load",
+    loadCommunityProfileCard
+);
+
