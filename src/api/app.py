@@ -1530,6 +1530,44 @@ def review_stop_info(stop_id):
     row = stop[0]
 
 
+    ddot_evidence = query_db(
+        '''
+        SELECT
+            physical_stop_id,
+            ddot_id,
+            api_id,
+            lifecycle_status,
+            route_ids,
+            route_count,
+            confidence,
+            notes
+        FROM stop_ddot_shelter_evidence
+        WHERE physical_stop_id = ?
+        ''',
+        (stop_id,)
+    )
+
+
+    ddot_evidence_payload = [
+        {
+            "physical_stop_id": r[0],
+            "ddot_id": r[1],
+            "api_id": r[2],
+            "lifecycle_status": r[3],
+            "routes": r[4].split(",") if r[4] else [],
+            "route_count": r[5],
+            "confidence": r[6],
+            "notes": r[7]
+        }
+        for r in ddot_evidence
+    ]
+
+
+    ddot_interpretation = interpret_ddot_evidence(
+        ddot_evidence_payload
+    )
+
+
 
     ridership = query_db(
         '''
@@ -1813,6 +1851,14 @@ def review_stop_info(stop_id):
                 "match_distance_m": row[15],
                 "match_confidence": row[16]
             },
+
+
+            "ddot_evidence":
+                ddot_evidence_payload,
+
+
+            "ddot_interpretation":
+                ddot_interpretation,
 
 
             "community_reviews": {

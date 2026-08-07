@@ -229,13 +229,11 @@ async function loadStopProfile(){
                 stop.ddot_interpretation &&
                 stop.ddot_interpretation.some(
                     item =>
-                    item.finding &&
-                    item.finding.includes(
-                        "active shelter"
-                    )
+                    item.evidence_class ===
+                    "current_asset"
                 )
                 ?
-                "✓ Confirmed present"
+                "✓ DDOT shelter asset identified"
                 :
                 "No confirmed evidence"
             }
@@ -271,7 +269,7 @@ async function loadStopProfile(){
                     <div>
 
                         <strong>
-                        ${item.source}
+                        ${item.public_status || item.source}
                         </strong>
 
                         <br>

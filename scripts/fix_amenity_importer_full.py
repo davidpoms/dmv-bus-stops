@@ -1,7 +1,12 @@
-import sqlite3
+from pathlib import Path
 
+path = Path("src/amenities/importer.py")
 
+text = path.read_text()
 
+start = text.index("def insert_amenity_evidence(")
+
+replacement = r'''
 def insert_amenity_evidence(
     db,
     physical_stop_id,
@@ -62,3 +67,8 @@ def insert_amenity_evidence(
     conn.close()
 
     return inserted == 1
+'''
+
+path.write_text(text[:start] + replacement)
+
+print("Rebuilt amenity importer with metadata support")

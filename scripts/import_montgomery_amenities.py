@@ -8,8 +8,8 @@ sys.path.append(
 import requests
 
 from src.amenities.importer import insert_amenity_evidence
-from src.amenities.matcher import find_nearest_physical_stop
-
+from src.amenities.matcher import find_nearest_wmata_stop
+from src.amenities.route_filter import has_wmata_route, extract_wmata_routes
 
 DB = Path(
     "src/database/dmv_bus_stops.db"
@@ -26,7 +26,8 @@ PARAMS = {
     "where": "1=1",
     "outFields": "*",
     "returnGeometry": "true",
-    "outSR": 4326,
+    "returnTrueCurves": "false",
+    "outSR": "4326",
     "f": "json"
 }
 
@@ -44,29 +45,64 @@ print(
 )
 
 
-response = requests.get(
-    URL,
-    params=PARAMS,
-    timeout=60
-)
 
-response.raise_for_status()
+all_features = []
 
+offset = 0
 
-data = response.json()
+page_size = 2000
 
 
-features = data.get(
-    "features",
-    []
-)
+while True:
+
+    print(
+        f"Fetching records {offset}-{offset + page_size - 1}"
+    )
+
+    params = PARAMS.copy()
+
+    params.update(
+        {
+            "resultOffset": offset,
+            "resultRecordCount": page_size
+        }
+    )
+
+
+    response = requests.get(
+        URL,
+        params=params,
+        timeout=60
+    )
+
+    response.raise_for_status()
+
+    data = response.json()
+
+    page = data.get(
+        "features",
+        []
+    )
+
+
+    all_features.extend(page)
+
+
+    if len(page) < page_size:
+        break
+
+
+    offset += page_size
+
+
+
+features = all_features
 
 
 print(
     "Records:",
     len(features)
 )
-
 
 matched = 0
 inserted = 0
@@ -79,7 +115,10 @@ for feature in features:
         "attributes",
         {}
     )
+    routes = attrs.get("ROUTES")
 
+    if not has_wmata_route(routes):
+      continue
 
     geometry = feature.get(
         "geometry"
@@ -104,7 +143,7 @@ for feature in features:
 
 
 
-    match = find_nearest_physical_stop(
+    match = find_nearest_wmata_stop(
         DB,
         lat,
         lon
@@ -139,7 +178,7 @@ for feature in features:
         was_inserted = insert_amenity_evidence(
             DB,
             physical_stop_id=stop_id,
-            source="MONTGOMERY_COUNTY",
+            source="MONTGOMERY_COUNTY_WMATA",
             source_record_id=str(
                 attrs.get("STOPID")
             ),
@@ -147,7 +186,12 @@ for feature in features:
             present=present,
             confidence="high",
             match_distance_m=match["distance_m"],
-            notes=None
+        jurisdiction="MONTGOMERY_COUNTY",
+        value="yes" if present else "no",
+        raw_value=str(value),
+            notes="WMATA routes: " + ",".join(
+               extract_wmata_routes(routes)
+            ),
         )
 
 

@@ -1,5 +1,11 @@
-import sqlite3
+from pathlib import Path
 
+
+FILE = Path("src/amenities/importer.py")
+
+
+NEW_CONTENT = r'''
+import sqlite3
 
 
 def insert_amenity_evidence(
@@ -16,8 +22,6 @@ def insert_amenity_evidence(
     value=None,
     raw_value=None
 ):
-
-    import sqlite3
 
     conn = sqlite3.connect(db)
 
@@ -62,3 +66,14 @@ def insert_amenity_evidence(
     conn.close()
 
     return inserted == 1
+'''
+
+
+FILE.write_text(
+    NEW_CONTENT.strip() + "\n"
+)
+
+
+print(
+    "Replaced amenity importer with metadata-aware version"
+)

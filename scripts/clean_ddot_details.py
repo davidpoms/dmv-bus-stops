@@ -1,17 +1,11 @@
 from pathlib import Path
 
-
 path = Path("src/assessment/interpretation.py")
 
-text = path.read_text()
+text = path.read_text(encoding="utf-8")
 
-
-old = '''                "details":
-                    record.get("notes")
-'''
-
-
-new = '''                "details":
+text = text.replace(
+'''                "details":
                     (
                         record.get("notes")
                         .replace(
@@ -20,20 +14,18 @@ new = '''                "details":
                         )
                         if record.get("notes")
                         else None
-                    )
-'''
-
-
-if old not in text:
-    raise Exception(
-        "Could not find DDOT details block"
-    )
-
+                    )''',
+'''                "details":
+                    (
+                        "Matched DDOT asset record."
+                        if evidence_class == "current_asset"
+                        else None
+                    )'''
+)
 
 path.write_text(
-    text.replace(old,new)
+    text,
+    encoding="utf-8"
 )
 
-print(
-    "Cleaned DDOT evidence details"
-)
+print("Cleaned DDOT interpretation details")
