@@ -32,67 +32,77 @@ document.addEventListener(
 
         function updateSections(){
 
-            const mode = getReviewMode();
+        const mode = getReviewMode();
 
+        const survey =
+            document.getElementById(
+                "surveyContent"
+            );
 
-            const survey =
-                document.getElementById(
-                    "surveyContent"
-                );
+        if(survey){
 
+            survey.style.display =
+                mode
+                ? "block"
+                : "none";
 
-            if(survey){
+        }
 
-                survey.style.display =
-                    mode
-                    ? "block"
-                    : "none";
+        document
+        .querySelectorAll(
+            ".survey-group"
+        )
+        .forEach(section => {
+
+            const sectionMode =
+                section.dataset.reviewMode;
+
+            let visible = false;
+
+            if(sectionMode === "remote"){
+
+                // Remote questions are the baseline
+                // for every review mode.
+                visible = true;
 
             }
 
+            else if(sectionMode === "in_person"){
 
-            document
+                // In-person observations only appear
+                // when the reviewer selected an in-person review.
+                visible =
+                    mode === "in_person";
+
+            }
+
+            else if(sectionMode === "steward"){
+
+                // Steward questions are available
+                // regardless of review mode.
+                visible = true;
+
+            }
+
+            section.style.display =
+                visible
+                ? "block"
+                : "none";
+
+            section
             .querySelectorAll(
-                ".survey-group"
+                "input, select, textarea"
             )
-            .forEach(section => {
+            .forEach(control => {
 
-                const sectionMode =
-                    section.dataset.reviewMode;
-
-
-                if(sectionMode === "remote"){
-
-                    // Remote questions are baseline.
-                    // Always show them.
-                    section.style.display =
-                        "block";
-
-                }
-
-
-                else if(sectionMode === "in_person"){
-
-                    // Extra observations only.
-                    section.style.display =
-                        mode === "in_person"
-                        ? "block"
-                        : "none";
-
-                }
-
-
-                else if(sectionMode === "steward"){
-
-                    // Steward questions always available.
-                    section.style.display =
-                        "block";
-
-                }
+                control.disabled =
+                    !visible;
 
             });
 
-        }
+        });
+
+    }
 
 
 
@@ -216,31 +226,43 @@ function evaluateCondition(condition){
 
 function updateQuestionVisibility(){
 
-            document
+        document
+        .querySelectorAll(
+            ".survey-question"
+        )
+        .forEach(question => {
+
+            const condition =
+                question.dataset.condition;
+
+            if(!condition){
+
+                return;
+
+            }
+
+            const visible =
+                evaluateCondition(condition);
+
+            question.style.display =
+                visible
+                ? "block"
+                : "none";
+
+            question
             .querySelectorAll(
-                ".survey-question"
+                "input, select, textarea"
             )
-            .forEach(question => {
+            .forEach(control => {
 
-                const condition =
-                    question.dataset.condition;
-
-
-                if(!condition){
-
-                    return;
-
-                }
-
-
-                question.style.display =
-                    evaluateCondition(condition)
-                    ? "block"
-                    : "none";
+                control.disabled =
+                    !visible;
 
             });
 
-        }
+        });
+
+    }
 
 
 

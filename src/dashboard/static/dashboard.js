@@ -672,6 +672,14 @@ function loadStops() {
                                 <br><br>
 
                                 <a
+                                href="/stop/${props.stop_id}"
+                                class="stop-review-button">
+                                View stop profile
+                                </a>
+
+                                <br><br>
+
+                                <a
                                 href="/review/${props.stop_id}?mode=opportunity"
                                 class="stop-review-button">
                                 Review this stop

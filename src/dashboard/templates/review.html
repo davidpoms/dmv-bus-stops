@@ -147,7 +147,7 @@ async function(){
 
     const response =
         await fetch(
-            /stops//steward,
+            `/stops/${stopId}/steward`,
             {
                 method:"POST",
 
@@ -524,15 +524,15 @@ ${
 
 <div class="completion-actions">
 
-<a href="/review/start?mode=opportunity">
+<a href="/review/start?mode=opportunity" class="dashboard-button">
 Review another stop
 </a>
 
-<a href="/reviewer/profile">
+<a href="/reviewer/profile" class="dashboard-button">
 View my community profile
 </a>
 
-<a href="/dashboard">
+<a href="/dashboard" class="dashboard-button">
 Return to dashboard
 </a>
 

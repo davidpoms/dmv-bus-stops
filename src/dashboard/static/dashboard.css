@@ -522,3 +522,95 @@ td, th {
     margin-top: 20px;
 }
 
+/* Community observation history */
+
+.community-observations-card {
+    margin-top: 20px;
+}
+
+.community-observations-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 18px;
+}
+
+.community-observations-title strong {
+    font-size: 18px;
+}
+
+.community-observations-subtitle {
+    margin-top: 4px;
+    color: #666;
+    font-size: 14px;
+}
+
+.community-observation {
+    padding: 16px;
+    margin-bottom: 12px;
+    background: #f7f9fb;
+    border: 1px solid #e1e6eb;
+    border-radius: 8px;
+}
+
+.community-observation:last-child {
+    margin-bottom: 0;
+}
+
+.community-observation-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 15px;
+    margin-bottom: 14px;
+}
+
+.community-observation-date {
+    color: #666;
+    font-size: 14px;
+}
+
+.community-observation-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.community-observation-grid > div {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.community-observation-label {
+    color: #666;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.community-observation-notes {
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid #e1e6eb;
+}
+
+.community-observations-empty {
+    padding: 16px;
+    background: #f7f9fb;
+    border-radius: 8px;
+    color: #666;
+}
+
+@media (max-width: 600px) {
+
+    .community-observation-header {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 5px;
+    }
+
+    .community-observation-grid {
+        grid-template-columns: 1fr;
+    }
+
+}

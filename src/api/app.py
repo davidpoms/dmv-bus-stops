@@ -2241,6 +2241,7 @@ def submit_review():
                 bench_feasible=?,
                 ada_clearance_possible=?,
                 notes=?,
+            streetview_imagery_month=?,
                 observed_at=CURRENT_TIMESTAMP
             WHERE id=?
             """,
@@ -2251,6 +2252,7 @@ def submit_review():
                 data.get("bench_feasible"),
                 data.get("ada_clearance_possible"),
                 data.get("notes"),
+            data.get("streetview_imagery_month"),
                 existing_review[0][0]
             )
         )
@@ -2292,11 +2294,12 @@ def submit_review():
             property_owner_outreach,
             steward_email,
             steward_candidate,
-            concrete_pad_needed
+            concrete_pad_needed,
+            streetview_imagery_month
         )
 
         VALUES
-        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 
         """,
         (
@@ -2323,7 +2326,8 @@ def submit_review():
             data.get("property_owner_outreach", ""),
             data.get("steward_email"),
             data.get("steward_candidate", 0),
-            data.get("concrete_pad_needed")
+            data.get("concrete_pad_needed"),
+            data.get("streetview_imagery_month")
         )
     )
 

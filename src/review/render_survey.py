@@ -128,6 +128,17 @@ def render_question(question):
         )
 
 
+    elif qtype == "month":
+
+        html.append(
+            f"""
+            <input
+                type="month"
+                name="{escape(field)}">
+            """
+        )
+
+
     elif qtype == "text":
 
         html.append(
@@ -137,11 +148,6 @@ def render_question(question):
                 name="{escape(field)}">
             """
         )
-
-
-    html.append(
-        "</div>"
-    )
 
     return "\n".join(html)
 
