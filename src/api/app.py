@@ -352,7 +352,7 @@ VALUES
     streetview_url = (
         "https://www.google.com/maps/@?api=1"
         "&map_action=pano"
-        f"&viewpoint={road['road_lat']},{road['road_lon']}"
+        f"&viewpoint={row[1]},{row[2]}"
         f"&heading={heading}"
         "&pitch=0"
         "&fov=90"
@@ -830,6 +830,7 @@ SELECT
     ps.primary_name,
     ps.latitude,
     ps.longitude,
+    bs.external_stop_id,
     io.opportunity_score,
 
     CASE
@@ -1106,7 +1107,7 @@ GROUP BY ps.id
     streetview_url = (
         "https://www.google.com/maps/@?api=1"
         "&map_action=pano"
-        f"&viewpoint={road['road_lat']},{road['road_lon']}"
+        f"&viewpoint={row[1]},{row[2]}"
         f"&heading={heading}"
         "&pitch=0"
         "&fov=90"
@@ -1297,10 +1298,16 @@ GROUP BY ps.id
             "location": row[0],
             "lat": row[1],
             "lon": row[2],
-            "score": row[3],
-            "impact": row[4],
+            "external_stop_id": row[3],
+
+            "wmata_rider_tools_url":
+                f"https://www.wmata.com/ridertools/stop/{row[3]}"
+                if row[3]
+                else None,
+            "score": row[4],
+            "impact": row[5],
             "routes":
-                row[5].split(",")
+                row[6].split(",")
                 if row[5]
                 else [],
             "heading": heading,
@@ -1512,7 +1519,16 @@ def review_stop_info(stop_id):
             w.wmata_shelter,
             w.wmata_accessible,
             w.match_distance_m,
-            w.match_confidence
+            w.match_confidence,
+
+            (
+                SELECT bs.external_stop_id
+                FROM physical_stop_members psm
+                JOIN bus_stops bs
+                    ON bs.id = psm.bus_stop_id
+                WHERE psm.physical_stop_id = p.id
+                LIMIT 1
+            ) AS external_stop_id
 
         FROM physical_stops p
 
@@ -1808,6 +1824,46 @@ def review_stop_info(stop_id):
     )
 
 
+    amenity_evidence = query_db(
+        """
+        SELECT
+            id,
+            source,
+            source_record_id,
+            amenity_type,
+            present,
+            confidence,
+            match_distance_m,
+            notes,
+            jurisdiction,
+            value,
+            raw_value
+        FROM stop_amenity_evidence
+        WHERE physical_stop_id=?
+        ORDER BY created_at DESC, id DESC
+        """,
+        (stop_id,)
+    )
+
+
+    amenity_evidence_payload = [
+        {
+            "id": row[0],
+            "source": row[1],
+            "source_record": row[2],
+            "amenity_type": row[3],
+            "present": row[4],
+            "confidence": row[5],
+            "match_distance_m": row[6],
+            "notes": row[7],
+            "jurisdiction": row[8],
+            "value": row[9],
+            "raw_value": row[10]
+        }
+        for row in amenity_evidence
+    ]
+
+
     return jsonify(
         {
             "stop_id": row[0],
@@ -1820,6 +1876,13 @@ def review_stop_info(stop_id):
             "anc": row[6],
             "county": row[7],
             "municipality": row[8],
+
+            "external_stop_id": row[17],
+
+            "wmata_rider_tools_url":
+                f"https://www.wmata.com/ridertools/stop/{row[17]}"
+                if row[17]
+                else None,
 
             "serving_direction":
                 row[11],
@@ -1859,6 +1922,10 @@ def review_stop_info(stop_id):
 
             "ddot_interpretation":
                 ddot_interpretation,
+
+
+            "amenity_evidence":
+                amenity_evidence_payload,
 
 
             "community_reviews": {
@@ -2978,6 +3045,9 @@ def map_stops():
             JOIN stop_routes sr
                 ON bs.id = sr.stop_id
 
+            JOIN routes r
+                ON sr.route_id = r.id
+
             LEFT JOIN stop_wmata_evidence we
                 ON ps.id = we.physical_stop_id
 
@@ -2987,7 +3057,7 @@ def map_stops():
             LEFT JOIN stop_jurisdiction sj
                 ON ps.id = sj.stop_id
 
-            WHERE sr.route_id = ?
+            WHERE r.route_id = ?
 
             GROUP BY
                 ps.id

@@ -31,6 +31,7 @@ def main():
         "jurisdiction": "TEXT",
         "value": "TEXT",
         "raw_value": "TEXT",
+        "source_metadata": "TEXT",
     }
 
 

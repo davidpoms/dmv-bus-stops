@@ -54,7 +54,7 @@ async function loadStopProfile() {
                 const name = routeNames[i] || "";
 
                 if (id && name) {
-                    combined.push(`${id} — ${name}`);
+                    combined.push(`${id} â€” ${name}`);
                 } else if (id) {
                     combined.push(id);
                 } else if (name) {
@@ -84,6 +84,11 @@ async function loadStopProfile() {
             stop.streetview_url ||
             review.streetview_url ||
             "#";
+
+        const riderToolsUrl =
+            stop.wmata_rider_tools_url ||
+            review.wmata_rider_tools_url ||
+            null;
 
         const communityReviews =
             Array.isArray(communityData)
@@ -117,53 +122,124 @@ async function loadStopProfile() {
         }
 
         const localEvidence =
-            stop.ddot_interpretation &&
-            stop.ddot_interpretation.length
-                ? stop.ddot_interpretation
-                : [];
+    Array.isArray(review.amenity_evidence)
+    ? review.amenity_evidence.filter(
+        item =>
+            item.amenity_type === "shelter" ||
+            item.amenity_type === "bench"
+      )
+    : [];
 
-        const localEvidenceHtml =
-            localEvidence.length
-                ? localEvidence.map(item => `
-                    <div class="evidence-item">
 
-                        <strong>
-                            ${item.public_status || item.source || "Local jurisdiction record"}
-                        </strong>
+const localEvidenceGroups = {};
 
-                        <br>
+localEvidence.forEach(item => {
 
-                        ${item.finding || "Finding not recorded"}
+    const key =
+        (item.jurisdiction || item.source || "Local jurisdiction")
+        + "|"
+        + (item.source_record || "");
 
-                        ${
-                            item.confidence
-                                ? `
-                                    <br>
-                                    Confidence:
-                                    <strong>${item.confidence}</strong>
-                                `
-                                : ""
-                        }
+    if (!localEvidenceGroups[key]) {
 
-                        ${
-                            item.source_record
-                                ? `
-                                    <br>
-                                    Source record:
-                                    ${item.source_record}
-                                `
-                                : ""
-                        }
+        localEvidenceGroups[key] = {
 
-                    </div>
-                `).join("")
-                : `
-                    <div class="community-observations-empty">
-                        No current local jurisdiction amenity record available.
-                    </div>
-                `;
+            jurisdiction:
+                item.jurisdiction ||
+                item.source ||
+                "Local jurisdiction",
 
-        const latestCommunity =
+            source_record:
+                item.source_record ||
+                null,
+
+            confidence:
+                item.confidence ||
+                "Unknown",
+
+            match_distance_m:
+                item.match_distance_m,
+
+            shelter: null,
+
+            bench: null
+        };
+    }
+
+    if (item.amenity_type === "shelter") {
+
+        localEvidenceGroups[key].shelter =
+            amenityValue(item.value ?? item.present);
+    }
+
+    if (item.amenity_type === "bench") {
+
+        localEvidenceGroups[key].bench =
+            amenityValue(item.value ?? item.present);
+    }
+});
+
+
+const localEvidenceHtml =
+    Object.values(localEvidenceGroups).length
+    ? Object.values(localEvidenceGroups).map(item => `
+
+        <div class="evidence-item">
+
+            <strong>
+                ${
+                    item.jurisdiction === "MONTGOMERY_COUNTY"
+                    ? "Montgomery County"
+                    : item.jurisdiction ||
+                      "Local jurisdiction"
+                }
+            </strong>
+
+            <br><br>
+
+            Shelter:
+            <strong>
+                ${item.shelter || "Not recorded"}
+            </strong>
+
+            <br>
+
+            Bench:
+            <strong>
+                ${item.bench || "Not recorded"}
+            </strong>
+
+            <br>
+
+            Confidence:
+            ${item.confidence}
+
+            <br>
+
+            Match distance:
+            ${
+                item.match_distance_m !== null &&
+                item.match_distance_m !== undefined
+                ? item.match_distance_m.toFixed(1) + " m"
+                : "Unknown"
+            }
+
+            <br>
+
+            Source record:
+            ${item.source_record || "Not recorded"}
+
+        </div>
+
+    `).join("")
+    : `
+        <div class="community-observations-empty">
+            No current local jurisdiction amenity record available.
+        </div>
+    `;
+
+
+const latestCommunity =
             communityReviews.length
                 ? communityReviews[0]
                 : null;
@@ -171,12 +247,12 @@ async function loadStopProfile() {
         const communityShelter =
             latestCommunity
                 ? amenityValue(latestCommunity.shelter)
-                : "Not recorded";
+                : "Not currently verified";
 
         const communityBench =
             latestCommunity
                 ? amenityValue(latestCommunity.bench)
-                : "Not recorded";
+                : "Not currently verified";
         function formatReviewDate(value) {
             if (!value) {
                 return "Date not recorded";
@@ -325,6 +401,11 @@ async function loadStopProfile() {
                 ${stop.stop_id || stopId}
 
                 <br><br>
+                External Stop ID:
+                ${stop.external_stop_id || "Not recorded"}
+
+                <br><br>
+
 
                 Routes:
                 ${routeText}
@@ -332,54 +413,162 @@ async function loadStopProfile() {
             </div>
 
 
-            <div class="card">
-            <strong>
-                Current amenity information
-            </strong>
+            <div class="card rider-exposure-card">
 
-            <br><br>
+                <strong>
+                    Rider exposure
+                </strong>
 
-            <div class="amenity-comparison">
+                <p>
+                    This stop's serving routes represent a high level
+                    of rider exposure compared with other stops in the region.
+                </p>
 
-                <div class="amenity-comparison-row">
+                ${
+                    stop.impact_summary &&
+                    stop.impact_summary.rider_exposure_percentile
+                        ? `
+                        <div class="evidence-card">
 
-                    <strong>
-                        Shelter
-                    </strong>
+                            <strong>
+                                Rider exposure percentile
+                            </strong>
 
-                    <span>
-                        Community observation:
-                        <strong>${communityShelter}</strong>
-                    </span>
+                            <br><br>
+
+                            The routes serving this stop carry more riders
+                            than approximately
+
+                            <strong>
+                                ${
+                                    Math.min(
+                                        stop.impact_summary.rider_exposure_percentile,
+                                        99
+                                    )
+                                }%
+                            </strong>
+
+                            of stops in the region.
+
+                        </div>
+                        `
+                        : ""
+                }
+
+                <br>
+
+                <div class="amenity-comparison">
+
+                    <div class="amenity-comparison-row">
+
+                        <strong>
+                            Estimated route exposure
+                        </strong>
+
+                        <span>
+                            <strong>
+                                ${
+                                    stop.impact_summary?.estimated_weekday_boardings
+                                        ? stop.impact_summary.estimated_weekday_boardings.toLocaleString()
+                                        : "Unknown"
+                                }
+                            </strong>
+                            weekday boardings across
+                            ${
+                                stop.impact_summary?.routes_served || 0
+                            }
+                            serving routes
+                        </span>
+
+                    </div>
+
+                    <div class="amenity-comparison-row">
+
+                        <strong>
+                            Routes served
+                        </strong>
+
+                        <span>
+                            ${
+                                stop.impact_summary?.routes &&
+                                stop.impact_summary.routes.length
+                                    ? stop.impact_summary.routes.join(", ")
+                                    : "Unknown"
+                            }
+                        </span>
+
+                    </div>
 
                 </div>
 
-                <div class="amenity-comparison-row">
-
-                    <strong>
-                        Bench
-                    </strong>
-
-                    <span>
-                        Community observation:
-                        <strong>${communityBench}</strong>
-                    </span>
-
-                </div>
+                <p class="impact-note">
+                    Rider exposure is estimated using route-level
+                    ridership data associated with this stop.
+                    These figures do not represent unique riders
+                    or stop-level boardings.
+                </p>
 
             </div>
 
-            <br>
 
-            <strong>
-                Local jurisdiction evidence
-            </strong>
+            <div class="card">
+                <strong>
+                    Community-verified amenity status
+                </strong>
 
-            <br><br>
+                <p>
+                    Status reflects the latest community observation
+                    when one is available. Local jurisdiction records
+                    are shown separately as supporting evidence.
+                </p>
 
-            ${localEvidenceHtml}
+                <div class="amenity-comparison">
 
-        </div>
+                    <div class="amenity-comparison-row">
+
+                        <strong>
+                            Shelter
+                        </strong>
+
+                        <span>
+                            Community observation:
+                            <strong>${communityShelter}</strong>
+                        </span>
+
+                    </div>
+
+                    <div class="amenity-comparison-row">
+
+                        <strong>
+                            Bench
+                        </strong>
+
+                        <span>
+                            Community observation:
+                            <strong>${communityBench}</strong>
+                        </span>
+
+                    </div>
+
+                </div>
+
+                <br>
+
+                <strong>
+                    Local jurisdiction evidence
+                </strong>
+
+                <p>
+                    Supporting records for shelter and bench presence.
+                    These records have not been independently verified
+                    by a community observation.
+                </p>
+
+                <br><br>
+
+                ${localEvidenceHtml}
+
+            </div>
 
 
             <div class="card community-observations-card">
@@ -452,6 +641,26 @@ async function loadStopProfile() {
                     Open Street View
 
                 </a>
+
+                ${
+                    riderToolsUrl
+                    ?
+                    `
+                    <br><br>
+
+                    <a
+                        class="stop-review-button"
+                        href="${riderToolsUrl}"
+                        target="_blank"
+                        rel="noopener noreferrer">
+
+                        Open WMATA Rider Tools
+
+                    </a>
+                    `
+                    :
+                    ""
+                }
 
             </div>
 

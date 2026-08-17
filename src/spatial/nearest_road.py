@@ -234,6 +234,8 @@ class RoadSpatialIndex:
 
         best_class = None
 
+        best_idx = None
+
         for idx in idxs:
 
             ax, ay, bx, by = self.edges[idx]
@@ -263,13 +265,15 @@ class RoadSpatialIndex:
 
                 best_class = self.edge_classes[idx]
 
+                best_idx = idx
+
         if best is None:
 
             return None
 
         distance = math.sqrt(best_dist)
 
-        edge = self.edges[idx]
+        edge = self.edges[best_idx]
 
         ax, ay, bx, by = edge
 

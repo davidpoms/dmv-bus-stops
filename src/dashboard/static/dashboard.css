@@ -614,3 +614,50 @@ td, th {
     }
 
 }
+
+
+/* Amenity comparison */
+
+.amenity-comparison {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.amenity-comparison-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 20px;
+    padding: 12px 14px;
+    background: #f7f9fb;
+    border: 1px solid #e1e6eb;
+    border-radius: 8px;
+}
+
+.amenity-comparison-row > strong {
+    font-size: 15px;
+}
+
+.amenity-comparison-row span {
+    color: #666;
+    text-align: right;
+}
+
+.amenity-comparison-row span strong {
+    color: #222;
+}
+
+@media (max-width: 600px) {
+
+    .amenity-comparison-row {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .amenity-comparison-row span {
+        text-align: left;
+    }
+
+}

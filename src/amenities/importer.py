@@ -14,7 +14,8 @@ def insert_amenity_evidence(
     notes=None,
     jurisdiction=None,
     value=None,
-    raw_value=None
+    raw_value=None,
+    source_metadata=None
 ):
 
     import sqlite3
@@ -35,10 +36,11 @@ def insert_amenity_evidence(
             notes,
             jurisdiction,
             value,
-            raw_value
+            raw_value,
+            source_metadata
         )
 
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         (
             physical_stop_id,
@@ -51,7 +53,8 @@ def insert_amenity_evidence(
             notes,
             jurisdiction,
             value,
-            raw_value
+            raw_value,
+            source_metadata
         )
     )
 

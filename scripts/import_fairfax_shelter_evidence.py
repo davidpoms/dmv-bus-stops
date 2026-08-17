@@ -15,6 +15,7 @@ This script is idempotent.
 
 import sqlite3
 import requests
+import json
 from collections import defaultdict
 from scipy.spatial import cKDTree
 from pyproj import Transformer
@@ -141,8 +142,12 @@ def insert_or_update(
 
     notes = (
         f"Fairfax shelter inventory. "
-        f"Assets: {', '.join(asset_ids)}. "
-        f"Address: {attrs.get('ADDRESS')}."
+        f"Assets: {', '.join(asset_ids)}."
+    )
+
+    source_metadata = json.dumps(
+        attrs,
+        separators=(",", ":")
     )
 
 
@@ -158,7 +163,8 @@ def insert_or_update(
                 notes = ?,
                 jurisdiction = ?,
                 value = ?,
-                raw_value = ?
+                raw_value = ?,
+                source_metadata = ?
             WHERE id = ?
             """,
             (
@@ -169,6 +175,7 @@ def insert_or_update(
                 SOURCE,
                 "yes",
                 "1",
+                source_metadata,
                 existing[0]
             )
         )
@@ -191,10 +198,12 @@ def insert_or_update(
             notes,
             jurisdiction,
             value,
-            raw_value
+            raw_value,
+            source_metadata
         )
         VALUES
         (
+            ?,
             ?,
             ?,
             ?,
@@ -219,7 +228,8 @@ def insert_or_update(
             notes,
             SOURCE,
             "yes",
-            "1"
+            "1",
+            source_metadata
         )
     )
 

@@ -6,6 +6,7 @@ sys.path.append(
 )
 
 import requests
+import json
 
 from src.amenities.importer import insert_amenity_evidence
 from src.amenities.matcher import find_nearest_wmata_stop
@@ -142,6 +143,15 @@ for feature in features:
         continue
 
 
+    source_metadata = dict(attrs)
+    source_metadata["source_lat"] = lat
+    source_metadata["source_lon"] = lon
+
+    source_metadata = json.dumps(
+        source_metadata,
+        separators=(",", ":")
+    )
+
 
     match = find_nearest_wmata_stop(
         DB,
@@ -186,11 +196,12 @@ for feature in features:
             present=present,
             confidence="high",
             match_distance_m=match["distance_m"],
-        jurisdiction="MONTGOMERY_COUNTY",
-        value="yes" if present else "no",
-        raw_value=str(value),
+            jurisdiction="MONTGOMERY_COUNTY",
+            source_metadata=source_metadata,
+            value="yes" if present else "no",
+            raw_value=str(value),
             notes="WMATA routes: " + ",".join(
-               extract_wmata_routes(routes)
+                extract_wmata_routes(routes)
             ),
         )
 

@@ -65,8 +65,13 @@ document.addEventListener(
 
                     <br>
 
-                    Stop ID:
+                    Internal ID:
                     ${info.stop_id}
+
+                    <br><br>
+
+                    External Stop ID:
+                    ${info.external_stop_id || "Not recorded"}
 
                     <br><br>
 
@@ -240,99 +245,162 @@ document.addEventListener(
 
 
                     ${
-                        info.wmata
+                        info.amenity_evidence &&
+                        info.amenity_evidence.length > 0
                         ?
                         `
                         <div class="evidence-card">
 
                             <strong>
-                            Current Stop Amenities (WMATA)
+                            Local jurisdiction evidence
                             </strong>
 
                             <br><br>
 
-                            WMATA Data Availability:
-                            <span class="${
-                                info.wmata.availability === "confirmed"
-                                ? "wmata-confirmed"
-                                : "wmata-unavailable"
-                            }">
-                            ${
-                                info.wmata.availability === "confirmed"
-                                ? "Confirmed WMATA match"
-                                : "No WMATA match available"
-                            }
-                            </span>
+                            Supporting records for shelter and bench
+                            presence. These records have not been
+                            independently verified by a community
+                            observation.
 
                             <br><br>
 
-                            WMATA Stop ID:
-                            ${info.wmata.stop_id || "Unknown"}
-
-                            <br>
-
-                            Status:
                             ${
-                                info.wmata.status === "PRS"
-                                ? "Published stop"
-                                : (info.wmata.status || "Unknown")
-                            }
+                                (() => {
 
-                            <br>
+                                    const grouped = {};
 
-                            Shelter:
-                            ${
-                                info.wmata.shelter === "1"
-                                ? "Yes"
-                                : info.wmata.shelter === "0"
-                                ? "No"
-                                : "Unknown"
-                            }
+                                    info.amenity_evidence
+                                    .filter(
+                                        evidence =>
+                                            evidence.amenity_type === "shelter" ||
+                                            evidence.amenity_type === "bench"
+                                    )
+                                    .forEach(
+                                        evidence => {
 
-                            <br>
+                                            const key =
+                                                (
+                                                    evidence.jurisdiction ||
+                                                    evidence.source ||
+                                                    "Local jurisdiction"
+                                                )
+                                                + "|"
+                                                + (
+                                                    evidence.source_record ||
+                                                    ""
+                                                );
 
-                            Bench:
-                            ${
-                                info.wmata.bench === "1"
-                                ? "Yes"
-                                : info.wmata.bench === "0"
-                                ? "No"
-                                : "Unknown"
-                            }
+                                            if (!grouped[key]) {
 
-                            <br>
+                                                grouped[key] = {
+                                                    jurisdiction:
+                                                        evidence.jurisdiction ||
+                                                        evidence.source ||
+                                                        "Local jurisdiction",
 
-                            Accessible:
-                            ${
-                                info.wmata.accessible === "Y"
-                                ? "Yes"
-                                : "No"
-                            }
+                                                    source_record:
+                                                        evidence.source_record ||
+                                                        null,
 
-                            <br>
+                                                    confidence:
+                                                        evidence.confidence ||
+                                                        "Unknown",
 
-                            Match quality:
-                            ${
-                                info.wmata.match_confidence === "high"
-                                ? "High confidence match (within ~10 meters)"
-                                : info.wmata.match_confidence === "medium"
-                                ? "Medium confidence match (within ~50 meters)"
-                                : info.wmata.match_confidence === "low"
-                                ? "Low confidence match (verify location)"
-                                : "Unknown"
-                            }
+                                                    match_distance_m:
+                                                        evidence.match_distance_m,
 
-                            <br>
+                                                    shelter: null,
 
-                            Match distance:
-                            ${
-                                info.wmata.match_distance_m !== null
-                                ? (
-                                    info.wmata.match_distance_m < 10
-                                    ? info.wmata.match_distance_m.toFixed(1)
-                                    : Math.round(info.wmata.match_distance_m)
-                                ) + " meters"
-                                : "Unknown"
+                                                    bench: null
+                                                };
+                                            }
+
+                                            if (
+                                                evidence.amenity_type ===
+                                                "shelter"
+                                            ) {
+                                                grouped[key].shelter =
+                                                    evidence.present
+                                                    ? "Yes"
+                                                    : "No";
+                                            }
+
+                                            if (
+                                                evidence.amenity_type ===
+                                                "bench"
+                                            ) {
+                                                grouped[key].bench =
+                                                    evidence.present
+                                                    ? "Yes"
+                                                    : "No";
+                                            }
+                                        }
+                                    );
+
+                                    return Object.values(grouped)
+                                    .map(
+                                        evidence => `
+
+                                        <strong>
+                                        ${
+                                            evidence.jurisdiction ===
+                                            "MONTGOMERY_COUNTY"
+                                            ? "Montgomery County"
+                                            : evidence.jurisdiction ||
+                                              "Local jurisdiction"
+                                        }
+                                        </strong>
+
+                                        <br><br>
+
+                                        Shelter:
+                                        <strong>
+                                        ${
+                                            evidence.shelter ||
+                                            "Not recorded"
+                                        }
+                                        </strong>
+
+                                        <br>
+
+                                        Bench:
+                                        <strong>
+                                        ${
+                                            evidence.bench ||
+                                            "Not recorded"
+                                        }
+                                        </strong>
+
+                                        <br>
+
+                                        Confidence:
+                                        ${
+                                            evidence.confidence
+                                        }
+
+                                        <br>
+
+                                        Match distance:
+                                        ${
+                                            evidence.match_distance_m !== null
+                                            ? evidence.match_distance_m.toFixed(1) + " m"
+                                            : "Unknown"
+                                        }
+
+                                        <br>
+
+                                        Source record:
+                                        ${
+                                            evidence.source_record ||
+                                            "Not recorded"
+                                        }
+
+                                        <br><br>
+                                        `
+                                    )
+                                    .join("");
+
+                                })()
                             }
 
                         </div>
@@ -344,19 +412,19 @@ document.addEventListener(
                     }
 
 
-                    ${
-                        info.community_reviews &&
-                        info.community_reviews.review_count > 0
-                        ?
-                        `
-                        <div class="evidence-card">
+                    <div class="evidence-card">
 
-                            <strong>
-                            Community observations
-                            </strong>
+                        <strong>
+                        Community observations
+                        </strong>
 
-                            <br><br>
+                        <br><br>
 
+                        ${
+                            info.community_reviews &&
+                            info.community_reviews.review_count > 0
+                            ?
+                            `
                             ${info.community_reviews.review_count}
                             observation(s)
 
@@ -393,15 +461,20 @@ document.addEventListener(
                                     `
                                 ).join("")
                             }
+                            `
+                            :
+                            `
+                            No observations yet.
 
-                        </div>
+                            <br><br>
 
-                        <br>
-                        `
-                        :
-                        ""
-                    }
+                            Be the first to review this stop.
+                            `
+                        }
 
+                    </div>
+
+                    <br>
 
                     ${
                         info.streetview_url
@@ -415,6 +488,26 @@ document.addEventListener(
                             class="stop-review-button">
 
                             Open Google Street View
+
+                        </a>
+                        `
+                        :
+                        ""
+                    }
+
+                    ${
+                        info.wmata_rider_tools_url
+                        ?
+                        `
+                        <br><br>
+
+                        <a
+                            href="${info.wmata_rider_tools_url}"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="stop-review-button">
+
+                            Open WMATA Rider Tools
 
                         </a>
                         `
