@@ -9,22 +9,6 @@ from html import escape
 from .community_survey_v1 import SURVEY
 
 
-def render_options(options):
-    html = []
-
-    for value, label in options:
-        html.append(
-            f"""
-            <option value="{escape(value)}">
-                {escape(label)}
-            </option>
-            """
-        )
-
-    return "\n".join(html)
-
-
-
 def render_question(question):
 
     field = question["field"]
@@ -49,50 +33,51 @@ def render_question(question):
 
     html.append(
         f"""
-        <div class="survey-question"
-             data-field="{escape(field)}"
-             data-condition="{escape(condition)}">
+        <div
+            class="survey-question"
+            data-field="{escape(field)}"
+            data-condition="{escape(condition)}"
+        >
 
-        <label>
-        {escape(label)}
-        </label>
+            <label>
+                {escape(label)}
+            </label>
         """
     )
 
-
     if qtype == "radio":
 
-        for value, label in question.get("options", []):
+        for value, option_label in question.get("options", []):
 
             html.append(
                 f"""
                 <label>
-                <input
-                    type="radio"
-                    name="{escape(field)}"
-                    value="{escape(value)}">
-                {escape(label)}
+                    <input
+                        type="radio"
+                        name="{escape(field)}"
+                        value="{escape(value)}"
+                    >
+                    {escape(option_label)}
                 </label>
                 """
             )
 
-
     elif multiple:
 
-        for value, label in question.get("options", []):
+        for value, option_label in question.get("options", []):
 
             html.append(
                 f"""
                 <label class="checkbox-option">
-                <input
-                    type="checkbox"
-                    name="{escape(field)}[]"
-                    value="{escape(value)}">
-                {escape(label)}
+                    <input
+                        type="checkbox"
+                        name="{escape(field)}[]"
+                        value="{escape(value)}"
+                    >
+                    {escape(option_label)}
                 </label>
                 """
             )
-
 
     elif qtype == "select":
 
@@ -102,31 +87,31 @@ def render_question(question):
             """
         )
 
-        for value, label in question.get("options", []):
+        for value, option_label in question.get("options", []):
 
             html.append(
                 f"""
                 <option value="{escape(value)}">
-                {escape(label)}
+                    {escape(option_label)}
                 </option>
                 """
             )
 
         html.append(
-            "</select>"
+            """
+            </select>
+            """
         )
-
 
     elif qtype == "textarea":
 
         html.append(
             f"""
             <textarea
-                name="{escape(field)}">
-            </textarea>
+                name="{escape(field)}"
+            ></textarea>
             """
         )
-
 
     elif qtype == "month":
 
@@ -134,10 +119,10 @@ def render_question(question):
             f"""
             <input
                 type="month"
-                name="{escape(field)}">
+                name="{escape(field)}"
+            >
             """
         )
-
 
     elif qtype == "text":
 
@@ -145,12 +130,18 @@ def render_question(question):
             f"""
             <input
                 type="text"
-                name="{escape(field)}">
+                name="{escape(field)}"
+            >
             """
         )
 
-    return "\n".join(html)
+    html.append(
+        """
+        </div>
+        """
+    )
 
+    return "\n".join(html)
 
 
 def render_section(section_name):
@@ -160,12 +151,12 @@ def render_section(section_name):
     html.append(
         f"""
         <section
-        class="survey-section"
-        data-section="{section_name}"
-        data-review-mode="{section_name}">
+            class="survey-section"
+            data-section="{escape(section_name)}"
+            data-review-mode="{escape(section_name)}"
+        >
         """
     )
-
 
     for question in SURVEY.get(
         section_name,
@@ -175,13 +166,13 @@ def render_section(section_name):
             render_question(question)
         )
 
-
     html.append(
-        "</section>"
+        """
+        </section>
+        """
     )
 
     return "\n".join(html)
-
 
 
 def render_survey():
@@ -199,26 +190,25 @@ def render_survey():
         )
     )
 
-
-    # Always include remote-visible questions.
-    # In-person review adds additional observations.
-    # Steward questions are available to all reviewers.
-
-
     html.append(
         """
-        <div id="surveyContent" style="display:none;">
+        <div
+            id="surveyContent"
+            style="display:none;"
+        >
         """
     )
 
-
-
     html.append(
         """
-        <div class="survey-group" data-review-mode="remote">
-        <h2 class="survey-section-title">
-        What can be seen from this stop
-        </h2>
+        <div
+            class="survey-group"
+            data-review-mode="remote"
+        >
+
+            <h2 class="survey-section-title">
+                What can be seen from this stop
+            </h2>
         """
     )
 
@@ -232,13 +222,16 @@ def render_survey():
         """
     )
 
-
     html.append(
         """
-        <div class="survey-group" data-review-mode="in_person">
-        <h2 class="survey-section-title">
-        Observations from visiting this stop
-        </h2>
+        <div
+            class="survey-group"
+            data-review-mode="in_person"
+        >
+
+            <h2 class="survey-section-title">
+                Observations from visiting this stop
+            </h2>
         """
     )
 
@@ -252,13 +245,16 @@ def render_survey():
         """
     )
 
-
     html.append(
         """
-        <div class="survey-group" data-review-mode="steward">
-        <h2 class="survey-section-title">
-        Community involvement
-        </h2>
+        <div
+            class="survey-group"
+            data-review-mode="steward"
+        >
+
+            <h2 class="survey-section-title">
+                Community involvement
+            </h2>
         """
     )
 
@@ -272,9 +268,6 @@ def render_survey():
         """
     )
 
-
-
-
     html.append(
         render_question(
             SURVEY["notes"]
@@ -286,8 +279,5 @@ def render_survey():
         </div>
         """
     )
-
-
-
 
     return "\n".join(html)
