@@ -19,24 +19,35 @@ INSERT INTO stop_transit_evidence
 )
 
 SELECT
-    pm.physical_stop_id,
+    psm.physical_stop_id,
     1,
     COUNT(DISTINCT sr.route_id),
-    'GTFS stop_routes via physical mapping'
+    'WMATA current GTFS via gtfs_stop_map'
 
-FROM physical_stop_members pm
+FROM physical_stop_members psm
+
+JOIN gtfs_stop_map gm
+    ON gm.bus_stop_id = psm.bus_stop_id
 
 JOIN stop_routes sr
-    ON pm.bus_stop_id = sr.stop_id
+    ON sr.stop_id = gm.bus_stop_id
 
-GROUP BY pm.physical_stop_id
+GROUP BY psm.physical_stop_id
 
 """)
+
 conn.commit()
 
 print(
     "Transit evidence rows:",
     cur.rowcount
+)
+
+print(
+    "Stops with transit evidence:",
+    cur.execute(
+        "SELECT COUNT(*) FROM stop_transit_evidence"
+    ).fetchone()[0]
 )
 
 conn.close()
