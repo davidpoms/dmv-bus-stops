@@ -44,9 +44,11 @@ class ActiveReviewWorkflowTests(unittest.TestCase):
             );
             INSERT INTO opportunity_assessments VALUES (1,10),(2,100),(3,90);
             CREATE TABLE stop_wmata_evidence (
-                id INTEGER PRIMARY KEY, physical_stop_id INTEGER, wmata_status TEXT
+                id INTEGER PRIMARY KEY, physical_stop_id INTEGER,
+                wmata_status TEXT, wmata_shelter INTEGER, wmata_bench INTEGER
             );
-            INSERT INTO stop_wmata_evidence VALUES (1,1,'PRS'),(2,2,'PRS'),(3,3,'PRS');
+            INSERT INTO stop_wmata_evidence VALUES
+                (1,1,'PRS',1,1),(2,2,'PRS',1,1),(3,3,'PRS',1,1);
             CREATE TABLE review_queue (
                 id INTEGER PRIMARY KEY, physical_stop_id INTEGER,
                 priority_rank INTEGER, opportunity_score REAL,
@@ -120,8 +122,35 @@ class ActiveReviewWorkflowTests(unittest.TestCase):
         conn.close()
 
     def test_queue_rebuild_uses_only_canonical_current_status(self):
+        conn = sqlite3.connect(self.db)
+        conn.executescript(
+            """
+            INSERT INTO physical_stops VALUES
+                (4,'Current ABS',0.003,0.003,'DC'),
+                (5,'Current zero amenities',0.004,0.004,'DC'),
+                (6,'Current no WMATA',0.005,0.005,'DC'),
+                (7,'Inactive PRS',0.006,0.006,'DC');
+            INSERT INTO stop_gtfs_status VALUES (4,1),(5,1),(6,1),(7,0);
+            INSERT INTO improvement_opportunities VALUES
+                (4,4,50),(5,5,40),(6,6,30),(7,7,100);
+            INSERT INTO stop_wmata_evidence VALUES
+                (4,4,'ABS',0,0),
+                (5,5,'PRS',0,0),
+                (7,7,'PRS',1,1);
+            """
+        )
+        conn.commit()
+        conn.close()
+
         create_review_queue.create_review_queue()
-        self.assertEqual({1}, self.queue_ids())
+        self.assertEqual({1, 4, 5, 6}, self.queue_ids())
+
+        source = Path(create_review_queue.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("stop_wmata_evidence", source)
+        self.assertNotIn("wmata_shelter", source)
+        self.assertNotIn("wmata_bench", source)
+        self.assertNotIn("'PRS'", source)
+        self.assertNotIn("'ABS'", source)
 
     def test_assignment_modes_and_specific_requests_fail_closed(self):
         self.assertIsNone(assignment_router.assign_stop(1, "opportunity", stop_id=2))
