@@ -1,3 +1,14 @@
+"""Deprecated compatibility entry point for the safe DDOT ArcGIS importer."""
+
+from import_ddot_arcgis_amenities import main
+
+
+if __name__ == "__main__":
+    main()
+    raise SystemExit(0)
+
+"""Legacy implementation retained below temporarily for source history."""
+
 import sys
 from pathlib import Path
 
@@ -30,6 +41,8 @@ params = {
     "f": "json"
 }
 
+
+raise SystemExit("Legacy implementation must not execute")
 
 print("Fetching DDOT shelters...")
 

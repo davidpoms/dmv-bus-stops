@@ -31,21 +31,29 @@ def haversine_m(lat1, lon1, lat2, lon2):
 def find_nearest_physical_stop(
     db,
     latitude,
-    longitude
+    longitude,
+    jurisdiction_state=None,
+    maximum_distance_m=100,
 ):
 
     conn = sqlite3.connect(db)
     conn.row_factory = sqlite3.Row
 
-    stops = conn.execute(
-        """
+    query = """
         SELECT
             id,
             latitude,
-            longitude
+            longitude,
+            state
         FROM physical_stops
-        """
-    )
+    """
+    parameters = ()
+
+    if jurisdiction_state is not None:
+        query += " WHERE state = ?"
+        parameters = (jurisdiction_state,)
+
+    stops = conn.execute(query, parameters)
 
     best = None
     best_distance = None
@@ -69,6 +77,9 @@ def find_nearest_physical_stop(
         return None
 
 
+    if best_distance > maximum_distance_m:
+        return None
+
     if best_distance <= 10:
         confidence = "high"
     elif best_distance <= 50:
@@ -76,13 +87,12 @@ def find_nearest_physical_stop(
     elif best_distance <= 100:
         confidence = "low"
     else:
-        return None
-
-
+        confidence = "out_of_range"
     return {
         "physical_stop_id": best["id"],
         "distance_m": best_distance,
-        "confidence": confidence
+        "confidence": confidence,
+        "state": best["state"],
     }
 
 def find_nearest_wmata_stop(
