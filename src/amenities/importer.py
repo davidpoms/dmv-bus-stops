@@ -1,6 +1,23 @@
 import sqlite3
 
 
+IDENTITY_COLUMNS = (
+    "physical_stop_id", "source", "source_record_id", "amenity_type"
+)
+
+
+def _validate_source_record_id(source, source_record_id):
+    if source == "DDOT":
+        raise ValueError(
+            "New writes from quarantined legacy source 'DDOT' are disabled"
+        )
+    if source_record_id is None:
+        raise ValueError(f"{source} evidence requires source_record_id")
+    identity = str(source_record_id).strip()
+    if not identity or identity.lower() in {"none", "null", "nan"}:
+        raise ValueError(f"{source} evidence requires meaningful source_record_id")
+    return identity
+
 
 def insert_amenity_evidence(
     db,
@@ -17,14 +34,13 @@ def insert_amenity_evidence(
     raw_value=None,
     source_metadata=None
 ):
-
-    import sqlite3
+    source_record_id = _validate_source_record_id(source, source_record_id)
 
     conn = sqlite3.connect(db)
 
     cursor = conn.execute(
         """
-        INSERT OR IGNORE INTO stop_amenity_evidence
+        INSERT INTO stop_amenity_evidence
         (
             physical_stop_id,
             source,
@@ -41,6 +57,17 @@ def insert_amenity_evidence(
         )
 
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT
+        (physical_stop_id, source, source_record_id, amenity_type)
+        DO UPDATE SET
+            present = excluded.present,
+            confidence = excluded.confidence,
+            match_distance_m = excluded.match_distance_m,
+            notes = excluded.notes,
+            jurisdiction = excluded.jurisdiction,
+            value = excluded.value,
+            raw_value = excluded.raw_value,
+            source_metadata = excluded.source_metadata
         """,
         (
             physical_stop_id,
