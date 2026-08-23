@@ -3,6 +3,7 @@
 import argparse
 import json
 import math
+import sqlite3
 import sys
 from collections import Counter
 from pathlib import Path
@@ -12,7 +13,7 @@ import requests
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from src.amenities.ddot import build_source_record_id, feature_coordinates, percentile
-from src.amenities.importer import insert_amenity_evidence
+from src.amenities.importer import upsert_amenity_evidence
 from src.amenities.matcher import find_nearest_physical_stop
 
 
@@ -150,8 +151,6 @@ def build_report(features, results):
 
 
 def insert_accepted(results, db=DB):
-    import sqlite3
-
     conn = sqlite3.connect(db)
     compatible_index = False
     for index in conn.execute("PRAGMA index_list(stop_amenity_evidence)"):
@@ -165,40 +164,46 @@ def insert_accepted(results, db=DB):
             break
     conn.close()
     if not compatible_index:
+        conn.close()
         raise RuntimeError(
             "Apply disabled: the source-record-aware unique index has not "
             "passed compatibility review or been installed."
         )
 
     inserted = 0
-    for result in results:
-        if result["status"] != "accepted":
-            continue
-        # Defense in depth: the matcher already selects only state='DC'.
-        if result.get("state") != "DC":
-            raise RuntimeError("Refusing to insert DDOT evidence outside DC")
-        attrs = result["attributes"]
-        metadata = dict(attrs)
-        metadata.update({
-            "source_latitude": result["latitude"],
-            "source_longitude": result["longitude"],
-            "match_policy": "nearest_dc_physical_stop",
-        })
-        inserted += insert_amenity_evidence(
-            db,
-            physical_stop_id=result["physical_stop_id"],
-            source=SOURCE,
-            source_record_id=result["source_record_id"],
-            amenity_type="shelter",
-            present=1,
-            confidence=result["confidence"],
-            match_distance_m=result["distance_m"],
-            notes=attrs.get("Sales_Address"),
-            jurisdiction=JURISDICTION,
-            value="yes",
-            raw_value="published_shelter_asset",
-            source_metadata=json.dumps(metadata, sort_keys=True, default=str),
-        )
+    with conn:
+        for result in results:
+            if result["status"] != "accepted":
+                continue
+            state_row = conn.execute(
+                "SELECT state FROM physical_stops WHERE id = ?",
+                (result["physical_stop_id"],),
+            ).fetchone()
+            if result.get("state") != "DC" or state_row is None or state_row[0] != "DC":
+                raise RuntimeError("Refusing to insert DDOT evidence outside DC")
+            attrs = result["attributes"]
+            metadata = dict(attrs)
+            metadata.update({
+                "source_latitude": result["latitude"],
+                "source_longitude": result["longitude"],
+                "match_policy": "nearest_dc_physical_stop",
+            })
+            inserted += upsert_amenity_evidence(
+                conn,
+                physical_stop_id=result["physical_stop_id"],
+                source=SOURCE,
+                source_record_id=result["source_record_id"],
+                amenity_type="shelter",
+                present=1,
+                confidence=result["confidence"],
+                match_distance_m=result["distance_m"],
+                notes=attrs.get("Sales_Address"),
+                jurisdiction=JURISDICTION,
+                value="yes",
+                raw_value="published_shelter_asset",
+                source_metadata=json.dumps(metadata, sort_keys=True, default=str),
+            ).rowcount
+    conn.close()
     return inserted
 
 
