@@ -31,9 +31,9 @@ OUTPUT_PATH = (
 )
 
 
-def export_review_tasks():
+def export_review_tasks(database_path=DATABASE_PATH, output_path=OUTPUT_PATH):
 
-    conn = sqlite3.connect(DATABASE_PATH)
+    conn = sqlite3.connect(database_path)
     conn.row_factory = sqlite3.Row
 
     cursor = conn.cursor()
@@ -57,6 +57,10 @@ def export_review_tasks():
             rq.review_questions
 
         FROM review_queue rq
+
+        JOIN stop_gtfs_status sgs
+            ON sgs.physical_stop_id = rq.physical_stop_id
+           AND sgs.current_gtfs = 1
 
         WHERE rq.review_status = 'pending'
 
@@ -87,7 +91,7 @@ def export_review_tasks():
             }
         )
 
-    OUTPUT_PATH.write_text(
+    Path(output_path).write_text(
         json.dumps(
             tasks,
             indent=2
@@ -101,7 +105,7 @@ def export_review_tasks():
     )
 
     print(
-        f"Saved to {OUTPUT_PATH}"
+        f"Saved to {output_path}"
     )
 
 

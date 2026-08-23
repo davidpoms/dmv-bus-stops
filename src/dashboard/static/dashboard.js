@@ -67,13 +67,7 @@ function loadEvidence(stopId) {
                     data.evidence?.osm || {},
 
                 observations:
-                    data.evidence?.reviews || [],
-
-                wmata_history:
-                    data.wmata_history || [],
-
-                wmata_evidence:
-                    data.wmata_evidence || null
+                    data.evidence?.reviews || []
 
             };
 
@@ -99,7 +93,7 @@ function loadEvidence(stopId) {
 
 
 
-function loadStops(route="") {
+function loadStops() {
 
 
     markers.forEach(
@@ -109,93 +103,74 @@ function loadStops(route="") {
 
     markers = [];
 
-    console.log("Loading route:", route);
+
+    let url =
+        "/map/stops";
 
 
-    let url = "/map/stops";
-
-
-    const params = new URLSearchParams();
-
-
-    if (route) {
-        params.append(
-            "route",
-            route
-        );
-    }
-
-
-    const pageParams =
-        new URLSearchParams(
-            window.location.search
-        );
-
-
-    [
-        "review",
-        "state",
-        "county",
-        "municipality",
-        "dc_ward",
-        "impact",
-        "priority",
-        "action"
-    ].forEach(
-        key => {
-
-            const value =
-                pageParams.get(key);
-
-            if(value){
-
-                params.append(
-                    key,
-                    value
-                );
-
-            }
-
-        }
-    );
+    const params =
+        new URLSearchParams();
 
 
 
-    const geoFilters = {
+    const filters = {
+
+        route:
+            document.getElementById(
+                "routeFilter"
+            )?.value,
+
 
         state:
             document.getElementById(
                 "stateFilter"
             )?.value,
 
+
         county:
             document.getElementById(
                 "countyFilter"
             )?.value,
+
 
         municipality:
             document.getElementById(
                 "municipalityFilter"
             )?.value,
 
+
         dc_ward:
             document.getElementById(
                 "wardFilter"
             )?.value,
 
+
         dc_anc:
             document.getElementById(
                 "ancFilter"
+            )?.value,
+
+
+        impact:
+            document.getElementById(
+                "impactFilter"
+            )?.value,
+
+
+        priority:
+            document.getElementById(
+                "priorityFilter"
             )?.value
 
     };
 
 
-    Object.entries(geoFilters)
+
+    Object.entries(filters)
     .forEach(
         ([key,value]) => {
 
-            if(value){
+            if(value && value !== "all"){
 
                 params.append(
                     key,
@@ -206,6 +181,7 @@ function loadStops(route="") {
 
         }
     );
+
 
 
     if(params.toString()){
@@ -215,6 +191,7 @@ function loadStops(route="") {
             params.toString();
 
     }
+
 
 
     fetch(url)
@@ -243,29 +220,7 @@ function loadStops(route="") {
 
 
                 let color = "gray";
-                let radius = 5;
-
-
-                if (
-                    props.impact === "very_high"
-                ) {
-                    color = "red";
-                    radius = 14;
-                }
-
-                else if (
-                    props.impact === "high"
-                ) {
-                    color = "orange";
-                    radius = 10;
-                }
-
-                else if (
-                    props.impact === "medium"
-                ) {
-                    color = "gold";
-                    radius = 7;
-                }
+                let radius = 7;
 
 
                 const marker = L.circleMarker(
@@ -278,14 +233,7 @@ function loadStops(route="") {
                         color:color,
                         fillOpacity:0.7,
 
-                        pane:
-                            props.impact === "very_high"
-                            ? "veryHighPriority"
-                            :
-                            props.impact === "high"
-                            ? "highPriority"
-                            :
-                            "markerPane"
+                        pane: "markerPane"
                     }
                 )
                 .addTo(map);
@@ -313,27 +261,11 @@ function loadStops(route="") {
                     "click",
                     function() {
 
-                        Promise.all([
-                            fetch(`/stops/${props.stop_id}`)
-                                .then(response => response.json()),
-
-                            fetch(`/stops/${props.stop_id}/amenities`)
-                                .then(response => {
-                                    if (!response.ok) {
-                                        return {
-                                            wmata: null,
-                                            osm: null
-                                        };
-                                    }
-
-                                    return response.json();
-                                })
-                        ])
+                        fetch(`/stops/${props.stop_id}`)
+                        .then(response => response.json())
 
                         .then(
-                            ([detail, amenities]) => {
-
-                                detail.amenities = amenities;
+                            (detail) => {
 
                                 const evidence = {
 
@@ -341,16 +273,13 @@ function loadStops(route="") {
                                         detail.evidence?.osm || {},
 
                                     observations:
-                                        detail.evidence?.reviews || [],
-
-                                    wmata_evidence:
-                                        detail.wmata_evidence || null
+                                        detail.evidence?.reviews || []
 
                                 };
 
 
                                 let reviewReason =
-                                    "This stop has been identified as a possible opportunity for improvement. Community feedback will help determine whether riders would benefit from changes like seating, shelter, or other waiting area improvements.";
+                                    "This stop has been prioritized for community verification because available information suggests additional review would be valuable. Community feedback will help confirm current waiting conditions and document where additional verification is valuable.";
 
 
                                 if (
@@ -359,7 +288,7 @@ function loadStops(route="") {
                                 ) {
 
                                     reviewReason =
-                                        "Community members have already provided feedback about this stop. Additional observations help confirm improvement needs.";
+                                        "Community members have already provided feedback about this stop. Additional observations help improve confidence in the available information.";
 
                                 }
 
@@ -371,37 +300,84 @@ function loadStops(route="") {
                                 ) {
 
                                     reviewReason =
-                                        "This stop appears to have a shelter, but seating information needs verification. Your review will help confirm whether riders have a place to sit while waiting.";
+                                        "This stop appears to have a shelter, but seating information needs verification. Your review helps document current waiting conditions and available amenities.";
 
                                 }
-
-
-                                else if (
-                                    detail.amenities?.wmata?.shelter === "1"
-                                ) {
-
-                                    reviewReason =
-                                        "Available records indicate this stop has a shelter, but seating information or rider experience may need verification.";
-
-                                }
-
-
-                                else if (
-                                    detail.amenities?.wmata?.shelter !== "1" &&
-                                    evidence.osm &&
-                                    evidence.osm.osm_shelter === 0 &&
-                                    evidence.osm.osm_bench === 0
-                                ) {
-
-                                    reviewReason =
-                                        "Available records do not show a shelter or bench. Your review will help determine whether riders would benefit from improved waiting conditions.";
-
-                                }
-
 
 
                                 let popup = `
-                                <b>${props.location.replace("+", " at ")}</b><br><br>
+                                <b>${props.location.replace("+", " at ")}</b><br>
+
+                                <br>
+
+                                <b>Transit demand</b><br>
+
+                                Routes serving this stop carry approximately
+
+                                <b>
+                                ${
+                                    detail.impact_summary &&
+                                    detail.impact_summary.estimated_weekday_boardings !== null &&
+                                    detail.impact_summary.estimated_weekday_boardings !== undefined
+                                    ? detail.impact_summary.estimated_weekday_boardings.toLocaleString()
+                                    : "Unknown"
+                                }
+                                weekday boardings per day
+                                </b>
+
+                                on average.
+
+                                <br><br>
+
+
+                                Routes:
+                                ${
+                                    detail.impact_summary &&
+                                    detail.impact_summary.routes &&
+                                    detail.impact_summary.routes.length
+                                    ? detail.impact_summary.routes.join(", ")
+                                    : "Unknown"
+                                }
+
+                                <br><br>
+
+                                <b>Rider exposure percentile:</b>
+                                ${
+                                    detail.impact_summary &&
+                                    detail.impact_summary.rider_exposure_percentile !== null
+                                    ? detail.impact_summary.rider_exposure_percentile + "th percentile"
+                                    : "Unknown"
+                                }
+
+
+                                <br><br>
+
+                                ${
+                                    detail.community_review &&
+                                    detail.community_review.has_reviewed
+                                    ?
+                                    `
+                                    <b>✅ You have reviewed this stop</b><br>
+                                    Community observations submitted:
+                                    ${detail.community_review.review_count}
+                                    `
+                                    :
+                                    `
+                                    <b>Community review status:</b><br>
+                                    No review submitted by you yet.
+                                    `
+                                }
+
+
+                                <br><br>
+
+                                <b>WMATA Stop IDs:</b>
+				${
+				    props.wmata_stop_ids && props.wmata_stop_ids.length
+				        ? props.wmata_stop_ids.join(", ")
+				        : "Unknown"
+				}
+				<br><br>
 
                                 <b>Why this stop is being reviewed</b><br>
 
@@ -412,7 +388,7 @@ function loadStops(route="") {
                                 `;
 
 
-                                if (detail.projects.length > 0) {
+                                if (detail.projects && detail.projects.length > 0) {
 
                                     detail.projects.forEach(
                                         project => {
@@ -434,6 +410,7 @@ function loadStops(route="") {
 
 
                                 if (
+                                    !detail.projects ||
                                     detail.projects.length === 0
                                 ) {
 
@@ -442,7 +419,7 @@ function loadStops(route="") {
                                     <button
                                         class="adoptStopButton"
                                         data-stop="${props.stop_id}">
-                                        Become a community steward
+                                        Steward this stop
                                     </button>
                                     `;
 
@@ -450,44 +427,13 @@ function loadStops(route="") {
 
 
                                 if (
-                                    evidence.osm ||
-                                    detail.amenities?.wmata
+                                    evidence.osm
                                 ) {
 
                                     popup += `
                                     <br>
                                     <b>Existing stop information</b><br>
                                     `;
-
-
-                                    if (detail.amenities?.wmata) {
-
-                                        popup += `
-                                        Shelter:
-                                        ${
-                                            detail.amenities.wmata.shelter === "1"
-                                            ? "Yes"
-                                            : "No"
-                                        }
-                                        (WMATA inventory)<br>
-
-                                        Bench:
-                                        ${
-                                            detail.amenities.wmata.bench === "1"
-                                            ? "Yes"
-                                            : "No"
-                                        }
-                                        (WMATA inventory)<br>
-
-                                        Accessible boarding:
-                                        ${
-                                            detail.amenities.wmata.accessible === "Y"
-                                            ? "Yes"
-                                            : "No"
-                                        }<br>
-                                        `;
-
-                                    }
 
 
                                     if (evidence.osm) {
@@ -508,6 +454,7 @@ function loadStops(route="") {
                                             ? "Yes"
                                             : "No"
                                         }<br>
+
                                         `;
 
                                     }
@@ -613,7 +560,15 @@ function loadStops(route="") {
                                 <br><br>
 
                                 <a
-                                href="/review/start?stop_id=${props.stop_id}"
+                                href="/stop/${props.stop_id}"
+                                class="stop-review-button">
+                                View stop profile
+                                </a>
+
+                                <br><br>
+
+                                <a
+                                href="/review/${props.stop_id}?mode=opportunity"
                                 class="stop-review-button">
                                 Review this stop
                                 </a>
@@ -635,64 +590,30 @@ function loadStops(route="") {
             }
         );
 
+
+
+        if(markers.length){
+
+            map.fitBounds(
+                L.featureGroup(markers).getBounds()
+            );
+
+        }
+
+
+
     }
 );
 
 }
 
-fetch("/routes")
+if(routeFilter){
 
-.then(
-    response => response.json()
-)
-
-.then(
-    routes => {
-
-        const select =
-            document.getElementById("routeSelect");
-
-
-        routes.forEach(
-            route => {
-
-                const option =
-                    document.createElement("option");
-
-
-                option.value =
-                    route.route_id;
-
-
-                option.text =
-                    route.route_id +
-                    " - " +
-                    route.route_name;
-
-
-                select.appendChild(
-                    option
-                );
-
-            }
-        );
-
-    }
-);
-
-
-
-const routeSelect = document.getElementById("routeSelect");
-
-if(routeSelect){
-
-    routeSelect.addEventListener(
+    routeFilter.addEventListener(
         "change",
         function(){
 
-            loadStops(
-                this.value
-            );
+            loadStops();
 
         }
     );
@@ -702,6 +623,13 @@ if(routeSelect){
 
 
 if(document.getElementById("map")){
+
+    map.createPane("markerPane");
+
+    map.getPane("markerPane").style.zIndex = 400;
+
+    map.getPane("popupPane").style.zIndex = 700;
+
     loadStops();
 }
 
@@ -721,7 +649,7 @@ document.addEventListener(
 
 
             fetch(
-                `/stops/${stopId}/community-action`,
+                `/stops/${stopId}/steward`,
                 {
                     method: "POST",
 
@@ -730,17 +658,7 @@ document.addEventListener(
                         "application/json"
                     },
 
-                    body: JSON.stringify(
-                        {
-                            status: "planned",
-                            project_type:
-                                "community_review",
-                            steward:
-                                "Dashboard Volunteer",
-                            notes:
-                                "Adopted through dashboard"
-                        }
-                    )
+                    body: JSON.stringify({})
                 }
             )
             .then(
@@ -750,7 +668,7 @@ document.addEventListener(
                 data => {
 
                     alert(
-                        "Stop adopted!"
+                        "You are now a community steward for this stop!"
                     );
 
                     location.reload();
@@ -810,9 +728,10 @@ function renderPipeline(rows){
     body.innerHTML="";
 
 
-    rows.forEach(row=>{
 
-        body.innerHTML += `
+rows.forEach(row=>{
+
+body.innerHTML += `
 
 <tr>
 
@@ -820,42 +739,20 @@ function renderPipeline(rows){
 
 <td>${row.geography}</td>
 
-<td>${row.stops}</td>
+<td>${row.total_stops}</td>
 
-<td>${row.queued}</td>
+<td>${row.shelter_likely_confirmed}</td>
 
-<td>${row.reviewed}</td>
+<td>${row.bench_likely_confirmed}</td>
 
-<td>${row.consensus}</td>
-
-<td>
-${row.wmata_evidence || 0}
-</td>
-
-<td>
-${row.osm?.mapped_benches || 0}
-</td>
-
-<td>
-${row.osm?.mapped_shelters || 0}
-</td>
-
-<td>
-
-<progress
-value="${row.completion_pct}"
-max="100">
-</progress>
-
-${row.completion_pct}%
-
-</td>
+<td>${row.amenity_status_unknown}</td>
 
 </tr>
 
 `;
 
-    });
+});
+
 
 }
 
@@ -1119,7 +1016,7 @@ function loadGeographyFilters(){
 
         }
 
-
+        console.log("REQUESTING MAP:", url);
         fetch(url)
         .then(r => r.json())
         .then(data => {
@@ -1441,4 +1338,206 @@ window.addEventListener(
     }
 );
 
+
+
+
+
+
+
+
+function loadRouteFilter(){
+
+    fetch("/routes")
+
+    .then(
+        response => response.json()
+    )
+
+    .then(
+        routes => {
+
+            const selector =
+                document.getElementById(
+                    "routeFilter"
+                );
+
+            if(!selector){
+                return;
+            }
+
+
+            routes.forEach(
+                route => {
+
+                    const option =
+                        document.createElement(
+                            "option"
+                        );
+
+                    option.value =
+                        route.route_id;
+
+
+                    option.textContent =
+                        route.route_id +
+                        " - " +
+                        route.route_name;
+
+
+                    selector.appendChild(
+                        option
+                    );
+
+                }
+            );
+
+        }
+    );
+
+}
+
+
+
+window.addEventListener(
+    "load",
+    loadRouteFilter
+);
+
+
+function enableNearbyReview(){
+
+    const link =
+        document.getElementById(
+            "nearbyReviewLink"
+        );
+
+
+    if(!link){
+        return;
+    }
+
+
+    link.addEventListener(
+        "click",
+        function(event){
+
+            event.preventDefault();
+
+
+            if(!navigator.geolocation){
+
+                alert(
+                    "Location services are not available."
+                );
+
+                return;
+            }
+
+
+            navigator.geolocation.getCurrentPosition(
+
+                function(position){
+
+                    const lat =
+                        position.coords.latitude;
+
+                    const lon =
+                        position.coords.longitude;
+
+
+                    window.location.href =
+                        `/review/start?mode=nearby`
+                        + `&lat=${lat}`
+                        + `&lon=${lon}`;
+
+                },
+
+
+                function(){
+
+                    alert(
+                        "Unable to get your location. Please allow location access."
+                    );
+
+                }
+
+            );
+
+        }
+    );
+
+}
+
+
+window.addEventListener(
+    "load",
+    enableNearbyReview
+);
+
+async function loadCommunityProfileCard(){
+
+    const card =
+        document.getElementById(
+            "communityProfileCard"
+        );
+
+
+    if(!card){
+        return;
+    }
+
+
+    try {
+
+        const response =
+            await fetch(
+                "/api/reviewer/status"
+            );
+
+
+        const data =
+            await response.json();
+
+
+        if(data.has_profile){
+
+            card.style.display =
+                "block";
+
+
+            const name =
+                document.getElementById(
+                    "communityProfileName"
+                );
+
+
+            if(name){
+
+                name.innerText =
+                    data.display_name ||
+                    "Community Volunteer";
+
+            }
+
+        }
+
+    }
+
+    catch(error){
+
+        console.error(
+            "Unable to load reviewer profile:",
+            error
+        );
+
+    }
+
+}
+
+
+
+window.addEventListener(
+    "load",
+    loadCommunityProfileCard
+);
 

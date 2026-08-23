@@ -86,116 +86,91 @@ def calculate_scores():
 
     cursor.execute(
         """
-        WITH route_daily AS (
+        WITH physical_stop_routes AS (
+
+            SELECT DISTINCT
+
+                psm.physical_stop_id,
+                r.route_id
+
+            FROM physical_stop_members psm
+
+            JOIN stop_routes sr
+                ON psm.bus_stop_id = sr.stop_id
+
+            JOIN routes r
+                ON sr.route_id = r.id
+
+        ),
+
+        route_exposure AS (
 
             SELECT
 
                 route_id,
 
-                weekday_boardings,
-
-                CASE
-
-                    WHEN weekday_boardings IS NULL
-                    THEN 0
-
-                    ELSE
-
-                        weekday_boardings
-                        /
-                        (
-                            CASE
-
-                            WHEN strftime(
-                                '%m',
-                                period
-                            ) IS NOT NULL
-
-                            THEN
-
-                                CASE
-
-                                WHEN strftime(
-                                    '%m',
-                                    period
-                                ) IN
-                                (
-                                    '01',
-                                    '02',
-                                    '03',
-                                    '04',
-                                    '05',
-                                    '06',
-                                    '07',
-                                    '08',
-                                    '09',
-                                    '10',
-                                    '11',
-                                    '12'
-                                )
-
-                                THEN 21
-
-                                ELSE 21
-
-                                END
-
-                            ELSE 21
-
-                            END
-                        )
-
-                END AS daily_boardings
-
+                weekday_boardings
 
             FROM ridership_snapshots
+
+            WHERE period = (
+                SELECT MAX(period)
+                FROM ridership_snapshots
+            )
 
         )
 
 
         SELECT
 
-            b.id,
+            ps.id,
 
             COUNT(
-                DISTINCT sr.route_id
+                DISTINCT psr.route_id
             ) AS routes_served,
 
 
             SUM(
-                rd.daily_boardings
-            ) AS total_daily_boardings,
-
-
-            MAX(
-                rd.daily_boardings
-            ) AS highest_route_daily,
-
-
-            GROUP_CONCAT(
-                DISTINCT sr.route_id
-            ) AS routes,
+                rd.weekday_boardings
+            ) AS combined_weekday_boardings,
 
 
             MAX(
                 rd.weekday_boardings
-            ) AS largest_monthly_route_total
+            ) AS highest_route_weekday,
 
 
-        FROM bus_stops b
+            GROUP_CONCAT(
+                DISTINCT psr.route_id
+            ) AS routes
 
 
-        JOIN stop_routes sr
 
-            ON b.gtfs_stop_id = sr.stop_id
-
-
-        LEFT JOIN route_daily rd
-
-            ON sr.route_id = rd.route_id
+FROM physical_stops ps
 
 
-        GROUP BY b.id;
+JOIN stop_gtfs_status sgs
+
+    ON sgs.physical_stop_id = ps.id
+
+   AND sgs.current_gtfs = 1
+
+
+JOIN physical_stop_routes psr
+
+    ON psr.physical_stop_id = ps.id
+
+
+
+
+
+
+LEFT JOIN route_exposure rd
+
+    ON psr.route_id = rd.route_id
+
+
+        GROUP BY ps.id;
 
         """
     )
@@ -210,6 +185,8 @@ def calculate_scores():
             "No stop data found"
         )
 
+        conn.commit()
+        conn.close()
         return
 
 
@@ -223,6 +200,10 @@ def calculate_scores():
         for row in rows
 
     )
+
+
+    if max_score_base == 0:
+        max_score_base = 1
 
 
     max_routes = max(
@@ -244,21 +225,20 @@ def calculate_scores():
         (
             stop_id,
             routes_served,
-            total_daily,
-            highest_route_daily,
-            routes,
-            largest_monthly
+            combined_weekday,
+            highest_route_weekday,
+            routes
 
         ) = row
 
 
-        total_daily = total_daily or 0
+        combined_weekday = combined_weekday or 0
 
 
         demand_score = (
 
             math.log(
-                1 + total_daily
+                1 + combined_weekday
             )
             /
             max_score_base
@@ -276,7 +256,7 @@ def calculate_scores():
             *
             100
 
-        )
+        ) if max_routes else 0
 
 
         priority_score = (
@@ -294,13 +274,13 @@ def calculate_scores():
 
             "combined_route_weekday_boardings":
                 round(
-                    total_daily,
+                    combined_weekday,
                     2
                 ),
 
             "highest_route_weekday_boardings":
                 round(
-                    highest_route_daily or 0,
+                    highest_route_weekday or 0,
                     2
                 ),
 

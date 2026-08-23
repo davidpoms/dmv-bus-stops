@@ -5,6 +5,7 @@ src/database/*.db
 *.csv
 *.json
 *.html
+!src/dashboard/templates/*.html
 
 # raw source data
 data/raw/
@@ -28,3 +29,13 @@ __pycache__/
 
 # Keep archived scripts
 !scripts/
+
+*.bak
+*.backup*
+*_backup*
+
+*.bak_*
+*.backup_*
+*.log
+
+.env

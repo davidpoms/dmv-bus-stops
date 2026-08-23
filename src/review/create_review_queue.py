@@ -1,3 +1,4 @@
+
 """
 Create volunteer review queue for bus stop improvement opportunities.
 """
@@ -24,6 +25,7 @@ def create_review_queue():
     )
 
     cursor = conn.cursor()
+
 
 
     cursor.execute(
@@ -68,7 +70,7 @@ def create_review_queue():
 
     cursor.execute(
         """
-        SELECT
+        SELECT DISTINCT
 
             io.physical_stop_id,
             io.priority_rank,
@@ -77,11 +79,18 @@ def create_review_queue():
 
         FROM improvement_opportunities io
 
+        JOIN stop_gtfs_status sgs
+
+            ON sgs.physical_stop_id = io.physical_stop_id
+
+           AND sgs.current_gtfs = 1
+
         JOIN physical_stops ps
 
             ON io.physical_stop_id = ps.id
 
         ORDER BY io.priority_rank;
+
         """
     )
 
@@ -105,6 +114,7 @@ def create_review_queue():
             priority_rank,
             score,
             location_name
+
         ) = row
 
 
@@ -124,6 +134,7 @@ def create_review_queue():
             )
 
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+
             """,
             (
                 physical_stop_id,
@@ -143,7 +154,7 @@ def create_review_queue():
 
 
     print(
-        f"Created {len(rows):,} review tasks"
+        f"Created {len(rows):,} active-stop review tasks"
     )
 
 

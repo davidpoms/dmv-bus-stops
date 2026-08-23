@@ -28,7 +28,6 @@ RIDERSHIP_FOLDER = (
 )
 
 
-
 def find_latest_ridership_file():
 
     files = list(
@@ -46,18 +45,14 @@ def find_latest_ridership_file():
     )
 
 
-
 def clean_number(value):
 
     if not value:
         return 0
 
     return float(
-        value
-        .replace(",", "")
-        .strip()
+        value.replace(",", "").strip()
     )
-
 
 
 def load_ridership(file_path):
@@ -74,45 +69,22 @@ def load_ridership(file_path):
     with open(
         file_path,
         "r",
-        encoding="utf-8"
+        encoding="utf-8-sig"
     ) as csv_file:
 
 
-        reader = csv.reader(
+        reader = csv.DictReader(
             csv_file,
             delimiter="\t"
         )
 
 
-        # Skip title row
-        next(reader)
-
-
-        # Header row
-        header = next(reader)
-
-
         for row in reader:
 
-            if not row:
+            route_id = row["Route"].strip()
+
+            if not route_id:
                 continue
-
-
-            route_id = row[0].strip()
-
-
-            # Ignore summary rows
-            if route_id in [
-                "Grand Total",
-                ""
-            ]:
-                continue
-
-
-            weekday = clean_number(row[1])
-            sunday = clean_number(row[2])
-            saturday = clean_number(row[3])
-            monthly_total = clean_number(row[4])
 
 
             cursor.execute(
@@ -139,17 +111,24 @@ def load_ridership(file_path):
                     datetime.now().strftime(
                         "%Y-%m-%d"
                     ),
-                    monthly_total,
-                    weekday,
-                    saturday,
-                    sunday,
+                    clean_number(
+                        row["Monthly Total"]
+                    ),
+                    clean_number(
+                        row["Weekday"]
+                    ),
+                    clean_number(
+                        row["Saturday"]
+                    ),
+                    clean_number(
+                        row["Sunday"]
+                    ),
                     "WMATA Metrobus Ridership Summary"
                 )
 
             )
 
             records_loaded += 1
-
 
 
     cursor.execute(
@@ -182,7 +161,6 @@ def load_ridership(file_path):
     print(
         f"Loaded {records_loaded} ridership records."
     )
-
 
 
 if __name__ == "__main__":

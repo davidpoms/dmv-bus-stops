@@ -1,0 +1,126 @@
+from pathlib import Path
+
+
+APP = Path("src/api/app.py")
+
+
+text = APP.read_text(encoding="utf-8")
+
+
+# Add DDOT query after row = stop[0]
+marker = """
+    row = stop[0]
+
+
+
+    ridership = query_db(
+"""
+
+insert = """
+    row = stop[0]
+
+
+    ddot_evidence = query_db(
+        '''
+        SELECT
+            physical_stop_id,
+            ddot_id,
+            api_id,
+            lifecycle_status,
+            route_ids,
+            route_count,
+            confidence,
+            notes
+        FROM stop_ddot_shelter_evidence
+        WHERE physical_stop_id = ?
+        ''',
+        (stop_id,)
+    )
+
+
+    ddot_evidence_payload = [
+        {
+            "physical_stop_id": row[0],
+            "ddot_id": row[1],
+            "api_id": row[2],
+            "lifecycle_status": row[3],
+            "routes": row[4].split(",") if row[4] else [],
+            "route_count": row[5],
+            "confidence": row[6],
+            "notes": row[7]
+        }
+        for row in ddot_evidence
+    ]
+
+
+    ddot_interpretation = interpret_ddot_evidence(
+        ddot_evidence_payload
+    )
+
+
+
+    ridership = query_db(
+"""
+
+
+if marker in text:
+    text = text.replace(marker, insert, 1)
+else:
+    raise SystemExit(
+        "Could not find insertion point after row = stop[0]"
+    )
+
+
+# Add response fields after wmata_evidence
+marker = """
+            "wmata_evidence": {
+                "wmata_stop_id": row[9],
+                "wmata_status": row[10],
+                "wmata_heading": row[11],
+                "wmata_bench": row[12],
+                "wmata_shelter": row[13],
+                "wmata_accessible": row[14],
+                "match_distance_m": row[15],
+                "match_confidence": row[16]
+            },
+
+
+            "community_reviews": {
+"""
+
+insert = """
+            "wmata_evidence": {
+                "wmata_stop_id": row[9],
+                "wmata_status": row[10],
+                "wmata_heading": row[11],
+                "wmata_bench": row[12],
+                "wmata_shelter": row[13],
+                "wmata_accessible": row[14],
+                "match_distance_m": row[15],
+                "match_confidence": row[16]
+            },
+
+
+            "ddot_evidence":
+                ddot_evidence_payload,
+
+
+            "ddot_interpretation":
+                ddot_interpretation,
+
+
+            "community_reviews": {
+"""
+
+
+if marker in text:
+    text = text.replace(marker, insert, 1)
+else:
+    raise SystemExit(
+        "Could not find response insertion point"
+    )
+
+
+APP.write_text(text, encoding="utf-8")
+
+print("Added DDOT evidence payload to review_stop_info()")

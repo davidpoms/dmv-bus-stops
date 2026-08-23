@@ -22,7 +22,6 @@ src="https://unpkg.com/leaflet/dist/leaflet.js">
 </script>
 
 </head>
-
 <body>
 
 <h1>
@@ -31,6 +30,9 @@ DMV Bus Stop Intelligence
 
 
 <div class="dashboard-links">
+
+
+
 
 <a href="/handbook" class="dashboard-button">
 📘 Community Handbook
@@ -60,21 +62,22 @@ Choose a review path below.
 </p>
 
 
+
+
 <div class="review-options">
 
 
 <div class="review-option">
 
-<a href="/review/start?mode=opportunity">
-⭐ Highest Opportunity Stops
+<a href="/review/routes">
+🚌 Choose My Routes
 </a>
 
 <p>
-Review stops where available evidence suggests the greatest potential improvement.
+Select the routes you ride or steward so reviews can prioritize those stops.
 </p>
 
 </div>
-
 
 
 <div class="review-option">
@@ -84,16 +87,29 @@ Review stops where available evidence suggests the greatest potential improvemen
 </a>
 
 <p>
-Review stops along routes you ride, use, or steward.
+Review stops along your selected routes.
 </p>
 
 </div>
 
 
+<div class="review-option">
+
+<a href="/review/start?mode=opportunity">
+⭐ Priority Verification Stops
+</a>
+
+<p>
+Review stops where additional community verification would provide the most value.
+</p>
+
+</div>
+
 
 <div class="review-option">
 
-<a href="/review/start?mode=nearby">
+<a href="#"
+id="nearbyReviewLink">
 📍 Near Me
 </a>
 
@@ -106,12 +122,35 @@ Find stops near your current location that need community validation.
 
 </div>
 
+
+<div
+class="card volunteer-card"
+id="communityProfileCard"
+style="display:none;"
+>
+
+<h2>
+Your community profile
+</h2>
+
+<p>
+Welcome back
+<strong id="communityProfileName">
+</strong>
+</p>
+
+<p>
+Track your reviews, rider impact, and community contributions.
+</p>
+
+<a
+href="/reviewer/profile"
+class="dashboard-button"
+>
+View my community profile
+</a>
+
 </div>
-
-
-
-
-
 
 
 <div class="card map-filter-card">
@@ -122,15 +161,35 @@ Filter the map
 
 <div class="filter-row">
 
-<label>
+<div class="filter-group">
+
+<label for="routeFilter">
+Route
+</label>
+
+<select id="routeFilter">
+<option value="">
+All routes
+</option>
+</select>
+
+</div>
+
+
+<div class="filter-group">
+
+<label for="stateFilter">
 State
+</label>
+
 <select id="stateFilter">
 <option value="">All</option>
 <option value="DC">DC</option>
 <option value="Maryland">Maryland</option>
 <option value="Virginia">Virginia</option>
 </select>
-</label>
+
+</div>
 
 
 <label>
@@ -228,14 +287,10 @@ onkeyup="searchPipeline()"
 <tr>
 <th>Type</th>
 <th>Geography</th>
-<th>Stops</th>
-<th>Queued</th>
-<th>Reviewed</th>
-<th>Consensus</th>
-<th>WMATA Evidence</th>
-<th>OSM Benches</th>
-<th>OSM Shelters</th>
-<th>Progress</th>
+<th>Total Stops</th>
+<th>Shelter Likely / Confirmed</th>
+<th>Bench Likely / Confirmed</th>
+<th>Amenity Status Unknown</th>
 </tr>
 
 </thead>

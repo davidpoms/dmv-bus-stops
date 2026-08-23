@@ -6,6 +6,30 @@ document.addEventListener(
             window.location.pathname.split("/").pop();
 
 
+        function displayAmenity(value) {
+
+            if (
+                value === true ||
+                value === 1 ||
+                value === "yes" ||
+                value === "Yes"
+            ) {
+                return "Yes";
+            }
+
+            if (
+                value === false ||
+                value === 0 ||
+                value === "no" ||
+                value === "No"
+            ) {
+                return "No";
+            }
+
+            return "Not reported";
+        }
+
+
         const container =
             document.getElementById("stopInfo");
 
@@ -41,8 +65,13 @@ document.addEventListener(
 
                     <br>
 
-                    Stop ID:
+                    Internal ID:
                     ${info.stop_id}
+
+                    <br><br>
+
+                    External Stop ID:
+                    ${info.external_stop_id || "Not recorded"}
 
                     <br><br>
 
@@ -59,100 +88,325 @@ document.addEventListener(
 
                     <br><br>
 
+                    Serving direction:
+
+                    <strong>
                     ${
-                        info.wmata
+                        (() => {
+                            const heading = Number(
+                                info.serving_direction
+                            );
+
+                            if (isNaN(heading)) {
+                                return "Unknown";
+                            }
+
+                            if (heading < 22.5 || heading >= 337.5)
+                                return "North";
+
+                            if (heading < 67.5)
+                                return "Northeast";
+
+                            if (heading < 112.5)
+                                return "East";
+
+                            if (heading < 157.5)
+                                return "Southeast";
+
+                            if (heading < 202.5)
+                                return "South";
+
+                            if (heading < 247.5)
+                                return "Southwest";
+
+                            if (heading < 292.5)
+                                return "West";
+
+                            return "Northwest";
+
+                        })()
+                    }
+                    </strong>
+
+                    <br><br>
+                    ${
+                        info.impact_summary &&
+                        info.impact_summary.rider_exposure_percentile
                         ?
                         `
                         <div class="evidence-card">
 
                             <strong>
-                            Current Stop Amenities (WMATA)
+                            Why this stop was selected
                             </strong>
 
                             <br><br>
 
-                            WMATA Data Availability:
-                            <span class="${
-                                info.wmata.availability === "confirmed"
-                                ? "wmata-confirmed"
-                                : "wmata-unavailable"
-                            }">
-                            ${
-                                info.wmata.availability === "confirmed"
-                                ? "Confirmed WMATA match"
-                                : "No WMATA match available"
-                            }
-                            </span>
+                            Verification priorities consider rider exposure
+                            and the need for better information about current
+                            stop conditions.
 
                             <br><br>
 
-                            WMATA Stop ID:
-                            ${info.wmata.stop_id || "Unknown"}
+                            <strong>
+                            Rider exposure
+                            </strong>
 
-                            <br>
+                            <br><br>
 
-                            Status:
+                            The routes serving this stop carry more riders
+                            than approximately
+
+                            <strong>
                             ${
-                                info.wmata.status === "PRS"
-                                ? "Published stop"
-                                : (info.wmata.status || "Unknown")
+                                Math.min(
+                                    info.impact_summary.rider_exposure_percentile,
+                                    99
+                                )
+                            }%
+                            </strong>
+
+                            of stops in the region.
+
+                            <br><br>
+
+                            Estimated route exposure:
+
+                            <strong>
+                            ${
+                                info.impact_summary.estimated_weekday_boardings
+                                ? info.impact_summary.estimated_weekday_boardings.toLocaleString()
+                                : "Unknown"
                             }
-
-                            <br>
-
-                            Shelter:
+                            weekday boardings across
                             ${
-                                info.wmata.shelter === "1"
-                                ? "Yes"
-                                : info.wmata.shelter === "0"
-                                ? "No"
+                                info.impact_summary.routes_served || 0
+                            }
+                            serving routes
+                            </strong>
+
+                            <br><br>
+
+                            Routes:
+
+                            ${
+                                info.impact_summary.routes &&
+                                info.impact_summary.routes.length
+                                ? info.impact_summary.routes.join(", ")
                                 : "Unknown"
                             }
 
-                            <br>
+                            <br><br>
 
-                            Bench:
+                            <small>
+                            Rider exposure is estimated using route-level
+                            ridership data associated with this stop.
+                            Stop-level boarding counts are not available.
+                            </small>
+
+                        </div>
+
+                        <br>
+                        `
+                        :
+                        ""
+                    }
+
+
+                    ${
+                        info.impact_summary
+                        ?
+                        `
+                        <div class="evidence-card">
+
+                            <strong>
+                            Community verification need
+                            </strong>
+
+                            <br><br>
+
+                            Available records do not fully confirm current
+                            waiting conditions.
+
+                            <br><br>
+
+                            Your review helps improve the accuracy of stop
+                            information and identify where improvements may
+                            be needed.
+
+                        </div>
+
+                        <br>
+                        `
+                        :
+                        ""
+                    }
+
+
+
+                    ${
+                        info.amenity_evidence &&
+                        info.amenity_evidence.length > 0
+                        ?
+                        `
+                        <div class="evidence-card">
+
+                            <strong>
+                            Local jurisdiction evidence
+                            </strong>
+
+                            <br><br>
+
+                            Supporting records for shelter and bench
+                            presence. These records have not been
+                            independently verified by a community
+                            observation.
+
+                            <br><br>
+
                             ${
-                                info.wmata.bench === "1"
-                                ? "Yes"
-                                : info.wmata.bench === "0"
-                                ? "No"
-                                : "Unknown"
-                            }
+                                (() => {
 
-                            <br>
+                                    const grouped = {};
 
-                            Accessible:
-                            ${
-                                info.wmata.accessible === "Y"
-                                ? "Yes"
-                                : "No"
-                            }
+                                    info.amenity_evidence
+                                    .filter(
+                                        evidence =>
+                                            evidence.amenity_type === "shelter" ||
+                                            evidence.amenity_type === "bench"
+                                    )
+                                    .forEach(
+                                        evidence => {
 
-                            <br>
+                                            const key =
+                                                (
+                                                    evidence.jurisdiction ||
+                                                    evidence.source ||
+                                                    "Local jurisdiction"
+                                                )
+                                                + "|"
+                                                + (
+                                                    evidence.source_record ||
+                                                    ""
+                                                );
 
-                            Match quality:
-                            ${
-                                info.wmata.match_confidence === "high"
-                                ? "High confidence match (within ~10 meters)"
-                                : info.wmata.match_confidence === "medium"
-                                ? "Medium confidence match (within ~50 meters)"
-                                : info.wmata.match_confidence === "low"
-                                ? "Low confidence match (verify location)"
-                                : "Unknown"
-                            }
+                                            if (!grouped[key]) {
 
-                            <br>
+                                                grouped[key] = {
+                                                    source:
+                                                        evidence.source ||
+                                                        null,
 
-                            Match distance:
-                            ${
-                                info.wmata.match_distance_m !== null
-                                ? (
-                                    info.wmata.match_distance_m < 10
-                                    ? info.wmata.match_distance_m.toFixed(1)
-                                    : Math.round(info.wmata.match_distance_m)
-                                ) + " meters"
-                                : "Unknown"
+                                                    jurisdiction:
+                                                        evidence.jurisdiction ||
+                                                        evidence.source ||
+                                                        "Local jurisdiction",
+
+                                                    source_record:
+                                                        evidence.source_record ||
+                                                        null,
+
+                                                    shelter: null,
+
+                                                    bench: null
+                                                };
+                                            }
+
+                                            if (
+                                                evidence.amenity_type ===
+                                                "shelter"
+                                            ) {
+                                                grouped[key].shelter =
+                                                    evidence.present
+                                                    ? "Yes"
+                                                    : "No";
+                                            }
+
+                                            if (
+                                                evidence.amenity_type ===
+                                                "bench"
+                                            ) {
+                                                grouped[key].bench =
+                                                    evidence.present
+                                                    ? "Yes"
+                                                    : "No";
+                                            }
+                                        }
+                                    );
+
+                                    return Object.values(grouped)
+                                    .map(
+                                        evidence => `
+
+                                        <strong>
+                                        ${
+                                            evidence.jurisdiction ===
+                                            "MONTGOMERY_COUNTY"
+                                            ? "Montgomery County"
+                                            : evidence.jurisdiction ===
+                                              "DISTRICT_OF_COLUMBIA"
+                                              ? "District of Columbia"
+                                            : evidence.jurisdiction ||
+                                              "Local jurisdiction"
+                                        }
+                                        </strong>
+
+                                        <br><br>
+
+                                        Shelter:
+                                        <strong>
+                                        ${
+                                            evidence.shelter ||
+                                            "Not recorded"
+                                        }
+                                        </strong>
+
+                                        <br>
+
+                                        ${
+                                            evidence.jurisdiction !==
+                                            "DISTRICT_OF_COLUMBIA"
+                                            ? `
+                                                Bench:
+                                                <strong>
+                                                ${
+                                                    evidence.bench ||
+                                                    "Not recorded"
+                                                }
+                                                </strong>
+
+                                                <br>
+                                            `
+                                            : ""
+                                        }
+
+                                        ${
+                                            evidence.jurisdiction ===
+                                                "DISTRICT_OF_COLUMBIA" &&
+                                            evidence.source === "DDOT_ARCGIS"
+                                            ? `
+                                                Source:
+                                                <strong>
+                                                    DDOT shelter asset record
+                                                </strong>
+
+                                                <br>
+                                            `
+                                            : ""
+                                        }
+
+                                        Source record:
+                                        ${
+                                            evidence.source_record ||
+                                            "Not recorded"
+                                        }
+
+                                        <br><br>
+                                        `
+                                    )
+                                    .join("");
+
+                                })()
                             }
 
                         </div>
@@ -163,6 +417,70 @@ document.addEventListener(
                         ""
                     }
 
+
+                    <div class="evidence-card">
+
+                        <strong>
+                        Community observations
+                        </strong>
+
+                        <br><br>
+
+                        ${
+                            info.community_reviews &&
+                            info.community_reviews.review_count > 0
+                            ?
+                            `
+                            ${info.community_reviews.review_count}
+                            observation(s)
+
+                            <br><br>
+
+                            ${
+                                info.community_reviews.reviews.map(
+                                    review => `
+                                    <strong>
+                                    ${review.date}
+                                    </strong>
+
+                                    <br><br>
+
+                                    Shelter:
+                                    ${displayAmenity(review.shelter)}
+
+                                    <br>
+
+                                    Bench:
+                                    ${displayAmenity(review.bench)}
+
+                                    <br><br>
+
+                                    Notes:
+                                    ${
+                                        review.notes &&
+                                        review.notes.trim()
+                                        ? review.notes
+                                        : "No notes provided."
+                                    }
+
+                                    <br><br>
+                                    `
+                                ).join("")
+                            }
+                            `
+                            :
+                            `
+                            No observations yet.
+
+                            <br><br>
+
+                            Be the first to review this stop.
+                            `
+                        }
+
+                    </div>
+
+                    <br>
 
                     ${
                         info.streetview_url
@@ -176,6 +494,26 @@ document.addEventListener(
                             class="stop-review-button">
 
                             Open Google Street View
+
+                        </a>
+                        `
+                        :
+                        ""
+                    }
+
+                    ${
+                        info.wmata_rider_tools_url
+                        ?
+                        `
+                        <br><br>
+
+                        <a
+                            href="${info.wmata_rider_tools_url}"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="stop-review-button">
+
+                            Open WMATA Rider Tools
 
                         </a>
                         `

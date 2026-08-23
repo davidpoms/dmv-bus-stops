@@ -23,6 +23,13 @@ SURVEY = {
 
     "remote": [
 
+    {
+        "field": "streetview_imagery_month",
+        "label": "What month and year is the Street View imagery from?",
+        "type": "month"
+    },
+
+
         {
             "field": "shelter_present",
             "label": "Is there a shelter at this stop?",

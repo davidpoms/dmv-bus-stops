@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+<title>Community Profile</title>
+
+<link rel="stylesheet" href="/static/dashboard.css">
+
+</head>
+
+
+<body>
+
+<h1>
+Community Profile
+</h1>
+
+
+<div class="panel volunteer-card">
+
+<h2 id="name">
+Loading...
+</h2>
+
+
+<div id="stats">
+Loading...
+</div>
+
+
+<h3>
+Stops you steward
+</h3>
+
+
+<div id="stewardedStops">
+Loading...
+</div>
+
+
+</div>
+
+
+
+<script>
+
+async function loadProfile(){
+
+    const response =
+        await fetch(
+            "/api/reviewer/profile"
+        );
+
+
+    const data =
+        await response.json();
+
+
+    document
+    .getElementById("name")
+    .innerText =
+        data.display_name
+        || "Community Volunteer";
+
+
+    document.getElementById("stats").innerHTML = `
+
+        <div class="evidence-card">
+
+        <strong>
+        Reviews completed:
+        </strong>
+        ${data.stats.reviews_completed}
+
+        <br><br>
+
+        <strong>
+        Stops validated:
+        </strong>
+        ${data.stats.stops_reviewed}
+
+        <br><br>
+
+        <strong>
+        Rider exposure represented:
+        </strong>
+        ${Number(
+            data.stats.ridership_impacted || 0
+        ).toLocaleString()}
+
+        weekday boardings
+
+        <br><br>
+
+        <strong>
+        Routes covered:
+        </strong>
+        ${
+            (data.stats.routes_covered || []).length
+            ? (data.stats.routes_covered || []).join(", ")
+            : "None yet"
+        }
+
+        <br><br>
+
+        <strong>
+        Stewarded stops:
+        </strong>
+        ${data.stats.stewarded_stops}
+
+        </div>
+
+    `;
+
+
+    const container =
+        document.getElementById(
+            "stewardedStops"
+        );
+
+
+    const stewardedStops =
+        data.stewarded_stops || [];
+
+
+    if(
+        stewardedStops.length === 0
+    ){
+
+        container.innerHTML =
+            "You have not stewarded any stops yet.";
+
+        return;
+
+    }
+
+
+    container.innerHTML =
+        stewardedStops.map(
+            stop => `
+
+            <div class="evidence-card">
+
+            <strong>
+            ${stop.name || "Bus Stop"}
+            </strong>
+
+            <br>
+
+            Stop ID:
+            ${stop.stop_id}
+
+            <br><br>
+
+            <a
+            href="/stop/${stop.stop_id}"
+            class="stop-review-button">
+
+            View Stop
+
+            </a>
+
+            </div>
+
+            `
+        ).join("");
+
+}
+
+
+loadProfile();
+
+</script>
+
+
+</body>
+
+</html>

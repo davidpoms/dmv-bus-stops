@@ -4,9 +4,10 @@ Generate stop improvement recommendations from verified consensus.
 
 import sqlite3
 import json
+from pathlib import Path
 
 
-DB = "src/database/dmv_bus_stops.db"
+DB = Path("src/database/dmv_bus_stops.db")
 
 
 def truthy(value):
@@ -20,11 +21,24 @@ def truthy(value):
     )
 
 
-conn = sqlite3.connect(DB)
-cur = conn.cursor()
+def generate_recommendations(db_path=DB):
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
 
+    cur.execute(
+        """
+        DELETE FROM improvement_recommendations
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM stop_gtfs_status sgs
+            WHERE sgs.physical_stop_id =
+                  improvement_recommendations.physical_stop_id
+              AND sgs.current_gtfs = 1
+        )
+        """
+    )
 
-rows = cur.execute(
+    rows = cur.execute(
     """
     SELECT
         stop_id,
@@ -34,19 +48,23 @@ rows = cur.execute(
         ada_accessible,
         confidence
 
-    FROM stop_consensus
+    FROM stop_consensus sc
 
-    WHERE consensus_status='verified'
+    JOIN stop_gtfs_status sgs
+      ON sgs.physical_stop_id = sc.stop_id
+     AND sgs.current_gtfs = 1
+
+    WHERE sc.consensus_status='verified'
     """
 ).fetchall()
 
 
-created = 0
+    created = 0
 
 
-for row in rows:
+    for row in rows:
 
-    (
+        (
         stop_id,
         reviewer_count,
         has_bench,
@@ -54,20 +72,20 @@ for row in rows:
         ada_accessible,
         confidence
 
-    ) = row
+        ) = row
 
 
-    has_bench_bool = truthy(has_bench)
-    feasible_bool = truthy(bench_feasible)
-    ada_bool = truthy(ada_accessible)
+        has_bench_bool = truthy(has_bench)
+        feasible_bool = truthy(bench_feasible)
+        ada_bool = truthy(ada_accessible)
 
 
-    recommendations = []
+        recommendations = []
 
 
-    if not has_bench_bool and feasible_bool:
+        if not has_bench_bool and feasible_bool:
 
-        recommendations.append(
+            recommendations.append(
             (
                 "install_bench",
                 "medium",
@@ -79,9 +97,9 @@ for row in rows:
         )
 
 
-    if not ada_bool:
+        if not ada_bool:
 
-        recommendations.append(
+            recommendations.append(
             (
                 "improve_ada_access",
                 "high",
@@ -93,15 +111,15 @@ for row in rows:
         )
 
 
-    for (
+        for (
         recommendation_type,
         priority,
         evidence
 
-    ) in recommendations:
+        ) in recommendations:
 
 
-        cur.execute(
+            cur.execute(
             """
             INSERT INTO improvement_recommendations
             (
@@ -128,14 +146,16 @@ for row in rows:
         )
 
 
-        created += 1
+            created += 1
 
 
 
-conn.commit()
-conn.close()
+    conn.commit()
+    conn.close()
 
 
-print(
-    f"Recommendations created: {created}"
-)
+    print(f"Recommendations created: {created}")
+
+
+if __name__ == "__main__":
+    generate_recommendations()

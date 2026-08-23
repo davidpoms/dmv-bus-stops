@@ -32,10 +32,10 @@ def dc_wards():
     return query(
         """
         SELECT
-            dc_ward,
+            ward AS dc_ward,
             stop_count
         FROM dc_ward_summary
-        ORDER BY dc_ward
+        ORDER BY ward
         """
     )
 
@@ -109,7 +109,6 @@ def community_verification_metrics():
             (
                 SELECT COUNT(*)
                 FROM stop_consensus
-                WHERE consensus_status='verified'
             ) AS consensus_stops
 
         """
@@ -342,14 +341,13 @@ def dc_ancs():
     return query(
         """
         SELECT
-            dc_anc,
+            anc AS dc_anc,
             stop_count
         FROM dc_anc_summary
-        WHERE dc_anc IS NOT NULL
-        ORDER BY dc_anc
+        WHERE anc IS NOT NULL
+        ORDER BY anc
         """
     )
-
 
 
 def verification_funnel_metrics():
@@ -453,7 +451,6 @@ def consensus_progress_metrics():
             (
                 SELECT COUNT(*)
                 FROM stop_consensus
-                WHERE consensus_status='verified'
             ) AS verified_stops,
 
             (

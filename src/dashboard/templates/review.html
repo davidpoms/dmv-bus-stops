@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+<title>Bus Stop Review</title>
+
+<link rel="stylesheet" href="/static/dashboard.css">
+
+</head>
+
+
+<body>
+
+
+<h1>
+Community Bus Stop Review
+</h1>
+
+
+<div style="margin: 12px 0 20px 0;">
+
+<a
+href="#"
+id="viewStopDetailsButton"
+class="dashboard-button"
+style="display: inline-block; text-decoration: none;">
+
+View stop details
+
+</a>
+
+</div>
+
+
+<div id="stopInfo">
+Loading stop information...
+</div>
+
+
+<div class="panel volunteer-card">
+
+<h3>
+Want to help beyond this review?
+</h3>
+
+<p>
+Steward this stop and help track future improvements with other community members.
+</p>
+
+<button
+type="button"
+id="stewardStopButton"
+class="dashboard-button">
+
+Steward this stop
+
+</button>
+
+<p id="stewardStatus"></p>
+
+</div>
+
+
+
+<form id="reviewForm">
+
+
+
+
+<input type="hidden" name="assignment_id" id="assignment_id">
+
+<input type="hidden"
+name="review_action"
+id="review_action"
+value="new">
+
+
+<div class="panel volunteer-identity-card">
+
+<h3>
+Optional: get credit for your review
+</h3>
+
+
+{% if reviewer_name %}
+
+<p>
+Welcome back <strong>{{ reviewer_name }}</strong>!
+</p>
+
+<p>
+Your reviews will be credited to this community profile.
+</p>
+
+<label>
+Change display name (optional)
+</label>
+
+<input
+type="text"
+name="display_name"
+placeholder="Leave blank to continue as {{ reviewer_name }}"
+>
+
+<p>
+You can also submit anonymously.
+</p>
+
+
+{% else %}
+
+<p>
+Choose a display name to show on your community contributions.
+You can leave this blank and remain anonymous.
+</p>
+
+<label>
+Display name
+</label>
+
+<input
+type="text"
+name="display_name"
+placeholder="Example: Metro Mapper"
+>
+
+{% endif %}
+
+</div>
+
+
+
+
+
+
+
+{{ survey_html|safe }}
+<br><br>
+
+
+<button type="submit">
+Submit Review
+</button>
+
+
+</form>
+
+
+
+<script>
+
+document
+.getElementById("stewardStopButton")
+.addEventListener(
+"click",
+async function(){
+
+    const stopId =
+        window.location.pathname.split("/").pop();
+
+
+    const response =
+        await fetch(
+            `/stops/${stopId}/steward`,
+            {
+                method:"POST",
+
+                headers:{
+                    "Content-Type":"application/json"
+                },
+
+                body:
+                    JSON.stringify({})
+            }
+        );
+
+
+    const data =
+        await response.json();
+
+
+    document
+    .getElementById("stewardStatus")
+    .innerText =
+        "You are now a community steward for this stop!";
+
+});
+
+</script>
+
+
+<script>
+
+const reviewStopId =
+window.location.pathname.split("/").pop();
+
+
+const viewStopDetailsButton =
+document.getElementById(
+    "viewStopDetailsButton"
+);
+
+
+viewStopDetailsButton.href =
+    `/stops/${reviewStopId}`;
+
+
+</script>
+
+
+
+<script src="/static/review_info_loader.js"></script>
+<script src="/static/review_survey.js"></script>
+<!-- disabled duplicate review_stop.js -->
+
+<script>
+
+const stopId =
+window.location.pathname.split("/").pop();
+
+
+async function loadAssignment(){
+
+    const params =
+        new URLSearchParams(
+            window.location.search
+        );
+
+
+    const assignmentId =
+        params.get("assignment_id");
+
+
+    let assignmentUrl =
+        `/review/${stopId}/assignment`;
+
+
+    if (assignmentId) {
+
+        assignmentUrl +=
+            `?assignment_id=${assignmentId}`;
+
+    }
+
+
+    const response =
+        await fetch(
+            assignmentUrl
+        );
+
+    const data =
+        await response.json();
+
+
+    document
+    .getElementById("assignment_id")
+    .value =
+        data.assignment_id;
+
+
+    document
+    .getElementById("review_action")
+    .value =
+        data.review_action || "new";
+
+
+}
+
+
+loadAssignment();
+
+
+document
+.getElementById("reviewForm")
+.addEventListener(
+"submit",
+async e => {
+
+e.preventDefault();
+
+
+let form =
+new FormData(e.target);
+
+
+let payload = {};
+
+
+for (const [key, value] of form.entries()) {
+
+    const cleanKey =
+        key.endsWith("[]")
+        ? key.slice(0, -2)
+        : key;
+
+
+    if (payload[cleanKey]) {
+
+        if (!Array.isArray(payload[cleanKey])) {
+
+            payload[cleanKey] =
+                [
+                    payload[cleanKey]
+                ];
+
+        }
+
+
+        payload[cleanKey].push(value);
+
+    }
+
+    else {
+
+        payload[cleanKey] =
+            value;
+
+    }
+
+}
+
+
+payload.stop_id =
+stopId;
+
+
+payload.assignment_id =
+    document.getElementById("assignment_id").value;
+
+
+const response =
+await fetch(
+"/review/submit",
+{
+method:"POST",
+headers:{
+"Content-Type":"application/json"
+},
+body:
+JSON.stringify(payload)
+}
+);
+
+const result =
+await response.json();
+
+console.log(result);
+
+if(result.message === "Review already submitted"){
+
+    document.body.innerHTML = `
+
+    <div class="completion-card">
+
+    <h1>
+    Review already submitted
+    </h1>
+
+    <p>
+    This stop already has a completed community review.
+    Thank you for helping improve bus stop information.
+    </p>
+
+    <button onclick="window.location.href='/dashboard'">
+    Return to dashboard
+    </button>
+
+    </div>
+
+    `;
+
+    return;
+
+}
+
+
+if(!response.ok){
+
+    alert(
+        JSON.stringify(result)
+    );
+
+    return;
+
+}
+
+document.body.innerHTML = `
+
+<div class="completion-card">
+
+<h1>
+Thank you for helping improve bus stops!
+</h1>
+
+
+${
+    result.reviewer_stats.display_name
+    ?
+    `
+    <p>
+    Welcome back,
+    <strong>
+    ${result.reviewer_stats.display_name}
+    </strong>
+    !
+    </p>
+    `
+    :
+    ""
+}
+
+<p class="impact-note">
+Ridership figures represent route-level weekday boardings associated with
+routes serving reviewed stops. They do not represent unique riders or
+stop-level boardings.
+</p>
+
+
+<p>
+Your review has been recorded.
+</p>
+
+<div class="impact-section current-review">
+
+<h2>
+This review
+</h2>
+
+
+<p>
+This stop serves approximately
+<strong>
+${
+    result.community_impact.average_weekday_boardings
+    ?
+    Math.round(
+        result.community_impact.average_weekday_boardings
+    ).toLocaleString()
+    :
+    "unknown"
+}
+</strong>
+average weekday boardings.
+</p>
+
+
+${
+    result.community_impact.routes &&
+    result.community_impact.routes.length
+    ?
+    `
+    <p>
+    Routes served:
+    <strong>
+    ${result.community_impact.routes.join(", ")}
+    </strong>
+    </p>
+    `
+    :
+    ""
+}
+
+
+${
+    result.reviewer_stats.first_review
+    ?
+    `
+    <p>
+    ⭐ You established the first community record for this stop.
+    </p>
+    `
+    :
+    ""
+}
+
+</div>
+
+
+<div class="impact-section">
+
+<h2>
+Your community profile
+</h2>
+
+
+<p>
+You have completed
+<strong>${result.reviewer_stats.review_count}</strong>
+review(s).
+</p>
+
+
+${
+    result.reviewer_stats.stops_reviewed
+    ?
+    `
+    <p>
+    You have helped validate
+    <strong>
+    ${result.reviewer_stats.stops_reviewed}
+    </strong>
+    unique stop(s).
+    </p>
+    `
+    :
+    ""
+}
+
+
+${
+    result.reviewer_stats.stewarded_stops
+    ?
+    `
+    <p>
+    You are a community steward for
+    <strong>
+    ${result.reviewer_stats.stewarded_stops}
+    </strong>
+    stop(s).
+    </p>
+    `
+    :
+    ""
+}
+
+
+${
+    result.reviewer_stats.total_route_boardings_represented
+    ?
+    `
+    <p>
+    Your completed reviews are associated with routes representing approximately
+    <strong>
+    ${result.reviewer_stats.total_route_boardings_represented.toLocaleString()}
+    </strong>
+    weekday boardings.
+    </p>
+    `
+    :
+    ""
+}
+
+
+${
+    result.reviewer_stats.routes_covered &&
+    result.reviewer_stats.routes_covered.length
+    ?
+    `
+    <p>
+    Routes covered:
+    <strong>
+    ${result.reviewer_stats.routes_covered.join(", ")}
+    </strong>
+    </p>
+    `
+    :
+    ""
+}
+
+</div>
+
+
+
+<div class="completion-actions">
+
+<a href="/review/start?mode=opportunity" class="dashboard-button">
+Review another stop
+</a>
+
+<a href="/reviewer/profile" class="dashboard-button">
+View my community profile
+</a>
+
+<a href="/dashboard" class="dashboard-button">
+Return to dashboard
+</a>
+
+</div>
+
+</div>
+
+`;
+
+
+});
+
+</script>
+
+
+</body>
+
+</html>

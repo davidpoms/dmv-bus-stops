@@ -4,7 +4,7 @@ import json
 DMV Bus Stops Improvement API
 """
 
-from flask import Flask, jsonify, send_from_directory, request, render_template, redirect
+from flask import Flask, jsonify, send_from_directory, request, render_template, redirect, session
 import sqlite3
 from pathlib import Path
 
@@ -17,11 +17,14 @@ from src.review.assignment_router import (
 from src.spatial.nearest_road import RoadSpatialIndex
 
 from src.assessment.interpretation import (
+    interpret_ddot_evidence,
     summarize_stop_evidence,
     generate_review_action_summary,
     interpret_bench_status,
     interpret_review_priority,
 )
+
+from src.review.consensus import calculate_stop_consensus
 
 
 app = Flask(
@@ -29,6 +32,8 @@ app = Flask(
     static_folder=None,
     template_folder="../dashboard/templates"
 )
+
+app.secret_key = "dmv-bus-stops-review-secret"
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 
@@ -42,27 +47,44 @@ DATABASE_PATH = (
 
 
 
+
 def get_wmata_history(stop_id):
 
     conn = sqlite3.connect(DATABASE_PATH)
     conn.row_factory = sqlite3.Row
 
     rows = conn.execute(
-        '''
+        """
         SELECT
-            statuses,
-            explanation,
-            high_confidence_count,
-            medium_confidence_count
-        FROM stop_wmata_history_summary
+            wmata_stop_id,
+            wmata_status,
+            wmata_heading,
+            wmata_bench,
+            wmata_shelter,
+            wmata_accessible,
+            match_distance_m,
+            match_confidence,
+            created_at
+
+        FROM stop_wmata_evidence
+
         WHERE physical_stop_id = ?
-        ''',
+
+        ORDER BY
+            created_at DESC,
+            match_distance_m ASC
+        """,
         (stop_id,)
     ).fetchall()
 
     conn.close()
 
-    return [dict(row) for row in rows]
+    return [
+        dict(row)
+        for row in rows
+    ]
+
+
 
 
 def get_wmata_evidence(stop_id):
@@ -71,17 +93,20 @@ def get_wmata_evidence(stop_id):
     conn.row_factory = sqlite3.Row
 
     row = conn.execute(
-        '''
+        """
         SELECT
-            wmata_status,
-            wmata_bench,
-            wmata_shelter,
-            wmata_accessible,
+            wmata_stop_id,
             match_confidence,
             match_distance_m
+
         FROM stop_wmata_evidence
+
         WHERE physical_stop_id = ?
-        ''',
+
+        ORDER BY match_distance_m ASC
+
+        LIMIT 1
+        """,
         (stop_id,)
     ).fetchone()
 
@@ -106,6 +131,54 @@ def query_db(sql, params=()):
     conn.close()
 
     return rows
+
+
+def get_current_amenity_evidence(stop_id):
+    """Return normalized evidence allowed in current public amenity views."""
+    return query_db(
+        """
+        SELECT
+            id,
+            source,
+            source_record_id,
+            amenity_type,
+            present,
+            confidence,
+            match_distance_m,
+            notes,
+            jurisdiction,
+            value,
+            raw_value
+        FROM stop_amenity_evidence
+        WHERE physical_stop_id=?
+          AND source != 'DDOT'
+        ORDER BY created_at DESC, id DESC
+        """,
+        (stop_id,)
+    )
+
+
+def stop_is_current(stop_id):
+    rows = query_db(
+        """
+        SELECT physical_stop_id
+        FROM stop_gtfs_status
+        WHERE physical_stop_id=?
+          AND current_gtfs=1
+        """,
+        (stop_id,)
+    )
+    return bool(rows)
+
+
+def inactive_stop_response(stop_id):
+    return jsonify(
+        {
+            "error": "Stop is not current and cannot receive active review work",
+            "code": "stop_not_current",
+            "stop_id": stop_id,
+        }
+    ), 409
 
 
 
@@ -137,6 +210,17 @@ def get_stop_evidence_summary(stop_id):
     ).fetchone()
 
 
+    ddot = conn.execute(
+        """
+        SELECT *
+        FROM stop_ddot_shelter_evidence
+        WHERE physical_stop_id=?
+        ORDER BY created_at DESC
+        """,
+        (stop_id,)
+    ).fetchall()
+
+
     reviews = conn.execute(
         """
         SELECT *
@@ -156,6 +240,11 @@ def get_stop_evidence_summary(stop_id):
 
         "osm": dict(osm) if osm else None,
 
+        "ddot": [
+            dict(r)
+            for r in ddot
+        ],
+
         "reviews": [
             dict(r)
             for r in reviews
@@ -166,6 +255,7 @@ def get_stop_evidence_summary(stop_id):
 road_index = None
 
 
+
 def get_road_index():
 
     global road_index
@@ -174,34 +264,50 @@ def get_road_index():
         return road_index
 
 
-    rows = query_db(
-        """
-        SELECT geometry, road_class
-        FROM road_centerlines
-        """
-    )
+    try:
 
-
-    roads = []
-
-    for row in rows:
-
-        geometry = json.loads(row[0])
-
-        roads.append(
-            {
-                "geometry": geometry["coordinates"],
-                "road_class": row[1]
-            }
+        rows = query_db(
+            """
+            SELECT geometry, road_class
+            FROM road_centerlines
+            """
         )
 
 
-    road_index = RoadSpatialIndex(
-        roads
-    )
+        roads = []
+
+        for row in rows:
+
+            geometry = json.loads(row[0])
+
+            roads.append(
+                {
+                    "geometry": geometry["coordinates"],
+                    "road_class": row[1]
+                }
+            )
+
+
+        road_index = RoadSpatialIndex(
+            roads
+        )
+
+
+    except Exception as e:
+
+        print("Road centerlines index build failed:", e)
+
+
+        class EmptyRoadIndex:
+
+            def nearest_road(self, lat, lon):
+                return None
+
+
+        road_index = EmptyRoadIndex()
+
 
     return road_index
-
 
 
 @app.route("/observations/create", methods=["POST"])
@@ -247,7 +353,7 @@ def create_observation():
         )
         
 VALUES
-        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 
         """,
         (
@@ -286,11 +392,91 @@ VALUES
     streetview_url = (
         "https://www.google.com/maps/@?api=1"
         "&map_action=pano"
-        f"&viewpoint={road['road_lat']},{road['road_lon']}"
+        f"&viewpoint={row[1]},{row[2]}"
         f"&heading={heading}"
         "&pitch=0"
         "&fov=90"
     )
+
+    reviewer_id = None
+
+    reviewer_key = session.get(
+        "reviewer_key"
+    )
+
+
+    if reviewer_key:
+
+        reviewer_id, reviewer_key = get_or_create_reviewer(
+            reviewer_key
+        )
+
+
+    reviewer_history = []
+
+
+    if reviewer_id:
+
+        reviewer_history = query_db(
+            """
+            SELECT
+                id,
+                observed_at
+
+            FROM stop_observations
+
+            WHERE physical_stop_id=?
+
+            AND reviewer_id=?
+
+            AND source='community_review'
+
+            ORDER BY observed_at DESC
+            """,
+            (
+                stop_id,
+                reviewer_id
+            )
+        )
+
+
+    total_reviews = query_db(
+        """
+        SELECT COUNT(*)
+
+        FROM stop_observations
+
+        WHERE physical_stop_id=?
+
+        AND source='community_review'
+        """,
+        (stop_id,)
+    )
+
+
+    community_review = {
+
+        "has_reviewed": bool(reviewer_history),
+
+        "review_count":
+            len(reviewer_history),
+
+        "total_stop_reviews":
+            total_reviews[0][0]
+            if total_reviews
+            else 0,
+
+        "latest_review_id":
+            reviewer_history[0][0]
+            if reviewer_history
+            else None,
+
+        "last_reviewed_at":
+            reviewer_history[0][1]
+            if reviewer_history
+            else None
+    }
+
 
     return jsonify(
         {
@@ -306,10 +492,8 @@ def validation_update():
     data = request.json
 
     stop_id = data["stop_id"]
-    status = data["status"]
-    validator = data.get("validator", "")
+    confidence = data.get("confidence", "needs_validation")
     notes = data.get("notes", "")
-
 
     conn = sqlite3.connect(
         "src/database/dmv_bus_stops.db"
@@ -317,32 +501,28 @@ def validation_update():
 
     cursor = conn.cursor()
 
-
     cursor.execute(
         """
-        INSERT INTO stop_validation
+        INSERT INTO stop_consensus
         (
-            physical_stop_id,
-            status,
-            validator,
+            stop_id,
+            confidence,
             notes,
-            validated_at
+            updated_at
         )
 
-        VALUES (?, ?, ?, ?, datetime('now'))
+        VALUES (?, ?, ?, datetime('now'))
 
-        ON CONFLICT(physical_stop_id)
+        ON CONFLICT(stop_id)
         DO UPDATE SET
 
-            status = excluded.status,
-            validator = excluded.validator,
+            confidence = excluded.confidence,
             notes = excluded.notes,
-            validated_at = excluded.validated_at
+            updated_at = excluded.updated_at
         """,
         (
             stop_id,
-            status,
-            validator,
+            confidence,
             notes
         )
     )
@@ -356,48 +536,56 @@ def validation_update():
         {
             "success": True,
             "stop_id": stop_id,
-            "status": status
+            "confidence": confidence
         }
     )
-
 
 @app.route("/validation/queue")
 def validation_queue():
 
     rows = query_db(
-        '''
+        """
         SELECT
             ps.id,
             ps.primary_name,
             ps.latitude AS lat,
             ps.longitude AS lon,
-            sii.opportunity_score,
-            sii.priority_level,
-            sv.status
+            io.opportunity_score,
 
-        FROM stop_validation sv
+            CASE
+                WHEN io.opportunity_score >= 80 THEN 'very_high'
+                WHEN io.opportunity_score >= 60 THEN 'high'
+                WHEN io.opportunity_score >= 40 THEN 'medium'
+                ELSE 'low'
+            END,
 
-        JOIN stop_improvement_impact sii
-            ON sv.physical_stop_id = sii.physical_stop_id
+            COALESCE(
+                sc.confidence,
+                'needs_validation'
+            )
 
-        JOIN physical_stops ps
-            ON ps.id = sv.physical_stop_id
+        FROM physical_stops ps
 
-        WHERE sv.status = 'needs_validation'
+        JOIN stop_gtfs_status sgs
+            ON sgs.physical_stop_id = ps.id
+           AND sgs.current_gtfs = 1
+
+        LEFT JOIN improvement_opportunities io
+            ON ps.id = io.physical_stop_id
+
+        LEFT JOIN stop_consensus sc
+            ON ps.id = sc.stop_id
+
+        WHERE
+            sc.confidence IS NULL
+            OR sc.confidence = 'needs_validation'
 
         ORDER BY
-            CASE sii.priority_level
-                WHEN 'P1' THEN 1
-                WHEN 'P2' THEN 2
-                WHEN 'P3' THEN 3
-                ELSE 4
-            END,
-            sii.opportunity_score DESC
+            io.opportunity_score DESC
 
         LIMIT 75;
-        '''
+        """
     )
-
     return jsonify(
         [
             {
@@ -476,7 +664,7 @@ def community_status(stop_id):
             status,
             validator,
             validated_at
-        FROM stop_validation
+        FROM stop_consensus
         WHERE physical_stop_id = ?
         """,
         (stop_id,)
@@ -525,7 +713,7 @@ def community_status(stop_id):
             steward,
             installed_date,
             notes
-        FROM community_actions
+        FROM stop_observations
         WHERE physical_stop_id = ?
         """,
         (stop_id,)
@@ -663,41 +851,75 @@ def community_status(stop_id):
 
 
 
+@app.route("/stop/<int:stop_id>")
+def stop_page(stop_id):
+
+    try:
+        return render_template(
+            "stop_detail.html",
+            stop_id=stop_id
+        )
+
+    except Exception as e:
+        return f"TEMPLATE ERROR: {type(e).__name__}: {e}", 500
+
+
+
 @app.route("/stops/<int:stop_id>")
 def stop_detail(stop_id):
 
     stop = query_db(
-        """
-        SELECT
-            ps.primary_name,
-            ps.latitude AS lat,
-            ps.longitude AS lon,
-            sii.opportunity_score,
-            sii.priority_level
+"""
+SELECT
+    ps.primary_name,
+    ps.latitude,
+    ps.longitude,
+    bs.external_stop_id,
+    io.opportunity_score,
 
-        FROM physical_stops ps
+    CASE
+        WHEN io.opportunity_score >= 80 THEN 'very_high'
+        WHEN io.opportunity_score >= 60 THEN 'high'
+        WHEN io.opportunity_score >= 40 THEN 'medium'
+        ELSE 'low'
+    END AS impact,
 
-        JOIN stop_improvement_impact sii
-            ON ps.id = sii.physical_stop_id
+    GROUP_CONCAT(DISTINCT r.route_name) AS routes
 
-        WHERE ps.id = ?;
-        """,
-        (stop_id,)
-    )
+FROM physical_stops ps
+
+JOIN improvement_opportunities io
+    ON ps.id = io.physical_stop_id
+
+LEFT JOIN physical_stop_members psm
+    ON ps.id = psm.physical_stop_id
+
+LEFT JOIN bus_stops bs
+    ON psm.bus_stop_id = bs.id
+
+LEFT JOIN stop_routes sr
+    ON bs.id = sr.stop_id
+
+LEFT JOIN routes r
+    ON sr.route_id = r.id
+
+WHERE ps.id = ?
+
+GROUP BY ps.id
+
+""",
+(stop_id,)
+)
 
 
-    projects = query_db(
-        """
-        SELECT
-            recommendation_type,
-            project_status
+    if not stop:
+        return {"error": "Stop not found"}, 404
 
-        FROM improvement_projects
 
-        WHERE physical_stop_id = ?;
-        """,
-        (stop_id,)
-    )
+    row = stop[0]
+
+
+    projects = []
 
 
     recommendations = query_db(
@@ -723,15 +945,15 @@ def stop_detail(stop_id):
 
     recommendation_payload = []
 
-    for row in recommendations:
+    for rec_row in recommendations:
 
         recommendation_payload.append(
             {
-                "type": row[0],
-                "priority": row[1],
-                "confidence": row[2],
-                "evidence": json.loads(row[3]) if row[3] else {},
-                "reasons": json.loads(row[4]) if row[4] else []
+                "type": rec_row[0],
+                "priority": rec_row[1],
+                "confidence": rec_row[2],
+                "evidence": json.loads(rec_row[3]) if rec_row[3] else {},
+                "reasons": json.loads(rec_row[4]) if rec_row[4] else []
             }
         )
 
@@ -757,185 +979,226 @@ def stop_detail(stop_id):
     )
 
 
-    wmata_history = get_wmata_history(stop_id)
-
     wmata_evidence = get_wmata_evidence(stop_id)
 
 
-    return jsonify(
-        {
-            "stop":
-                {
-                    "location": stop_row[0],
-                    "lat": stop_row[1],
-                    "lon": stop_row[2],
-                    "score": stop_row[3],
-                    "impact": stop_row[4]
-                }
-                if stop_row else None,
-
-            "projects": [
-                {
-                    "recommendation": row[0],
-                    "status": row[1]
-                }
-                for row in projects
-            ],
-
-            "recommendations": recommendation_payload,
-
-            "evidence": evidence,
-
-            "evidence_summary": evidence_summary,
-
-            "review_actions": review_actions,
-
-            "bench_status": bench_status,
-
-            "review_priority": review_priority,
-
-            "wmata_history": wmata_history,
-
-            "wmata_evidence": wmata_evidence
-        }
-    )
 
 
-
-
-
-
-
-
-@app.route("/stops/<int:stop_id>/amenities")
-def stop_amenities(stop_id):
-
-    wmata = query_db(
-        """
-        SELECT
-            wmata_shelter,
-            wmata_bench,
-            wmata_accessible,
-            match_confidence
-        FROM stop_wmata_evidence
-        WHERE physical_stop_id = ?
-        """,
-        (stop_id,)
-    )
-
-    osm = query_db(
-        """
-        SELECT
-            osm_shelter,
-            osm_bench
-        FROM stop_osm_evidence
-        WHERE stop_id = ?
-        """,
-        (stop_id,)
-    )
-
-    return jsonify(
-        {
-            "wmata": (
-                {
-                    "shelter": wmata[0][0],
-                    "bench": wmata[0][1],
-                    "accessible": wmata[0][2],
-                    "confidence": wmata[0][3],
-                }
-                if wmata else None
-            ),
-            "osm": (
-                {
-                    "shelter": osm[0][0],
-                    "bench": osm[0][1],
-                }
-                if osm else None
-            )
-        }
-    )
-
-
-@app.route("/survey-page/<int:stop_id>")
-def survey_page(stop_id):
-
-    return redirect(
-        f"/review/{stop_id}"
-    )
-
-@app.route("/survey/<int:stop_id>")
-def survey(stop_id):
-
-    stop = query_db(
-        """
-        SELECT
-            ps.id,
-            ps.primary_name,
-            ps.latitude AS lat,
-            ps.longitude
-
-        FROM physical_stops ps
-
-        WHERE ps.id = ?;
-        """,
-        (stop_id,)
-    )
-
-    if not stop:
-        return "Stop not found", 404
-
-    row = stop[0]
-
-
-    wmata_evidence = query_db(
+    ddot_evidence = query_db(
         '''
         SELECT
-            wmata_status,
-            wmata_bench,
-            wmata_shelter,
-            wmata_accessible,
-            match_confidence,
-            match_distance_m
-        FROM stop_wmata_evidence
+            physical_stop_id,
+            ddot_id,
+            api_id,
+            lifecycle_status,
+            route_ids,
+            route_count,
+            confidence,
+            notes
+        FROM stop_ddot_shelter_evidence
         WHERE physical_stop_id = ?
         ''',
+        (stop_id,)
+    )
+
+
+    ddot_evidence_payload = [
+        {
+            "physical_stop_id": row[0],
+            "ddot_id": row[1],
+            "api_id": row[2],
+            "lifecycle_status": row[3],
+            "routes": row[4].split(",") if row[4] else [],
+            "route_count": row[5],
+            "confidence": row[6],
+            "notes": row[7]
+        }
+        for row in ddot_evidence
+    ]
+
+
+
+    ddot_interpretation = interpret_ddot_evidence(
+        ddot_evidence_payload
+    )
+
+
+    impact_summary = query_db(
+        """
+        SELECT
+            summary,
+            impact_level,
+            recommendations,
+            opportunity_score,
+            daily_route_exposure
+
+        FROM stop_improvement_impact
+
+        WHERE physical_stop_id = ?
+        """,
         (stop_id,)
     )
 
 
     ridership = query_db(
         '''
-        SELECT
-            SUM(rs.weekday_boardings) AS total_boardings,
-            COUNT(DISTINCT r.route_id) AS route_count,
-            GROUP_CONCAT(DISTINCT r.route_id) AS routes
+        WITH physical_stop_routes AS (
 
-        FROM stop_routes sr
+            SELECT DISTINCT
+                psm.physical_stop_id,
+                r.route_id
 
-        JOIN routes r
-            ON sr.route_id = r.route_id
+            FROM physical_stop_members psm
 
-        JOIN ridership_snapshots rs
-            ON r.route_id = rs.route_id
+            JOIN stop_routes sr
+                ON psm.bus_stop_id = sr.stop_id
 
-        WHERE sr.stop_id = ?
+            JOIN routes r
+                ON sr.route_id = r.id
 
-        AND rs.period = (
-            SELECT MAX(period)
+            WHERE psm.physical_stop_id = ?
+
+        ),
+
+        latest_ridership AS (
+
+            SELECT
+                route_id,
+                weekday_boardings,
+                period
+
             FROM ridership_snapshots
+
+            WHERE period = (
+                SELECT MAX(period)
+                FROM ridership_snapshots
+            )
+
         )
 
-        GROUP BY sr.stop_id
+        SELECT
+            SUM(lr.weekday_boardings) AS weekday_total,
+
+            COUNT(DISTINCT psr.route_id) AS route_count,
+
+            GROUP_CONCAT(DISTINCT psr.route_id) AS routes,
+
+            (
+                SELECT COUNT(*)
+
+                FROM (
+                    SELECT 1 AS day
+                    UNION ALL SELECT 2
+                    UNION ALL SELECT 3
+                    UNION ALL SELECT 4
+                    UNION ALL SELECT 5
+                    UNION ALL SELECT 6
+                    UNION ALL SELECT 7
+                    UNION ALL SELECT 8
+                    UNION ALL SELECT 9
+                    UNION ALL SELECT 10
+                    UNION ALL SELECT 11
+                    UNION ALL SELECT 12
+                    UNION ALL SELECT 13
+                    UNION ALL SELECT 14
+                    UNION ALL SELECT 15
+                    UNION ALL SELECT 16
+                    UNION ALL SELECT 17
+                    UNION ALL SELECT 18
+                    UNION ALL SELECT 19
+                    UNION ALL SELECT 20
+                    UNION ALL SELECT 21
+                    UNION ALL SELECT 22
+                    UNION ALL SELECT 23
+                    UNION ALL SELECT 24
+                    UNION ALL SELECT 25
+                    UNION ALL SELECT 26
+                    UNION ALL SELECT 27
+                    UNION ALL SELECT 28
+                    UNION ALL SELECT 29
+                    UNION ALL SELECT 30
+                    UNION ALL SELECT 31
+                ) days
+
+                WHERE days.day <= CAST(
+                    strftime(
+                        '%d',
+                        date(
+                            lr.period,
+                            'start of month',
+                            '+1 month',
+                            '-1 day'
+                        )
+                    ) AS INTEGER
+                )
+
+                AND strftime(
+                    '%w',
+                    date(
+                        lr.period,
+                        'start of month',
+                        '+' || (days.day - 1) || ' days'
+                    )
+                ) BETWEEN '1' AND '5'
+            ) AS weekdays_in_period
+
+        FROM physical_stop_routes psr
+
+        JOIN latest_ridership lr
+            ON psr.route_id = lr.route_id
         ''',
         (stop_id,)
     )
 
 
+
+    rider_exposure = query_db(
+        '''
+        SELECT
+            assessment_json
+
+        FROM opportunity_assessments
+
+        WHERE physical_stop_id = ?
+        ''',
+        (stop_id,)
+    )
+
+    rider_exposure_percentile = None
+
+    if rider_exposure and rider_exposure[0][0]:
+
+        try:
+
+            assessment = json.loads(
+                rider_exposure[0][0]
+            )
+
+            rider_exposure_percentile = (
+                assessment.get(
+                    "rider_exposure_percentile"
+                )
+            )
+
+        except Exception:
+
+            pass
+
+
     ridership_exposure = (
         {
-            "weekday_boardings":
+            "weekday_boardings_total":
                 round(ridership[0][0])
                 if ridership[0][0]
+                else 0,
+
+            "average_weekday_boardings":
+                round(
+                    ridership[0][0]
+                    /
+                    ridership[0][3]
+                )
+                if ridership[0][0] and ridership[0][3]
                 else 0,
 
             "route_count":
@@ -952,9 +1215,12 @@ def survey(stop_id):
     )
 
 
+    print("DEBUG STOP DETAIL ROW:", row)
+    print("DEBUG TYPES:", type(row[1]), type(row[2]))
+
     road = get_road_index().nearest_road(
-        row[3],
-        row[2]
+        row[2],
+        row[1]
     )
 
 
@@ -967,36 +1233,206 @@ def survey(stop_id):
     streetview_url = (
         "https://www.google.com/maps/@?api=1"
         "&map_action=pano"
-        f"&viewpoint={road['road_lat']},{road['road_lon']}"
+        f"&viewpoint={row[1]},{row[2]}"
         f"&heading={heading}"
         "&pitch=0"
         "&fov=90"
     )
 
+
+    reviewer_key = session.get(
+        "reviewer_key"
+    )
+
+    reviewer_id, reviewer_key = get_or_create_reviewer(
+        reviewer_key
+    )
+
+    print(
+        "REVIEWER:",
+        reviewer_id,
+        reviewer_key
+    )
+
+    session["reviewer_key"] = reviewer_key
+
+
+    reviewer_history = query_db(
+        """
+        SELECT
+            id,
+            observed_at
+
+        FROM stop_observations
+
+        WHERE physical_stop_id=?
+
+        AND reviewer_id=?
+
+        AND source='community_review'
+
+        ORDER BY observed_at DESC
+        """,
+        (
+            stop_id,
+            reviewer_id
+        )
+    )
+
+
+    my_review_count = len(reviewer_history)
+
+
+    total_stop_reviews = query_db(
+        """
+        SELECT COUNT(*)
+
+        FROM stop_observations
+
+        WHERE physical_stop_id=?
+
+        AND source='community_review'
+        """,
+        (stop_id,)
+    )
+
+
+    community_review = {
+
+        "has_reviewed": bool(reviewer_history),
+
+        "my_review_count":
+            my_review_count,
+
+        "total_stop_reviews":
+            total_stop_reviews[0][0]
+            if total_stop_reviews
+            else 0,
+
+        "latest_review_id":
+            reviewer_history[0][0]
+            if reviewer_history
+            else None,
+
+        "last_reviewed_at":
+            reviewer_history[0][1]
+            if reviewer_history
+            else None
+    }
+
+
+    opportunity = query_db(
+        '''
+        SELECT
+            opportunity_score,
+            impact_level,
+            daily_route_exposure,
+            summary,
+            recommendations
+        FROM stop_improvement_impact
+        WHERE physical_stop_id = ?
+        ''',
+        (stop_id,)
+    )
+
+
+    opportunity_summary = (
+        {
+            "score":
+                opportunity[0][0],
+
+            "level":
+                opportunity[0][1],
+
+            "daily_route_exposure":
+                opportunity[0][2],
+
+            "summary":
+                opportunity[0][3],
+
+            "recommendations":
+                json.loads(opportunity[0][4])
+                if opportunity[0][4]
+                else []
+        }
+        if opportunity
+        else None
+    )
+
+
+
     return jsonify(
         {
-            "stop_id": row[0],
-            "location": row[1],
-            "lat": row[2],
-            "lon": row[3],
+            "stop_id": stop_id,
+            "location": row[0],
+            "lat": row[1],
+            "lon": row[2],
+            "external_stop_id": row[3],
+
+            "wmata_rider_tools_url":
+                f"https://www.wmata.com/ridertools/stop/{row[3]}"
+                if row[3]
+                else None,
+            "score": row[4],
+            "impact": row[5],
+            "routes":
+                row[6].split(",")
+                if row[5]
+                else [],
             "heading": heading,
             "streetview_url": streetview_url,
 
-            "wmata_evidence": (
-                {
-                    "status": wmata_evidence[0][0],
-                    "bench": wmata_evidence[0][1],
-                    "shelter": wmata_evidence[0][2],
-                    "accessible": wmata_evidence[0][3],
-                    "confidence": wmata_evidence[0][4],
-                    "distance_meters": wmata_evidence[0][5]
-                }
-                if wmata_evidence
-                else None
-            ),
 
-            "ridership_exposure":
-                ridership_exposure
+            "wmata_evidence":
+                wmata_evidence,
+
+
+            "ddot_evidence":
+                ddot_evidence_payload,
+
+            "ddot_interpretation":
+                ddot_interpretation,
+
+            "community_review":
+                community_review,
+
+            "recommendations":
+                recommendation_payload,
+
+            "impact_summary":
+                {
+                    "rider_exposure_percentile":
+                        rider_exposure_percentile,
+
+                    "estimated_weekday_boardings":
+                        ridership_exposure["average_weekday_boardings"]
+                        if ridership_exposure
+                        else None,
+
+                    "routes_served":
+                        ridership_exposure["route_count"]
+                        if ridership_exposure
+                        else 0,
+
+                    "routes":
+                        ridership_exposure["routes"]
+                        if ridership_exposure
+                        else [],
+
+                    "opportunity_score":
+                        opportunity_summary["score"]
+                        if opportunity_summary
+                        else None,
+
+                    "impact_level":
+                        opportunity_summary["level"]
+                        if opportunity_summary
+                        else None
+                },
+
+
+            "opportunity":
+                opportunity_summary
         }
     )
 
@@ -1020,14 +1456,33 @@ def review_start():
         )
     )
 
+    stop_id_requested = request.args.get("stop_id")
+
+    requested_stop_id = None
+
+    if stop_id_requested:
+        try:
+            requested_stop_id = int(stop_id_requested)
+        except (TypeError, ValueError):
+            return {"error": "valid stop_id required"}, 400
+
+        if not stop_is_current(requested_stop_id):
+            return inactive_stop_response(requested_stop_id)
+
+    reviewer_key = session.get(
+        "reviewer_key"
+    )
+
+
     reviewer_id, reviewer_key = (
-        get_or_create_reviewer()
+        get_or_create_reviewer(
+            reviewer_key
+        )
     )
 
 
-    stop_id_requested = request.args.get(
-        "stop_id"
-    )
+    session["reviewer_key"] = reviewer_key
+
 
     latitude = request.args.get("lat")
     longitude = request.args.get("lon")
@@ -1038,7 +1493,7 @@ def review_start():
         result = assign_stop(
             reviewer_id,
             scenario,
-            stop_id=int(stop_id_requested)
+            stop_id=requested_stop_id
         )
 
     else:
@@ -1061,7 +1516,7 @@ def review_start():
 
 
     return redirect(
-        f"/review/{stop_id}?assignment={assignment_id}"
+        f"/review/{stop_id}?assignment_id={assignment_id}&mode={scenario}"
     )
 
 
@@ -1070,6 +1525,9 @@ def review_page(stop_id):
 
     from src.review.render_survey import render_survey
 
+    if not stop_is_current(stop_id):
+        return inactive_stop_response(stop_id)
+
     stop = query_db(
         """
         SELECT
@@ -1077,7 +1535,7 @@ def review_page(stop_id):
             primary_name,
             latitude,
             longitude,
-            jurisdiction
+            state
         FROM physical_stops
         WHERE id=?
         """,
@@ -1089,15 +1547,35 @@ def review_page(stop_id):
 
     stop_row = list(stop[0])
 
-    # Normalize displayed jurisdiction from state field
-    if stop_row[4] == "MD/VA":
-        stop_row[4] = "Maryland / Virginia"
+    reviewer_key = session.get("reviewer_key")
+
+    reviewer = None
+
+    if reviewer_key:
+        reviewer = query_db(
+            """
+            SELECT
+                display_name
+            FROM community_reviewers
+            WHERE reviewer_key=?
+            """,
+            (reviewer_key,)
+        )
+
+
+    reviewer_name = (
+        reviewer[0][0]
+        if reviewer and reviewer[0][0]
+        else None
+    )
+
 
     return render_template(
         "review.html",
         stop=stop_row,
         stop_id=stop_id,
-        survey_html=render_survey()
+        survey_html=render_survey(),
+        reviewer_name=reviewer_name
     )
 
 
@@ -1112,25 +1590,31 @@ def review_stop_info(stop_id):
             p.primary_name,
             p.latitude,
             p.longitude,
-            p.jurisdiction,
+            p.state,
             p.dc_ward,
             p.dc_anc,
             p.county,
             p.municipality,
 
-            w.wmata_stop_id,
-            w.wmata_status,
-            w.wmata_heading,
-            w.wmata_bench,
-            w.wmata_shelter,
-            w.wmata_accessible,
-            w.match_distance_m,
-            w.match_confidence
+            NULL AS wmata_stop_id,
+            NULL AS wmata_status,
+            NULL AS wmata_heading,
+            NULL AS wmata_bench,
+            NULL AS wmata_shelter,
+            NULL AS wmata_accessible,
+            NULL AS match_distance_m,
+            NULL AS match_confidence,
+
+            (
+                SELECT bs.external_stop_id
+                FROM physical_stop_members psm
+                JOIN bus_stops bs
+                    ON bs.id = psm.bus_stop_id
+                WHERE psm.physical_stop_id = p.id
+                LIMIT 1
+            ) AS external_stop_id
 
         FROM physical_stops p
-
-        LEFT JOIN stop_wmata_evidence w
-        ON p.id = w.physical_stop_id
 
         WHERE p.id=?
         """,
@@ -1141,6 +1625,248 @@ def review_stop_info(stop_id):
         return {"error": "Stop not found"}, 404
 
     row = stop[0]
+
+
+    ddot_evidence = query_db(
+        '''
+        SELECT
+            physical_stop_id,
+            ddot_id,
+            api_id,
+            lifecycle_status,
+            route_ids,
+            route_count,
+            confidence,
+            notes
+        FROM stop_ddot_shelter_evidence
+        WHERE physical_stop_id = ?
+        ''',
+        (stop_id,)
+    )
+
+
+    ddot_evidence_payload = [
+        {
+            "physical_stop_id": r[0],
+            "ddot_id": r[1],
+            "api_id": r[2],
+            "lifecycle_status": r[3],
+            "routes": r[4].split(",") if r[4] else [],
+            "route_count": r[5],
+            "confidence": r[6],
+            "notes": r[7]
+        }
+        for r in ddot_evidence
+    ]
+
+
+    ddot_interpretation = interpret_ddot_evidence(
+        ddot_evidence_payload
+    )
+
+
+
+    ridership = query_db(
+        '''
+        SELECT
+            SUM(rs.weekday_boardings) AS total_weekday_boardings,
+            COUNT(DISTINCT r.route_id) AS route_count,
+            GROUP_CONCAT(DISTINCT r.route_id) AS routes
+
+        FROM physical_stop_members psm
+
+        JOIN stop_routes sr
+            ON psm.bus_stop_id = sr.stop_id
+
+        JOIN routes r
+            ON sr.route_id = r.id
+
+        JOIN ridership_snapshots rs
+            ON r.route_id = rs.route_id
+
+        WHERE psm.physical_stop_id = ?
+
+        AND rs.period = (
+            SELECT MAX(period)
+            FROM ridership_snapshots
+        )
+
+        GROUP BY psm.physical_stop_id
+        ''',
+        (stop_id,)
+    )
+
+
+    ridership_exposure = (
+        {
+            "average_weekday_boardings":
+                round(ridership[0][0] / 23)
+                if ridership[0][0]
+                else 0,
+
+            "route_count":
+                ridership[0][1]
+                or 0,
+
+            "routes":
+                ridership[0][2].split(",")
+                if ridership[0][2]
+                else []
+        }
+        if ridership
+        else None
+    )
+
+
+
+    ridership = query_db(
+        '''
+        SELECT
+            SUM(rs.weekday_boardings) AS weekday_total,
+            COUNT(DISTINCT r.route_id) AS route_count,
+            GROUP_CONCAT(DISTINCT r.route_id) AS routes
+
+        FROM physical_stop_members psm
+
+        JOIN stop_routes sr
+            ON psm.bus_stop_id = sr.stop_id
+
+        JOIN routes r
+            ON sr.route_id = r.id
+
+        JOIN ridership_snapshots rs
+            ON r.route_id = rs.route_id
+
+        WHERE psm.physical_stop_id = ?
+
+        AND rs.period = (
+            SELECT MAX(period)
+            FROM ridership_snapshots
+        )
+
+        GROUP BY psm.physical_stop_id
+        ''',
+        (stop_id,)
+    )
+
+
+    ridership_exposure = (
+        {
+            "weekday_boardings_total":
+                round(ridership[0][0])
+                if ridership[0][0]
+                else 0,
+
+            "average_weekday_boardings":
+                round(ridership[0][0] / 23)
+                if ridership[0][0]
+                else 0,
+
+            "route_count":
+                ridership[0][1]
+                or 0,
+
+            "routes":
+                ridership[0][2].split(",")
+                if ridership[0][2]
+                else []
+        }
+        if ridership
+        else None
+    )
+
+
+    impact_summary = query_db(
+        '''
+        SELECT
+            summary,
+            impact_level,
+            recommendations,
+            opportunity_score,
+            daily_route_exposure
+
+        FROM stop_improvement_impact
+
+        WHERE physical_stop_id = ?
+        ''',
+        (stop_id,)
+    )
+
+
+    rider_exposure = query_db(
+        '''
+        SELECT
+            assessment_json
+
+        FROM opportunity_assessments
+
+        WHERE physical_stop_id = ?
+        ''',
+        (stop_id,)
+    )
+
+
+    rider_exposure_percentile = None
+
+
+    if rider_exposure and rider_exposure[0][0]:
+
+        try:
+
+            assessment = json.loads(
+                rider_exposure[0][0]
+            )
+
+            rider_exposure_percentile = (
+                assessment.get(
+                    "rider_exposure_percentile"
+                )
+            )
+
+        except Exception:
+
+            pass
+
+
+
+    opportunity = query_db(
+        '''
+        SELECT
+            opportunity_score,
+            impact_level,
+            daily_route_exposure,
+            summary,
+            recommendations
+        FROM stop_improvement_impact
+        WHERE physical_stop_id = ?
+        ''',
+        (stop_id,)
+    )
+
+
+    opportunity_summary = (
+        {
+            "score":
+                opportunity[0][0],
+
+            "level":
+                opportunity[0][1],
+
+            "daily_route_exposure":
+                opportunity[0][2],
+
+            "summary":
+                opportunity[0][3],
+
+            "recommendations":
+                json.loads(opportunity[0][4])
+                if opportunity[0][4]
+                else []
+        }
+        if opportunity
+        else None
+    )
+
 
 
     streetview = get_road_index().nearest_road(
@@ -1162,6 +1888,174 @@ def review_stop_info(stop_id):
     )
 
 
+    community_reviews = query_db(
+        """
+        SELECT
+            id,
+            observed_at,
+            shelter_present,
+            bench_present,
+            notes
+        FROM stop_observations
+        WHERE physical_stop_id=?
+        AND source='community_review'
+        ORDER BY observed_at DESC
+        """,
+        (stop_id,)
+    )
+
+
+    community_consensus = query_db(
+        """
+        SELECT
+            has_shelter,
+            has_bench,
+            ada_accessible,
+            confidence,
+            seating_type_consensus,
+            rider_comfort_consensus,
+            hostile_design_consensus,
+            bench_feasible
+        FROM stop_consensus
+        WHERE stop_id=?
+        """,
+        (stop_id,)
+    )
+
+
+    community_consensus_payload = None
+
+    if community_consensus:
+
+        consensus = community_consensus[0]
+
+        required_reviews = 3
+        completed_reviews = len(community_reviews)
+
+        confidence = consensus[3]
+
+        if completed_reviews < required_reviews:
+            consensus_status = "awaiting_consensus"
+
+        elif confidence is not None and confidence >= 0.75:
+            consensus_status = "consensus_reached"
+
+        else:
+            consensus_status = "needs_more_agreement"
+
+        community_consensus_payload = {
+
+            "has_shelter":
+                consensus[0],
+
+            "has_bench":
+                consensus[1],
+
+            "ada_accessible":
+                consensus[2],
+
+            "confidence":
+                confidence,
+
+            "seating_type":
+                consensus[4],
+
+            "rider_comfort":
+                consensus[5],
+
+            "hostile_design":
+                consensus[6],
+
+            "bench_feasible":
+                consensus[7],
+
+            "review_count":
+                completed_reviews,
+
+            "required_reviews":
+                required_reviews,
+
+            "status":
+                consensus_status
+        }
+
+
+    amenity_evidence = get_current_amenity_evidence(stop_id)
+
+
+    improvement_recommendations = query_db(
+        """
+        SELECT
+            id,
+            recommendation_type,
+            priority,
+            reasons,
+            confidence,
+            evidence,
+            created_at
+        FROM improvement_recommendations
+        WHERE physical_stop_id=?
+        ORDER BY
+            CASE priority
+                WHEN 'high' THEN 1
+                WHEN 'medium' THEN 2
+                WHEN 'low' THEN 3
+                ELSE 4
+            END,
+            id DESC
+        """,
+        (stop_id,)
+    )
+
+
+    improvement_recommendations_payload = [
+        {
+            "id": recommendation[0],
+
+            "type":
+                recommendation[1],
+
+            "priority":
+                recommendation[2],
+
+            "reasons":
+                json.loads(recommendation[3])
+                if recommendation[3]
+                else [],
+
+            "confidence":
+                recommendation[4],
+
+            "evidence":
+                json.loads(recommendation[5])
+                if recommendation[5]
+                else {},
+
+            "created_at":
+                recommendation[6]
+        }
+        for recommendation in improvement_recommendations
+    ]
+
+
+    amenity_evidence_payload = [
+        {
+            "id": row[0],
+            "source": row[1],
+            "source_record": row[2],
+            "amenity_type": row[3],
+            "present": row[4],
+            "confidence": row[5],
+            "match_distance_m": row[6],
+            "notes": row[7],
+            "jurisdiction": row[8],
+            "value": row[9],
+            "raw_value": row[10]
+        }
+        for row in amenity_evidence
+    ]
+
+
     return jsonify(
         {
             "stop_id": row[0],
@@ -1175,41 +2069,114 @@ def review_stop_info(stop_id):
             "county": row[7],
             "municipality": row[8],
 
+            "external_stop_id": row[17],
+
+            "wmata_rider_tools_url":
+                f"https://www.wmata.com/ridertools/stop/{row[17]}"
+                if row[17]
+                else None,
+
+            "serving_direction":
+                row[11],
+
             "streetview_url": streetview_url,
 
-            "wmata": {
-                "availability":
-                    "confirmed"
-                    if row[9]
-                    else "unavailable",
+            "ddot_evidence":
+                ddot_evidence_payload,
 
-                "stop_id": row[9],
-                "status": row[10],
-                "bench": row[12],
-                "shelter": row[13],
-                "accessible": row[14],
-                "match_distance_m": row[15],
-                "match_confidence": row[16]
+
+            "ddot_interpretation":
+                ddot_interpretation,
+
+
+            "amenity_evidence":
+                amenity_evidence_payload,
+
+
+            "recommendations":
+                improvement_recommendations_payload,
+
+
+            "community_reviews": {
+                "review_count": len(community_reviews),
+
+                "reviews": [
+                    {
+                        "id": review[0],
+                        "date": review[1],
+                        "shelter": review[2],
+                        "bench": review[3],
+                        "notes": review[4].strip() if review[4] else ""
+                    }
+                    for review in community_reviews
+                ]
             },
 
-            "wmata_evidence": {
-                "wmata_stop_id": row[9],
-                "wmata_status": row[10],
-                "wmata_heading": row[11],
-                "wmata_bench": row[12],
-                "wmata_shelter": row[13],
-                "wmata_accessible": row[14],
-                "match_distance_m": row[15],
-                "match_confidence": row[16]
-            }
+
+            "community_consensus":
+                community_consensus_payload,
+
+
+            "ridership_exposure":
+                ridership_exposure,
+
+            "impact_summary":
+                {
+                    "rider_exposure_percentile":
+                        rider_exposure_percentile,
+
+                    "estimated_weekday_boardings":
+                        ridership_exposure["average_weekday_boardings"]
+                        if ridership_exposure
+                        else None,
+
+                    "routes_served":
+                        ridership_exposure["route_count"]
+                        if ridership_exposure
+                        else 0,
+
+                    "routes":
+                        ridership_exposure["routes"]
+                        if ridership_exposure
+                        else [],
+
+                    "opportunity_score":
+                        opportunity_summary["score"]
+                        if opportunity_summary
+                        else None,
+
+                    "impact_level":
+                        opportunity_summary["level"]
+                        if opportunity_summary
+                        else None
+                },
+
+
+            "opportunity":
+                opportunity_summary
         }
     )
 
 
 
 
+
 @app.route("/review/<int:stop_id>/assignment")
 def review_assignment(stop_id):
+
+    if not stop_is_current(stop_id):
+        return inactive_stop_response(stop_id)
+
+    reviewer_key = session.get(
+        "reviewer_key"
+    )
+
+    reviewer_id, reviewer_key = get_or_create_reviewer(
+        reviewer_key
+    )
+
+    session["reviewer_key"] = reviewer_key
+
 
     assignment_id = request.args.get(
         "assignment_id"
@@ -1234,6 +2201,25 @@ def review_assignment(stop_id):
             )
         )
 
+        if assignment and assignment[0][2] != stop_id:
+
+            return jsonify(
+                {
+                    "error":
+                        "Assignment does not belong to requested stop"
+                }
+            ), 400
+
+
+        if assignment and assignment[0][1] != reviewer_id:
+
+            return jsonify(
+                {
+                    "error":
+                        "Assignment does not belong to current reviewer"
+                }
+            ), 403
+
     else:
 
         assignment = query_db(
@@ -1246,15 +2232,67 @@ def review_assignment(stop_id):
             FROM stop_review_assignments
 
             WHERE stop_id=?
-
+            AND reviewer_id=?
             AND status='assigned'
 
-            ORDER BY id
+            ORDER BY id DESC
 
             LIMIT 1
             """,
             (
                 stop_id,
+                reviewer_id
+            )
+        )
+
+
+    if not assignment:
+
+        scenario = request.args.get(
+            "mode",
+            "opportunity"
+        )
+
+        query_db(
+            """
+            INSERT INTO stop_review_assignments
+            (
+                stop_id,
+                reviewer_id,
+                scenario,
+                status
+            )
+
+            VALUES (?, ?, ?, 'assigned')
+            """,
+            (
+                stop_id,
+                reviewer_id,
+                scenario
+            )
+        )
+
+
+        assignment = query_db(
+            """
+            SELECT
+                id,
+                reviewer_id,
+                stop_id
+
+            FROM stop_review_assignments
+
+            WHERE stop_id=?
+            AND reviewer_id=?
+            AND status='assigned'
+
+            ORDER BY id DESC
+
+            LIMIT 1
+            """,
+            (
+                stop_id,
+                reviewer_id
             )
         )
 
@@ -1269,16 +2307,94 @@ def review_assignment(stop_id):
         ), 404
 
 
+    assignment_reviewer_id = assignment[0][1]
+
+    existing_review = query_db(
+        """
+        SELECT id
+        FROM stop_observations
+        WHERE physical_stop_id=?
+        AND reviewer_id=?
+        AND source='community_review'
+        LIMIT 1
+        """,
+        (
+            assignment[0][2],
+            assignment_reviewer_id
+        )
+    )
+
+
+    print(
+        "ASSIGNMENT DEBUG:",
+        "DB=", DATABASE_PATH,
+        "request_stop_id=", stop_id,
+        "session_reviewer_id=", reviewer_id,
+        "assignment_reviewer_id=", assignment_reviewer_id,
+        "assignment_id=", assignment_id,
+        "assignment_row=", assignment[0],
+        "existing_review=", existing_review
+    )
+
+
     return jsonify(
         {
             "assignment_id":
                 assignment[0][0],
 
             "reviewer_id":
-                assignment[0][1],
+                assignment_reviewer_id,
 
             "stop_id":
-                assignment[0][2]
+                assignment[0][2],
+
+            "review_action":
+                "update"
+                if existing_review
+                else "new"
+        }
+    )
+
+
+
+
+@app.route("/stops/<int:stop_id>/community-reviews")
+def community_reviews(stop_id):
+
+    reviews = query_db(
+        """
+        SELECT
+            id,
+            observed_at,
+            shelter_present,
+            bench_present,
+            notes,
+            reviewer_id
+        FROM stop_observations
+        WHERE physical_stop_id=?
+        AND source='community_review'
+        ORDER BY observed_at DESC
+        """,
+        (stop_id,)
+    )
+
+
+    return jsonify(
+        {
+            "review_count":
+                len(reviews),
+
+            "reviews":
+                [
+                    {
+                        "id": row[0],
+                        "date": row[1],
+                        "shelter": row[2],
+                        "bench": row[3],
+                        "notes": row[4]
+                    }
+                    for row in reviews
+                ]
         }
     )
 
@@ -1288,13 +2404,27 @@ def submit_review():
 
     data = request.json
 
+    print(
+        "SUBMIT DATA:",
+        data
+    )
 
-    if isinstance(data.get("seating_type"), list):
-        data["seating_type"] = ",".join(
-            data["seating_type"]
-        )
 
+    # Preserve the original multi-select seating values before
+    # converting them to the storage representation used by bench_type.
+    seating_values = data.get("seating_type", [])
 
+    if isinstance(seating_values, str):
+        seating_values = [seating_values]
+
+    if not isinstance(seating_values, list):
+        seating_values = []
+
+    seating_values = [
+        str(value).strip()
+        for value in seating_values
+        if str(value).strip()
+    ]
 
     data["shelter_type"] = (
         data.get("shelter_type")
@@ -1304,9 +2434,46 @@ def submit_review():
 
     data["bench_type"] = (
         data.get("bench_type")
-        or data.get("seating_type")
-        or ""
+        or ",".join(seating_values)
     )
+
+    # Normalize seating selections into a conservative bench status.
+    #
+    # A bench is present only when an actual bench seating type was
+    # selected. Individual seats, leaning support, and no seating are
+    # explicitly not benches. "Other" and "unknown" cannot establish
+    # whether a bench is present.
+    bench_seating_types = {
+        "full_bench",
+        "shelter_bench",
+        "non_shelter_bench",
+    }
+
+    no_bench_types = {
+        "individual_seats",
+        "leaning_support",
+        "none",
+    }
+
+    unknown_types = {
+        "other",
+        "unknown",
+    }
+
+    if any(value in bench_seating_types for value in seating_values):
+        data["bench_present"] = "yes"
+
+    elif any(value in no_bench_types for value in seating_values):
+        data["bench_present"] = "no"
+
+    elif any(value in unknown_types for value in seating_values):
+        data["bench_present"] = "unknown"
+
+    elif data.get("bench_present") in ("yes", "no", "unknown"):
+        data["bench_present"] = data.get("bench_present")
+
+    else:
+        data["bench_present"] = None
 
     data["bench_condition"] = (
         data.get("bench_condition")
@@ -1339,19 +2506,206 @@ def submit_review():
 
 
     stop_id = data.get("stop_id")
-    reviewer_id = data.get("reviewer_id")
     assignment_id = data.get("assignment_id")
 
-
-    if not assignment_id or not reviewer_id:
+    try:
+        stop_id = int(stop_id)
+    except (TypeError, ValueError):
         return {
-            "error": "assignment_id and reviewer_id required"
+            "error": "valid stop_id required"
+        }, 400
+
+    # Historical assignments remain stored, but cannot be completed as new
+    # active work after the stop becomes non-current.
+    if not stop_is_current(stop_id):
+        return inactive_stop_response(stop_id)
+
+    reviewer_key = session.get(
+        "reviewer_key"
+    )
+
+    reviewer_id, reviewer_key = get_or_create_reviewer(
+        reviewer_key
+    )
+
+    session["reviewer_key"] = reviewer_key
+
+
+    display_name = data.get(
+        "display_name",
+        ""
+    ).strip()
+
+
+    if display_name:
+
+        query_db(
+            """
+            UPDATE community_reviewers
+            SET
+                display_name=?,
+                profile_created_at=CURRENT_TIMESTAMP
+            WHERE id=?
+            """,
+            (
+                display_name,
+                reviewer_id
+            )
+        )
+
+
+
+    if not assignment_id:
+        return {
+            "error": "valid assignment_id required"
         }, 400
 
 
-    query_db(
+    assignment = query_db(
         """
-        INSERT INTO stop_observations
+        SELECT
+            id,
+            reviewer_id,
+            stop_id,
+            status
+        FROM stop_review_assignments
+        WHERE id=?
+        LIMIT 1
+        """,
+        (
+            assignment_id,
+        )
+    )
+
+
+    if not assignment:
+
+        return {
+            "error":
+                "Assignment not found"
+        }, 404
+
+
+    assignment_reviewer_id = assignment[0][1]
+    assignment_stop_id = assignment[0][2]
+    assignment_status = assignment[0][3]
+
+
+    if assignment_stop_id != stop_id:
+
+        return {
+            "error":
+                "Assignment does not belong to submitted stop"
+        }, 400
+
+
+    if assignment_reviewer_id != reviewer_id:
+
+        return {
+            "error":
+                "Assignment does not belong to current reviewer"
+        }, 403
+
+
+    if assignment_status == "completed":
+
+        return {
+            "error":
+                "Review already submitted"
+        }, 409
+
+
+    existing_review = query_db(
+        """
+        SELECT id
+        FROM stop_observations
+        WHERE physical_stop_id=?
+        AND reviewer_id=?
+        AND source='community_review'
+        LIMIT 1
+        """,
+        (
+            assignment_stop_id,
+            assignment_reviewer_id
+        )
+    )
+
+
+    reviewer_id = assignment_reviewer_id
+
+
+    review_action = data.get(
+        "review_action",
+        "new"
+    )
+
+
+    if existing_review and review_action == "update":
+
+        query_db(
+            """
+            UPDATE stop_observations
+            SET
+                observer=?,
+                shelter_present=?,
+                bench_present=?,
+                trash_present=?,
+                bench_feasible=?,
+                concrete_pad_needed=?,
+                ada_clearance_possible=?,
+                bench_type=?,
+                bench_condition=?,
+                shelter_type=?,
+                rider_comfort_category=?,
+                accessibility_status=?,
+                hostile_design=?,
+                notes=?,
+                confidence=?,
+                review_mode=?,
+                reviewer_relationship=?,
+                rider_activity=?,
+                usage_times=?,
+                property_owner_outreach=?,
+                steward_email=?,
+                steward_candidate=?,
+                streetview_imagery_month=?,
+                observed_at=CURRENT_TIMESTAMP
+            WHERE id=?
+            """,
+            (
+                data.get("observer", ""),
+                data.get("shelter_present"),
+                data.get("bench_present"),
+                data.get("trash_present"),
+                data.get("bench_feasible"),
+                data.get("concrete_pad_needed"),
+                data.get("ada_clearance_possible"),
+                data.get("bench_type", ""),
+                data.get("bench_condition", ""),
+                data.get("shelter_type", ""),
+                data.get("rider_comfort_category", ""),
+                data.get("accessibility_status"),
+                data.get("hostile_design"),
+                data.get("notes"),
+                data.get("reviewer_confidence", "unknown"),
+                data.get("review_mode"),
+                data.get("reviewer_relationship"),
+                data.get("rider_activity"),
+                data.get("usage_times"),
+                data.get("property_owner_outreach", ""),
+                data.get("steward_email"),
+                data.get("steward_candidate", 0),
+                data.get("streetview_imagery_month"),
+                existing_review[0][0]
+            )
+        )
+
+
+    if not (existing_review and review_action == "update"):
+
+        query_db(
+            """
+            INSERT INTO stop_observations
         (
             physical_stop_id,
             observer,
@@ -1365,6 +2719,7 @@ def submit_review():
             shelter_type,
             rider_comfort_category,
             accessibility_status,
+            hostile_design,
             notes,
             reviewer_id,
             confidence,
@@ -1376,26 +2731,28 @@ def submit_review():
             property_owner_outreach,
             steward_email,
             steward_candidate,
-            concrete_pad_needed
+            concrete_pad_needed,
+            streetview_imagery_month
         )
 
         VALUES
-        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 
         """,
         (
             stop_id,
             data.get("observer", ""),
             data.get("shelter_present"),
-            "yes" if data.get("bench_type") else data.get("bench_present"),
+            data.get("bench_present"),
             data.get("trash_present"),
             data.get("bench_feasible"),
-            data.get("accessibility_status"),
+            data.get("ada_clearance_possible"),
             data.get("bench_type", ""),
             data.get("bench_condition", ""),
             data.get("shelter_type", ""),
             data.get("rider_comfort_category", ""),
             data.get("accessibility_status"),
+            data.get("hostile_design"),
             data.get("notes"),
             reviewer_id,
             data.get("reviewer_confidence", "unknown"),
@@ -1407,9 +2764,14 @@ def submit_review():
             data.get("property_owner_outreach", ""),
             data.get("steward_email"),
             data.get("steward_candidate", 0),
-            data.get("concrete_pad_needed")
+            data.get("concrete_pad_needed"),
+            data.get("streetview_imagery_month")
         )
     )
+
+
+    # Recalculate community consensus from saved observations.
+    consensus = calculate_stop_consensus(stop_id)
 
 
     query_db(
@@ -1423,10 +2785,303 @@ def submit_review():
     )
 
 
+    review_count = query_db(
+        """
+        SELECT COUNT(*)
+        FROM stop_review_assignments
+        WHERE reviewer_id=?
+        AND status='completed'
+        """,
+        (reviewer_id,)
+    )[0][0]
+
+
+    first_review = (
+        query_db(
+            """
+            SELECT COUNT(*)
+            FROM stop_review_assignments
+            WHERE stop_id=?
+            AND status='completed'
+            """,
+            (stop_id,)
+        )[0][0]
+        == 1
+    )
+
+
+    impact = query_db(
+        """
+        SELECT
+            daily_route_exposure,
+            average_weekday_boardings
+        FROM stop_improvement_impact
+        WHERE physical_stop_id=?
+        """,
+        (stop_id,)
+    )
+
+
     return {
         "success": True,
-        "stop_id": stop_id
-    }
+        "stop_id": stop_id,
+        "assignment_id": assignment_id,
+        "reviewer_id": reviewer_id,
+
+        "consensus": consensus,
+
+        "reviewer_stats": {
+
+            "display_name":
+                query_db(
+                    """
+                    SELECT display_name
+                    FROM community_reviewers
+                    WHERE id=?
+                    """,
+                    (reviewer_id,)
+                )[0][0],
+
+            "review_count":
+                review_count,
+
+            "first_review":
+                first_review,
+
+            "stops_reviewed":
+                query_db(
+                    """
+                    SELECT COUNT(DISTINCT stop_id)
+                    FROM stop_review_assignments
+                    WHERE reviewer_id=?
+                    AND status='completed'
+                    """,
+                    (reviewer_id,)
+                )[0][0],
+
+
+            "stewarded_stops":
+                query_db(
+                    """
+                    SELECT COUNT(DISTINCT stop_id)
+                    FROM community_stewardships
+                    WHERE reviewer_id=?
+                    """,
+                    (reviewer_id,)
+                )[0][0],
+
+            "total_route_boardings_represented":
+                round(
+                    query_db(
+                        """
+                        SELECT
+                            COALESCE(
+                                SUM(unique_stops.daily_route_exposure),
+                                0
+                            )
+
+                        FROM (
+
+                            SELECT DISTINCT
+                                sra.stop_id,
+                                si.daily_route_exposure
+
+                            FROM stop_review_assignments sra
+
+                            LEFT JOIN stop_improvement_impact si
+
+                            ON sra.stop_id =
+                               si.physical_stop_id
+
+                            WHERE sra.reviewer_id=?
+
+                            AND sra.status='completed'
+
+                        ) unique_stops
+                        """,
+                        (reviewer_id,)
+                    )[0][0]
+                ),
+
+            "routes_covered":
+                (
+                    query_db(
+                        """
+                        SELECT
+                            GROUP_CONCAT(
+                                DISTINCT r.route_id
+                            )
+
+                        FROM stop_review_assignments sra
+
+                        JOIN physical_stop_members psm
+                        ON sra.stop_id =
+                           psm.physical_stop_id
+
+                        JOIN stop_routes sr
+                        ON psm.bus_stop_id =
+                           sr.stop_id
+
+                        JOIN routes r
+                        ON sr.route_id = r.id
+
+                        WHERE sra.reviewer_id=?
+
+                        AND sra.status='completed'
+                        """,
+                        (reviewer_id,)
+                    )[0][0].split(",")
+                    if query_db(
+                        """
+                        SELECT
+                            GROUP_CONCAT(
+                                DISTINCT r.route_id
+                            )
+
+                        FROM stop_review_assignments sra
+
+                        JOIN physical_stop_members psm
+                        ON sra.stop_id =
+                           psm.physical_stop_id
+
+                        JOIN stop_routes sr
+                        ON psm.bus_stop_id =
+                           sr.stop_id
+
+                        JOIN routes r
+                        ON sr.route_id = r.id
+
+                        WHERE sra.reviewer_id=?
+
+                        AND sra.status='completed'
+                        """,
+                        (reviewer_id,)
+                    )[0][0]
+                    else []
+                )
+
+        },
+
+"community_impact": {
+
+    "average_weekday_boardings":
+        impact[0][1]
+        if impact
+        else None,
+
+    "daily_route_exposure":
+        impact[0][0]
+        if impact
+        else None,
+
+    "routes":
+        (
+            query_db(
+                """
+                SELECT
+                    GROUP_CONCAT(DISTINCT r.route_id)
+
+                FROM physical_stop_members psm
+
+                JOIN stop_routes sr
+                    ON psm.bus_stop_id = sr.stop_id
+
+                JOIN routes r
+                    ON sr.route_id = r.id
+
+                WHERE psm.physical_stop_id=?
+
+                """,
+                (stop_id,)
+            )[0][0].split(",")
+            if query_db(
+                """
+                SELECT
+                    GROUP_CONCAT(DISTINCT r.route_id)
+
+                FROM physical_stop_members psm
+
+                JOIN stop_routes sr
+                    ON psm.bus_stop_id = sr.stop_id
+
+                JOIN routes r
+                    ON sr.route_id = r.id
+
+                WHERE psm.physical_stop_id=?
+
+                """,
+                (stop_id,)
+            )[0][0]
+            else []
+        )
+    },
+
+"stewardships": {
+
+    "count":
+        query_db(
+            """
+            SELECT COUNT(*)
+            FROM community_stewardships
+            WHERE reviewer_id=?
+            """,
+            (reviewer_id,)
+        )[0][0],
+
+
+    "stops":
+        [
+            {
+                "stop_id": row[0],
+                "name": row[1]
+            }
+
+            for row in query_db(
+                """
+                SELECT
+                    cs.stop_id,
+                    p.primary_name
+
+                FROM community_stewardships cs
+
+                JOIN physical_stops p
+                    ON cs.stop_id = p.id
+
+                WHERE cs.reviewer_id=?
+
+                ORDER BY cs.created_at DESC
+                """,
+                (reviewer_id,)
+            )
+        ]
+
+}
+
+}
+
+
+def get_reviewer_impact(reviewer_id):
+
+    return query_db(
+        """
+        SELECT
+            COUNT(DISTINCT sra.stop_id),
+            COALESCE(SUM(si.daily_route_exposure),0)
+
+        FROM stop_review_assignments sra
+
+        LEFT JOIN stop_improvement_impact si
+            ON sra.stop_id = si.physical_stop_id
+
+        WHERE sra.reviewer_id=?
+
+        AND sra.status='completed'
+
+        """,
+        (reviewer_id,)
+    )[0]
+
+
 
 
 @app.route("/api/review-queue")
@@ -1438,27 +3093,29 @@ def review_queue():
     rows = conn.execute(
         """
         SELECT
-            ir.physical_stop_id,
+            rq.physical_stop_id,
             ps.latitude AS lat,
             ps.longitude AS lon,
-            ir.recommendation_type,
-            ir.priority,
-            ir.confidence,
-            ir.reasons,
-            ir.evidence
+            rq.priority_rank,
+            rq.opportunity_score,
+            rq.location_name,
+            rq.review_status,
+            rq.consensus_status
 
-        FROM improvement_recommendations ir
+        FROM review_queue rq
 
         JOIN physical_stops ps
-            ON ps.id = ir.physical_stop_id
+            ON ps.id = rq.physical_stop_id
+
+        JOIN stop_gtfs_status sgs
+            ON sgs.physical_stop_id = rq.physical_stop_id
+           AND sgs.current_gtfs = 1
+
+        WHERE rq.review_status = 'pending'
 
         ORDER BY
-            CASE ir.priority
-                WHEN 'high' THEN 1
-                WHEN 'medium' THEN 2
-                ELSE 3
-            END,
-            ir.physical_stop_id
+            rq.priority_rank,
+            rq.physical_stop_id
 
         """
     ).fetchall()
@@ -1473,15 +3130,11 @@ def review_queue():
                     "stop_id": row["physical_stop_id"],
                     "lat": row["lat"],
                     "lon": row["lon"],
-                    "type": row["recommendation_type"],
-                    "priority": row["priority"],
-                    "confidence": row["confidence"],
-                    "reasons": json.loads(row["reasons"])
-                        if row["reasons"]
-                        else [],
-                    "evidence": json.loads(row["evidence"])
-                        if row["evidence"]
-                        else {}
+                    "location_name": row["location_name"],
+                    "priority_rank": row["priority_rank"],
+                    "opportunity_score": row["opportunity_score"],
+                    "review_status": row["review_status"],
+                    "consensus_status": row["consensus_status"]
                 }
                 for row in rows
             ]
@@ -1561,16 +3214,25 @@ def top_priorities():
             ps.primary_name,
             ps.latitude AS lat,
             ps.longitude AS lon,
-            sii.opportunity_score,
-            sii.priority_level,
-            sii.priority_level
+            io.opportunity_score,
 
-        FROM stop_improvement_impact sii
+            CASE
+                WHEN io.opportunity_score >= 80 THEN 'very_high'
+                WHEN io.opportunity_score >= 60 THEN 'high'
+                WHEN io.opportunity_score >= 40 THEN 'medium'
+                ELSE 'low'
+            END AS impact
+
+        FROM improvement_opportunities io
 
         JOIN physical_stops ps
-            ON sii.physical_stop_id = ps.id
+            ON io.physical_stop_id = ps.id
 
-        ORDER BY sii.opportunity_score DESC
+        JOIN stop_gtfs_status sgs
+            ON sgs.physical_stop_id = ps.id
+           AND sgs.current_gtfs = 1
+
+        ORDER BY io.opportunity_score DESC
 
         LIMIT 10;
         """
@@ -1583,8 +3245,7 @@ def top_priorities():
                 "lat": row[1],
                 "lon": row[2],
                 "score": row[3],
-                "priority": row[4],
-                "impact": row[5]
+                "impact": row[4]
             }
             for row in rows
         ]
@@ -1731,32 +3392,41 @@ def map_stops():
             SELECT DISTINCT
 
                 ps.id,
+                GROUP_CONCAT(DISTINCT we.wmata_stop_id),
                 ps.primary_name,
                 ps.latitude AS lat,
                 ps.longitude AS lon,
-                sii.opportunity_score,
-                sii.priority_level,
-                sii.priority_level,
+                io.opportunity_score,
+
+                CASE
+                    WHEN io.opportunity_score >= 80 THEN 'very_high'
+                    WHEN io.opportunity_score >= 60 THEN 'high'
+                    WHEN io.opportunity_score >= 40 THEN 'medium'
+                    ELSE 'low'
+                END,
+
+                CASE
+                    WHEN io.opportunity_score >= 80 THEN 'very_high'
+                    WHEN io.opportunity_score >= 60 THEN 'high'
+                    WHEN io.opportunity_score >= 40 THEN 'medium'
+                    ELSE 'low'
+                END,
+
                 COALESCE(
-                    sv.status,
+                    ca.confidence,
                     'needs_validation'
                 ),
 
-                COALESCE(
-                    ca.status,
-                    'none'
-                )
+                'none'
 
             FROM physical_stops ps
 
-            JOIN stop_improvement_impact sii
-                ON ps.id = sii.physical_stop_id
+            JOIN stop_gtfs_status sgs
+                ON sgs.physical_stop_id = ps.id
+               AND sgs.current_gtfs = 1
 
-            LEFT JOIN stop_validation sv
-                ON ps.id = sv.physical_stop_id
-
-            LEFT JOIN community_actions ca
-                ON ps.id = ca.physical_stop_id
+            JOIN improvement_opportunities io
+                ON ps.id = io.physical_stop_id
 
             JOIN physical_stop_members psm
                 ON ps.id = psm.physical_stop_id
@@ -1765,101 +3435,30 @@ def map_stops():
                 ON psm.bus_stop_id = bs.id
 
             JOIN stop_routes sr
-                ON bs.gtfs_stop_id = sr.stop_id
+                ON bs.id = sr.stop_id
+
+            JOIN routes r
+                ON sr.route_id = r.id
+
+            LEFT JOIN stop_wmata_evidence we
+                ON ps.id = we.physical_stop_id
+
+            LEFT JOIN stop_consensus ca
+                ON ps.id = ca.stop_id
 
             LEFT JOIN stop_jurisdiction sj
                 ON ps.id = sj.stop_id
 
-            WHERE sr.route_id = ?
+            WHERE r.route_id = ?
 
-            AND (
-                ? IS NULL
-                OR (
-                    ? = 'high'
-                    AND sii.priority_level IN ('high', 'very_high')
-                )
-                OR (
-                    ? = 'very_high'
-                    AND sii.priority_level = 'very_high'
-                )
-            )
+            GROUP BY
+                ps.id
 
-            AND (
-                ? IS NULL
-                OR sii.priority_level = ?
-            )
+            ORDER BY io.opportunity_score DESC;
 
-            AND (
-                ? IS NULL
-                OR sj.state = ?
-            )
-
-            AND (
-                ? IS NULL
-                OR sj.county = ?
-            )
-
-            AND (
-                ? IS NULL
-                OR sj.municipality = ?
-            )
-
-            AND (
-                ? IS NULL
-                OR sj.dc_ward = ?
-            )
-
-            AND (
-                ? IS NULL
-                OR sj.dc_anc = ?
-            )
-
-            AND (
-                ? IS NULL
-
-                OR (
-                    ? = 'opportunity'
-                    AND (
-                        sv.status IS NULL
-                        OR sv.status = 'needs_validation'
-                    )
-                )
-
-                OR (
-                    ? = 'candidate'
-                    AND sv.status = 'validated'
-                )
-            )
-
-            AND (
-                ? IS NULL
-                OR COALESCE(ca.status, 'none') = ?
-            )
-
-            ORDER BY sii.opportunity_score DESC;
             """,
             (
                 route,
-                impact,
-                impact,
-                impact,
-                priority,
-                priority,
-                state,
-                state,
-                county,
-                county,
-                municipality,
-                municipality,
-                dc_ward,
-                dc_ward,
-                dc_anc,
-                dc_anc,
-                review_mode,
-                review_mode,
-                review_mode,
-                action_filter,
-                action_filter
             )
         )
 
@@ -1870,32 +3469,54 @@ def map_stops():
             SELECT DISTINCT
 
                 ps.id,
+                GROUP_CONCAT(DISTINCT we.wmata_stop_id),
                 ps.primary_name,
                 ps.latitude AS lat,
                 ps.longitude AS lon,
-                sii.opportunity_score,
-                sii.priority_level,
-                sii.priority_level,
+                io.opportunity_score,
+
+    CASE
+        WHEN io.opportunity_score >= 80 THEN 'very_high'
+        WHEN io.opportunity_score >= 60 THEN 'high'
+        WHEN io.opportunity_score >= 40 THEN 'medium'
+        ELSE 'low'
+    END
+    ,
+
+    CASE
+        WHEN io.opportunity_score >= 80 THEN 'very_high'
+        WHEN io.opportunity_score >= 60 THEN 'high'
+        WHEN io.opportunity_score >= 40 THEN 'medium'
+        ELSE 'low'
+    END
+    ,
                 COALESCE(
-                    sv.status,
+                    ca.confidence,
                     'needs_validation'
                 ),
 
                 COALESCE(
-                    ca.status,
+                    'none',
                     'none'
                 )
 
             FROM physical_stops ps
 
-            JOIN stop_improvement_impact sii
-                ON ps.id = sii.physical_stop_id
+            JOIN stop_gtfs_status sgs
+                ON sgs.physical_stop_id = ps.id
+               AND sgs.current_gtfs = 1
 
-            LEFT JOIN stop_validation sv
-                ON ps.id = sv.physical_stop_id
+            LEFT JOIN physical_stop_members psm
+                ON ps.id = psm.physical_stop_id
 
-            LEFT JOIN community_actions ca
-                ON ps.id = ca.physical_stop_id
+            LEFT JOIN stop_wmata_evidence we
+                ON ps.id = we.physical_stop_id
+
+            JOIN improvement_opportunities io
+                ON ps.id = io.physical_stop_id
+
+            LEFT JOIN stop_consensus ca
+                ON ps.id = ca.stop_id
 
             LEFT JOIN stop_jurisdiction sj
                 ON ps.id = sj.stop_id
@@ -1904,17 +3525,38 @@ def map_stops():
                 ? IS NULL
                 OR (
                     ? = 'high'
-                    AND sii.priority_level IN ('high', 'very_high')
+                    AND
+                    CASE
+                        WHEN io.opportunity_score >= 80 THEN 'very_high'
+                        WHEN io.opportunity_score >= 60 THEN 'high'
+                        WHEN io.opportunity_score >= 40 THEN 'medium'
+                        ELSE 'low'
+                    END IN ('high', 'very_high')
+
                 )
                 OR (
                     ? = 'very_high'
-                    AND sii.priority_level = 'very_high'
+                    AND
+                    CASE
+                        WHEN io.opportunity_score >= 80 THEN 'very_high'
+                        WHEN io.opportunity_score >= 60 THEN 'high'
+                        WHEN io.opportunity_score >= 40 THEN 'medium'
+                        ELSE 'low'
+                    END = 'very_high'
+
                 )
             )
 
             AND (
                 ? IS NULL
-                OR sii.priority_level = ?
+                OR
+                    CASE
+                        WHEN io.opportunity_score >= 80 THEN 'very_high'
+                        WHEN io.opportunity_score >= 60 THEN 'high'
+                        WHEN io.opportunity_score >= 40 THEN 'medium'
+                        ELSE 'low'
+                    END = ?
+
             )
 
             AND (
@@ -1948,23 +3590,31 @@ def map_stops():
                 OR (
                     ? = 'opportunity'
                     AND (
-                        sv.status IS NULL
-                        OR sv.status = 'needs_validation'
+                        ca.confidence IS NULL
+                        OR ca.confidence = 'needs_validation'
                     )
                 )
 
                 OR (
                     ? = 'candidate'
-                    AND sv.status = 'validated'
+                    AND ca.confidence = 'validated'
                 )
             )
 
             AND (
                 ? IS NULL
-                OR COALESCE(ca.status, 'none') = ?
+                OR 'none' = ?
             )
 
-            ORDER BY sii.opportunity_score DESC;
+            GROUP BY
+                ps.id,
+                ps.primary_name,
+                ps.latitude,
+                ps.longitude,
+                io.opportunity_score,
+                ca.confidence
+
+            ORDER BY io.opportunity_score DESC;
             """,
             (
                 impact,
@@ -2003,19 +3653,24 @@ def map_stops():
                     "geometry": {
                         "type": "Point",
                         "coordinates": [
-                            row[3],
-                            row[2]
+                            row[4],
+                            row[3]
                         ]
                     },
 
                     "properties": {
                         "stop_id": row[0],
-                        "location": row[1],
-                        "score": row[4],
-                        "impact": row[5],
-                        "priority": row[6],
-                        "validation_status": row[7],
-                        "action_status": row[8]
+                        "wmata_stop_ids": (
+                            row[1].split(",")
+                            if row[1]
+                            else []
+                        ),
+                        "location": row[2],
+                        "score": row[5],
+                        "impact": row[6],
+                        "priority": row[7],
+                        "validation_status": row[8],
+                        "action_status": row[9]
                     }
                 }
 
@@ -2027,6 +3682,42 @@ def map_stops():
 
 
 
+@app.route("/stops/<int:stop_id>/steward", methods=["POST"])
+def create_stewardship(stop_id):
+
+    reviewer_key = session.get(
+        "reviewer_key"
+    )
+
+    reviewer_id, reviewer_key = get_or_create_reviewer(
+        reviewer_key
+    )
+
+    session["reviewer_key"] = reviewer_key
+
+
+    query_db(
+        """
+        INSERT OR IGNORE INTO community_stewardships
+        (
+            reviewer_id,
+            stop_id
+        )
+        VALUES (?, ?)
+        """,
+        (
+            reviewer_id,
+            stop_id
+        )
+    )
+
+
+    return jsonify(
+        {
+            "status": "stewarded",
+            "stop_id": stop_id
+        }
+    )
 
 
 @app.route("/stops/<int:stop_id>/community-action", methods=["POST"])
@@ -2057,7 +3748,7 @@ def create_community_action(stop_id):
         SELECT
             id,
             status
-        FROM community_actions
+        FROM stop_observations
         WHERE physical_stop_id = ?
         AND status IN (
             'planned',
@@ -2179,7 +3870,7 @@ def community_action_summary():
         SELECT
             status,
             COUNT(*)
-        FROM community_actions
+        FROM stop_observations
         GROUP BY status
         """
     )
@@ -2212,10 +3903,10 @@ def validation_status_summary():
     rows = query_db(
         """
         SELECT
-            status,
+            confidence,
             COUNT(*) AS count
-        FROM stop_validation
-        GROUP BY status
+        FROM stop_consensus
+        GROUP BY confidence
         ORDER BY count DESC
         """
     )
@@ -2223,7 +3914,7 @@ def validation_status_summary():
     return jsonify(
         [
             {
-                "status": row[0],
+                "confidence": row[0],
                 "count": row[1]
             }
             for row in rows
@@ -2235,6 +3926,26 @@ def validation_status_summary():
 @app.route("/priority-summary")
 def priority_summary():
 
+    columns = {
+        row[1]
+        for row in query_db(
+            "PRAGMA table_info(stop_improvement_impact)"
+        )
+    }
+
+    # priority_level is a derived classification populated by
+    # scripts/generate_priority_levels.py. Before that rebuild has run, the
+    # endpoint has no classifications to report; impact_level is not a proxy.
+    if "priority_level" not in columns:
+        return jsonify(
+            {
+                "P1": 0,
+                "P2": 0,
+                "P3": 0,
+                "monitor": 0
+            }
+        )
+
     rows = query_db(
         """
         SELECT
@@ -2242,6 +3953,11 @@ def priority_summary():
             COUNT(*) AS count
 
         FROM stop_improvement_impact
+
+        JOIN stop_gtfs_status sgs
+            ON sgs.physical_stop_id =
+               stop_improvement_impact.physical_stop_id
+           AND sgs.current_gtfs = 1
 
         GROUP BY priority_level;
         """
@@ -2262,6 +3978,146 @@ def priority_summary():
 
 
 
+
+
+@app.route("/reviewer/routes")
+def reviewer_routes():
+
+    reviewer_key = session.get(
+        "reviewer_key"
+    )
+
+    reviewer_id, reviewer_key = get_or_create_reviewer(
+        reviewer_key
+    )
+
+    session["reviewer_key"] = reviewer_key
+
+
+    routes = query_db(
+        """
+        SELECT
+            route_id,
+            route_name
+
+        FROM routes
+
+        ORDER BY route_id
+        """
+    )
+
+
+    selected = query_db(
+        """
+        SELECT route_id
+
+        FROM community_reviewer_routes
+
+        WHERE reviewer_id=?
+        """,
+        (
+            reviewer_id,
+        )
+    )
+
+
+    return jsonify(
+        {
+            "routes":
+                [
+                    {
+                        "route_id": r[0],
+                        "route_name": r[1]
+                    }
+                    for r in routes
+                ],
+
+            "selected":
+                [
+                    r[0]
+                    for r in selected
+                ]
+        }
+    )
+
+
+
+@app.route(
+    "/reviewer/routes",
+    methods=["POST"]
+)
+def save_reviewer_routes():
+
+    data = request.get_json()
+
+    reviewer_key = session.get(
+        "reviewer_key"
+    )
+
+    reviewer_id, reviewer_key = get_or_create_reviewer(
+        reviewer_key
+    )
+
+    session["reviewer_key"] = reviewer_key
+
+
+    routes = data.get(
+        "routes",
+        []
+    )
+
+
+    conn = sqlite3.connect(
+        DATABASE_PATH
+    )
+
+    cur = conn.cursor()
+
+
+    cur.execute(
+        """
+        DELETE FROM community_reviewer_routes
+
+        WHERE reviewer_id=?
+        """,
+        (
+            reviewer_id,
+        )
+    )
+
+
+    for route in routes:
+
+        cur.execute(
+            """
+            INSERT INTO community_reviewer_routes
+            (
+                reviewer_id,
+                route_id
+            )
+
+            VALUES (?,?)
+            """,
+            (
+                reviewer_id,
+                route
+            )
+        )
+
+
+    conn.commit()
+    conn.close()
+
+
+    return jsonify(
+        {
+            "success": True,
+            "routes": routes
+        }
+    )
+
+
+
 @app.route("/routes")
 def routes():
 
@@ -2269,30 +4125,34 @@ def routes():
         """
         SELECT
 
-            r.route_id,
-            r.route_name,
-            COUNT(DISTINCT ps.id)
+    r.route_id,
+    r.route_name,
+    COUNT(DISTINCT ps.id)
 
-        FROM routes r
+FROM routes r
 
-        JOIN stop_routes sr
-            ON r.route_id = sr.route_id
+JOIN stop_routes sr
+    ON r.id = sr.route_id
 
-        JOIN bus_stops bs
-            ON sr.stop_id = bs.gtfs_stop_id
+JOIN bus_stops bs
+    ON sr.stop_id = bs.id
 
-        JOIN physical_stop_members psm
-            ON bs.id = psm.bus_stop_id
+JOIN physical_stop_members psm
+    ON bs.id = psm.bus_stop_id
 
-        JOIN physical_stops ps
-            ON psm.physical_stop_id = ps.id
+JOIN physical_stops ps
+    ON psm.physical_stop_id = ps.id
 
-        GROUP BY
-            r.route_id,
-            r.route_name
+JOIN stop_gtfs_status sgs
+    ON sgs.physical_stop_id = ps.id
+   AND sgs.current_gtfs = 1
 
-        ORDER BY
-            r.route_id;
+GROUP BY
+    r.route_id,
+    r.route_name
+
+ORDER BY
+    r.route_id;
         """
     )
 
@@ -2321,12 +4181,306 @@ def dashboard_static(filename):
         filename
     )
 
+
+@app.route("/api/reviewer/status")
+def reviewer_status():
+
+    reviewer_key = session.get(
+        "reviewer_key"
+    )
+
+
+    if not reviewer_key:
+
+        return jsonify(
+            {
+                "has_profile": False
+            }
+        )
+
+
+    reviewer = query_db(
+        """
+        SELECT
+            display_name
+        FROM community_reviewers
+        WHERE reviewer_key=?
+        """,
+        (reviewer_key,)
+    )
+
+
+    if not reviewer:
+
+        return jsonify(
+            {
+                "has_profile": False
+            }
+        )
+
+
+    return jsonify(
+        {
+            "has_profile": True,
+            "display_name":
+                reviewer[0][0]
+                if reviewer[0][0]
+                else "Community Volunteer"
+        }
+    )
+
+
+
+
+@app.route("/reviewer/profile")
+def reviewer_profile_page():
+
+    return render_template(
+        "reviewer_profile.html"
+    )
+
+
+
+@app.route("/api/reviewer/profile")
+def reviewer_profile_api():
+
+    reviewer_key = session.get(
+        "reviewer_key"
+    )
+
+    reviewer_id, reviewer_key = get_or_create_reviewer(
+        reviewer_key
+    )
+
+    session["reviewer_key"] = reviewer_key
+
+
+    reviewer = query_db(
+        """
+        SELECT display_name
+        FROM community_reviewers
+        WHERE id=?
+        """,
+        (reviewer_id,)
+    )
+
+
+    stewarded = query_db(
+        """
+        SELECT
+            cs.stop_id,
+            p.primary_name,
+            p.state,
+            p.county,
+            p.municipality
+
+        FROM community_stewardships cs
+
+        JOIN physical_stops p
+            ON cs.stop_id = p.id
+
+        WHERE cs.reviewer_id=?
+
+        ORDER BY p.primary_name
+
+        """,
+        (reviewer_id,)
+    )
+
+
+    stats = {
+
+        "reviews_completed":
+            query_db(
+                """
+                SELECT COUNT(*)
+                FROM stop_review_assignments
+                WHERE reviewer_id=?
+                AND status='completed'
+                """,
+                (reviewer_id,)
+            )[0][0],
+
+
+        "stops_reviewed":
+            query_db(
+                """
+                SELECT COUNT(DISTINCT stop_id)
+                FROM stop_review_assignments
+                WHERE reviewer_id=?
+                AND status='completed'
+                """,
+                (reviewer_id,)
+            )[0][0],
+
+
+        "ridership_impacted":
+            query_db(
+                """
+                SELECT
+                    COALESCE(
+                        SUM(unique_stops.daily_route_exposure),
+                        0
+                    )
+
+                FROM (
+
+                    SELECT DISTINCT
+                        sra.stop_id,
+                        si.daily_route_exposure
+
+                    FROM stop_review_assignments sra
+
+                    LEFT JOIN stop_improvement_impact si
+                    ON sra.stop_id =
+                       si.physical_stop_id
+
+                    WHERE sra.reviewer_id=?
+
+                    AND sra.status='completed'
+
+                ) unique_stops
+                """,
+                (reviewer_id,)
+            )[0][0],
+
+
+        "stewarded_stops":
+
+            len(stewarded),
+
+
+        "routes_covered":
+
+            (
+                query_db(
+                    """
+                    SELECT
+                        GROUP_CONCAT(
+                            DISTINCT r.route_id
+                        )
+
+                    FROM stop_review_assignments sra
+
+                    JOIN physical_stop_members psm
+                    ON sra.stop_id =
+                       psm.physical_stop_id
+
+                    JOIN stop_routes sr
+                    ON psm.bus_stop_id =
+                       sr.stop_id
+
+                    JOIN routes r
+                    ON sr.route_id = r.id
+
+                    WHERE sra.reviewer_id=?
+
+                    AND sra.status='completed'
+
+                    """,
+                    (reviewer_id,)
+                )[0][0].split(",")
+                if query_db(
+                    """
+                    SELECT
+                        GROUP_CONCAT(
+                            DISTINCT r.route_id
+                        )
+
+                    FROM stop_review_assignments sra
+
+                    JOIN physical_stop_members psm
+                    ON sra.stop_id =
+                       psm.physical_stop_id
+
+                    JOIN stop_routes sr
+                    ON psm.bus_stop_id =
+                       sr.stop_id
+
+                    JOIN routes r
+                    ON sr.route_id = r.id
+
+                    WHERE sra.reviewer_id=?
+
+                    AND sra.status='completed'
+
+                    """,
+                    (reviewer_id,)
+                )[0][0]
+                else []
+            )
+
+    }
+
+
+
+    routes = query_db(
+        """
+        SELECT
+            GROUP_CONCAT(DISTINCT r.route_id)
+
+        FROM stop_review_assignments sra
+
+        JOIN physical_stop_members psm
+            ON sra.stop_id = psm.physical_stop_id
+
+        JOIN stop_routes sr
+            ON psm.bus_stop_id = sr.stop_id
+
+        JOIN routes r
+            ON sr.route_id = r.id
+
+        WHERE sra.reviewer_id=?
+
+        AND sra.status='completed'
+        """,
+        (reviewer_id,)
+    )
+
+
+    return jsonify(
+        {
+            "display_name":
+                reviewer[0][0]
+                if reviewer and reviewer[0][0]
+                else None,
+
+
+            "stats":
+                stats,
+
+
+            "stewarded_stops":
+                [
+                    {
+                        "stop_id": row[0],
+                        "name": row[1],
+                        "state": row[2],
+                        "county": row[3],
+                        "municipality": row[4]
+                    }
+
+                    for row in stewarded
+                ]
+        }
+    )
+
+
+
+@app.route("/review/routes")
+def review_routes():
+
+    return render_template(
+        "review_routes.html"
+    )
+
+
+
 @app.route("/dashboard")
 def dashboard():
 
-    return send_from_directory(
-        BASE_DIR,
-        "dmv_bus_stops_dashboard.html"
+    return render_template(
+        "dashboard.html"
     )
 
 
@@ -2343,38 +4497,66 @@ def evidence_summary():
 
         SUM(
             CASE
-            WHEN
-                COALESCE(w.wmata_shelter,'') != ''
-                OR COALESCE(o.osm_shelter,0)=1
+            WHEN EXISTS (
+                SELECT 1
+                FROM stop_amenity_evidence e
+                WHERE e.physical_stop_id = p.id
+                  AND e.source != 'DDOT'
+                  AND e.amenity_type = 'shelter'
+                  AND e.present = 1
+            ) OR EXISTS (
+                SELECT 1
+                FROM stop_consensus sc
+                WHERE sc.stop_id = p.id
+                  AND sc.has_shelter = 1
+            )
             THEN 1 ELSE 0
             END
         ) AS likely_shelter,
 
         SUM(
             CASE
-            WHEN
-                COALESCE(w.wmata_bench,'') != ''
-                OR COALESCE(o.osm_bench,0)=1
+            WHEN EXISTS (
+                SELECT 1
+                FROM stop_amenity_evidence e
+                WHERE e.physical_stop_id = p.id
+                  AND e.source != 'DDOT'
+                  AND e.amenity_type = 'bench'
+                  AND e.present = 1
+            ) OR EXISTS (
+                SELECT 1
+                FROM stop_consensus sc
+                WHERE sc.stop_id = p.id
+                  AND sc.has_bench = 1
+            )
             THEN 1 ELSE 0
             END
         ) AS likely_bench,
 
         SUM(
             CASE
-            WHEN
-                COALESCE(w.wmata_shelter,'')=''
-                AND COALESCE(o.osm_shelter,0)=0
+            WHEN NOT EXISTS (
+                SELECT 1
+                FROM stop_amenity_evidence e
+                WHERE e.physical_stop_id = p.id
+                  AND e.source != 'DDOT'
+                  AND e.amenity_type = 'shelter'
+                  AND e.present = 1
+            ) AND NOT EXISTS (
+                SELECT 1
+                FROM stop_consensus sc
+                WHERE sc.stop_id = p.id
+                  AND sc.has_shelter = 1
+            )
             THEN 1 ELSE 0
             END
         ) AS no_shelter_evidence
 
         FROM physical_stops p
 
-        LEFT JOIN stop_wmata_evidence w
-        ON p.id=w.physical_stop_id
-
-        LEFT JOIN stop_osm_evidence o
-        ON p.id=o.stop_id
+        JOIN stop_gtfs_status sgs
+          ON sgs.physical_stop_id = p.id
+         AND sgs.current_gtfs = 1
 
         """
     )[0]
@@ -2433,10 +4615,13 @@ def pipeline_geography():
             "DC Ward",
             """
             SELECT
-                dc_ward as geography,
-                stop_id
-            FROM stop_jurisdiction
-            WHERE dc_ward IS NOT NULL
+                sj.dc_ward as geography,
+                sj.stop_id
+            FROM stop_jurisdiction sj
+            JOIN stop_gtfs_status sgs
+              ON sgs.physical_stop_id = sj.stop_id
+             AND sgs.current_gtfs = 1
+            WHERE sj.dc_ward IS NOT NULL
             """
         ),
 
@@ -2444,10 +4629,13 @@ def pipeline_geography():
             "ANC",
             """
             SELECT
-                dc_anc as geography,
-                stop_id
-            FROM stop_jurisdiction
-            WHERE dc_anc IS NOT NULL
+                sj.dc_anc as geography,
+                sj.stop_id
+            FROM stop_jurisdiction sj
+            JOIN stop_gtfs_status sgs
+              ON sgs.physical_stop_id = sj.stop_id
+             AND sgs.current_gtfs = 1
+            WHERE sj.dc_anc IS NOT NULL
             """
         ),
 
@@ -2455,10 +4643,13 @@ def pipeline_geography():
             "County",
             """
             SELECT
-                state || ' - ' || county as geography,
-                stop_id
-            FROM stop_jurisdiction
-            WHERE county IS NOT NULL
+                sj.state || ' - ' || sj.county as geography,
+                sj.stop_id
+            FROM stop_jurisdiction sj
+            JOIN stop_gtfs_status sgs
+              ON sgs.physical_stop_id = sj.stop_id
+             AND sgs.current_gtfs = 1
+            WHERE sj.county IS NOT NULL
             """
         ),
 
@@ -2466,10 +4657,13 @@ def pipeline_geography():
             "Municipality",
             """
             SELECT
-                state || ' - ' || municipality as geography,
-                stop_id
-            FROM stop_jurisdiction
-            WHERE municipality IS NOT NULL
+                sj.state || ' - ' || sj.municipality as geography,
+                sj.stop_id
+            FROM stop_jurisdiction sj
+            JOIN stop_gtfs_status sgs
+              ON sgs.physical_stop_id = sj.stop_id
+             AND sgs.current_gtfs = 1
+            WHERE sj.municipality IS NOT NULL
             """
         )
 
@@ -2507,124 +4701,94 @@ def pipeline_geography():
                 return cur.fetchone()[0]
 
 
+
+            shelter_count = count("""
+            SELECT COUNT(DISTINCT p.id)
+            FROM physical_stops p
+            WHERE p.id IN ({})
+            AND (
+                EXISTS (
+                    SELECT 1
+                    FROM stop_amenity_evidence e
+                    WHERE e.physical_stop_id = p.id
+                      AND e.source != 'DDOT'
+                      AND e.amenity_type = 'shelter'
+                      AND e.present = 1
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM stop_consensus sc
+                    WHERE sc.stop_id = p.id
+                      AND sc.has_shelter = 1
+                )
+            )
+            """)
+
+
+            bench_count = count("""
+            SELECT COUNT(DISTINCT p.id)
+            FROM physical_stops p
+            WHERE p.id IN ({})
+            AND (
+                EXISTS (
+                    SELECT 1
+                    FROM stop_amenity_evidence e
+                    WHERE e.physical_stop_id = p.id
+                      AND e.source != 'DDOT'
+                      AND e.amenity_type = 'bench'
+                      AND e.present = 1
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM stop_consensus sc
+                    WHERE sc.stop_id = p.id
+                      AND sc.has_bench = 1
+                )
+            )
+            """)
+
+
+            known_amenity_count = count("""
+            SELECT COUNT(DISTINCT p.id)
+            FROM physical_stops p
+            WHERE p.id IN ({})
+            AND (
+                EXISTS (
+                    SELECT 1
+                    FROM stop_amenity_evidence e
+                    WHERE e.physical_stop_id = p.id
+                      AND e.source != 'DDOT'
+                      AND e.amenity_type IN ('shelter', 'bench')
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM stop_consensus sc
+                    WHERE sc.stop_id = p.id
+                      AND (
+                          sc.has_shelter IS NOT NULL
+                          OR sc.has_bench IS NOT NULL
+                      )
+                )
+            )
+            """)
+
+
             rows.append(
                 {
-
                     "type": geo_type,
 
                     "geography": name,
 
-                    "stops": len(stops),
+                    "total_stops": len(stops),
 
-                    "queued":
-                        count("""
-                        SELECT COUNT(*)
-                        FROM review_queue
-                        WHERE physical_stop_id IN ({})
-                        """),
+                    "shelter_likely_confirmed":
+                        shelter_count,
 
-                    "review": {
+                    "bench_likely_confirmed":
+                        bench_count,
 
-                        "needs_review":
-                            count("""
-                            SELECT COUNT(*)
-                            FROM review_queue
-                            WHERE physical_stop_id IN ({})
-                            """),
-
-                        "completed":
-                            count("""
-                            SELECT COUNT(DISTINCT physical_stop_id)
-                            FROM stop_observations
-                            WHERE physical_stop_id IN ({})
-                            """),
-                    },
-
-
-                    "osm": {
-
-                        "mapped_benches":
-                            count("""
-                            SELECT COUNT(*)
-                            FROM stop_osm_evidence
-                            WHERE stop_id IN ({})
-                            AND osm_bench = 1
-                            """),
-
-                        "mapped_shelters":
-                            count("""
-                            SELECT COUNT(*)
-                            FROM stop_osm_evidence
-                            WHERE stop_id IN ({})
-                            AND osm_shelter = 1
-                            """),
-                    },
-
-
-                    "confirmed_conditions": {
-
-                        "benches":
-                            count("""
-                            SELECT COUNT(*)
-                            FROM stop_consensus
-                            WHERE stop_id IN ({})
-                            AND has_bench = 1
-                            """),
-
-                        "shelters":
-                            count("""
-                            SELECT COUNT(*)
-                            FROM stop_consensus
-                            WHERE stop_id IN ({})
-                            AND has_shelter = 1
-                            """),
-
-                        "bench_space":
-                            count("""
-                            SELECT COUNT(*)
-                            FROM stop_consensus
-                            WHERE stop_id IN ({})
-                            AND bench_feasible = 1
-                            """),
-                    },
-
-                    "reviewed":
-                        count("""
-                        SELECT COUNT(*)
-                        FROM stop_observations
-                        WHERE physical_stop_id IN ({})
-                        """),
-
-                    "consensus":
-                        count("""
-                        SELECT COUNT(*)
-                        FROM stop_consensus
-                        WHERE stop_id IN ({})
-                        AND consensus_status='verified'
-                        """),
-
-                    "completion_pct":
-                        round(
-                            (
-                                count("""
-                                SELECT COUNT(*)
-                                FROM stop_observations
-                                WHERE physical_stop_id IN ({})
-                                """)
-                                +
-                                count("""
-                                SELECT COUNT(*)
-                                FROM stop_consensus
-                                WHERE stop_id IN ({})
-                                """)
-                            )
-                            /
-                            len(stops)
-                            *
-                            100,
-                            1
-                        )
-
+                    "amenity_status_unknown":
+                        len(stops) - known_amenity_count
                 }
             )
 
@@ -2670,6 +4834,13 @@ def volunteer_handbook():
     return html
 
 
+
+
+
+
+@app.route("/test-route")
+def test_route():
+    return "hello"
 
 
 if __name__ == "__main__":

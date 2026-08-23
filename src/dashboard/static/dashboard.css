@@ -426,3 +426,434 @@ td, th {
     font-style: italic;
 }
 
+
+
+/* Map filter layout */
+
+.map-filter-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 20px;
+    align-items: end;
+}
+
+.map-filter-card label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+}
+
+.map-filter-card select {
+    width: 100%;
+    min-height: 42px;
+}
+
+.route-filter-card,
+.geo-filter-card {
+    margin-bottom: 20px;
+}
+
+
+
+/* Map filter spacing */
+.map-filter-card .filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    align-items: flex-end;
+}
+
+.map-filter-card .filter-group {
+    display: flex;
+    flex-direction: column;
+    min-width: 160px;
+}
+
+.map-filter-card label {
+    margin-bottom: 6px;
+}
+
+
+
+/* Final map filter cleanup */
+
+.map-filter-card .filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    align-items: flex-end;
+}
+
+
+.map-filter-card .filter-group,
+.map-filter-card label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 160px;
+}
+
+
+.map-filter-card select {
+    width: 180px;
+    height: 40px;
+}
+
+
+.map-filter-card button {
+    height: 40px;
+    margin-bottom: 0;
+}
+
+
+
+.impact-section {
+    margin-top: 24px;
+    padding: 18px;
+    border-radius: 12px;
+    border: 1px solid #ddd;
+}
+
+.impact-section h2 {
+    margin-top: 0;
+}
+
+.current-review {
+    margin-top: 20px;
+}
+
+/* Community observation history */
+
+.community-observations-card {
+    margin-top: 20px;
+}
+
+.community-observations-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 18px;
+}
+
+.community-observations-title strong {
+    font-size: 18px;
+}
+
+.community-observations-subtitle {
+    margin-top: 4px;
+    color: #666;
+    font-size: 14px;
+}
+
+.community-observation {
+    padding: 16px;
+    margin-bottom: 12px;
+    background: #f7f9fb;
+    border: 1px solid #e1e6eb;
+    border-radius: 8px;
+}
+
+.community-observation:last-child {
+    margin-bottom: 0;
+}
+
+.community-observation-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 15px;
+    margin-bottom: 14px;
+}
+
+.community-observation-date {
+    color: #666;
+    font-size: 14px;
+}
+
+.community-observation-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.community-observation-grid > div {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.community-observation-label {
+    color: #666;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.community-observation-notes {
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid #e1e6eb;
+}
+
+.community-observations-empty {
+    padding: 16px;
+    background: #f7f9fb;
+    border-radius: 8px;
+    color: #666;
+}
+
+@media (max-width: 600px) {
+
+    .community-observation-header {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 5px;
+    }
+
+    .community-observation-grid {
+        grid-template-columns: 1fr;
+    }
+
+}
+
+
+/* Amenity comparison */
+
+.amenity-comparison {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.amenity-comparison-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 20px;
+    padding: 12px 14px;
+    background: #f7f9fb;
+    border: 1px solid #e1e6eb;
+    border-radius: 8px;
+}
+
+.amenity-comparison-row > strong {
+    font-size: 15px;
+}
+
+.amenity-comparison-row span {
+    color: #666;
+    text-align: right;
+}
+
+.amenity-comparison-row span strong {
+    color: #222;
+}
+
+@media (max-width: 600px) {
+
+    .amenity-comparison-row {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .amenity-comparison-row span {
+        text-align: left;
+    }
+
+}
+
+
+/* ------------------------------------------------------------
+   Stop detail recommendation UI
+   ------------------------------------------------------------ */
+
+/* ------------------------------------------------
+   DDOT evidence
+   ------------------------------------------------ */
+
+.ddot-evidence-card {
+    margin-top: 20px;
+}
+
+.ddot-evidence-card > strong {
+    display: block;
+    font-size: 20px;
+    margin-bottom: 8px;
+}
+
+.ddot-evidence-card > p {
+    margin: 10px 0 16px;
+    color: #555;
+    line-height: 1.5;
+    max-width: 850px;
+}
+
+.ddot-evidence-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.ddot-evidence-item {
+    padding: 16px;
+    background: #f7f9fb;
+    border: 1px solid #e1e6eb;
+    border-radius: 8px;
+    line-height: 1.5;
+}
+
+.ddot-evidence-item > strong:first-child {
+    font-size: 16px;
+}
+
+
+/* Existing recommendation styles */
+
+.recommendation-card {
+    margin-top: 20px;
+}
+
+.recommendation-card > strong {
+    display: block;
+    font-size: 20px;
+    margin-bottom: 8px;
+}
+
+.recommendation-card > p {
+    margin: 0 0 18px 0;
+    color: #555;
+    line-height: 1.55;
+    max-width: 850px;
+}
+
+.recommendation-item {
+    padding: 20px;
+    border: 1px solid #d7dee5;
+    border-radius: 10px;
+    margin-top: 14px;
+    background: #fafcfd;
+}
+
+.recommendation-header {
+    font-size: 18px;
+    margin-bottom: 8px;
+}
+
+.recommendation-description {
+    margin: 0 0 16px 0;
+    color: #555;
+    line-height: 1.5;
+}
+
+.recommendation-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+    margin-bottom: 16px;
+    font-size: 14px;
+}
+
+.recommendation-reasons-title {
+    font-weight: 600;
+    margin-bottom: 6px;
+}
+
+.recommendation-reasons {
+    margin: 0 0 18px 20px;
+    padding: 0;
+}
+
+.recommendation-reasons li {
+    margin-bottom: 7px;
+    line-height: 1.45;
+}
+
+.recommendation-action {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    padding-top: 16px;
+    border-top: 1px solid #e1e6eb;
+}
+
+.recommendation-review-button {
+    display: inline-block;
+    padding: 11px 18px;
+    border-radius: 7px;
+    background: #1f5f8b;
+    color: white;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.recommendation-review-button:hover {
+    opacity: 0.9;
+}
+
+.recommendation-action-note {
+    color: #666;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+.recommendation-empty {
+    margin-top: 14px;
+    padding: 14px;
+    border-radius: 8px;
+    background: #f7f7f7;
+    color: #666;
+}
+
+@media (max-width: 600px) {
+
+    .recommendation-item {
+        padding: 16px;
+    }
+
+    .recommendation-meta {
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .recommendation-action {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .recommendation-review-button {
+        width: 100%;
+        box-sizing: border-box;
+        text-align: center;
+    }
+
+}
+
+
+/* Final recommendation card cleanup */
+
+.recommendation-card {
+    border: 1px solid #cfd9e2;
+    border-radius: 12px;
+    padding: 22px;
+}
+
+.recommendation-description {
+    margin: 10px 0 16px;
+    color: #555;
+    line-height: 1.55;
+}
+
+.recommendation-meta {
+    margin-bottom: 16px;
+}
+
+.recommendation-action {
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid #e1e6eb;
+}
+
+.amenity-comparison-row span {
+    line-height: 1.5;
+}

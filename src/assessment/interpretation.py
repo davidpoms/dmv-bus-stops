@@ -113,6 +113,7 @@ def summarize_stop_evidence(evidence):
 
     osm = evidence.get("osm") or {}
     transit = evidence.get("transit") or {}
+    ddot = evidence.get("ddot") or []
     reviews = evidence.get("reviews") or []
 
     return {
@@ -129,6 +130,41 @@ def summarize_stop_evidence(evidence):
 
         "community_reviews":
             len(reviews),
+
+
+        "ddot_shelter": {
+
+            "records":
+                len(ddot),
+
+            "confirmed_active": False,
+
+            "possible_new":
+                any(
+                    r.get("lifecycle_status")
+                    == "POSSIBLE_NEW_DDOT_SHELTER"
+                    for r in ddot
+                ),
+
+            "removed":
+                any(
+                    r.get("lifecycle_status")
+                    == "MATCHED_REMOVED"
+                    for r in ddot
+                ),
+
+            "routes":
+                sorted(
+                    {
+                        route
+                        for r in ddot
+                        for route in
+                        (r.get("route_ids") or "").split(",")
+                        if route
+                    }
+                )
+        },
+
 
         "data_sources": [
             source
@@ -175,3 +211,79 @@ def generate_review_action_summary(evidence, review_priority):
         "recommended_actions": actions
     }
 
+
+
+
+
+
+def interpret_ddot_evidence(ddot_records):
+
+    results = []
+
+    for record in ddot_records or []:
+
+        status = record.get(
+            "lifecycle_status"
+        )
+
+        evidence_class = "quarantined_legacy"
+        public_status = "Quarantined legacy DDOT reconciliation record"
+        finding = (
+            "This historical reconciliation record is retained for audit "
+            "only and is not used to determine current shelter status."
+        )
+
+
+        source_label = (
+            "DDOT API shelter asset record"
+            if record.get("api_id")
+            else
+            "DDOT shelter procurement inventory July 2026"
+        )
+
+
+        results.append(
+            {
+                "source":
+                    source_label,
+
+                "source_type":
+                    (
+                        "api"
+                        if record.get("api_id")
+                        else
+                        "procurement"
+                    ),
+
+                "source_record":
+                    record.get("ddot_id")
+                    or record.get("api_id"),
+
+                "lifecycle_status":
+                    status,
+
+                "evidence_class":
+                    evidence_class,
+
+                "public_status":
+                    public_status,
+
+                "finding":
+                    finding,
+
+                "routes":
+                    record.get("routes", []),
+
+                "confidence":
+                    record.get("confidence"),
+
+                "details":
+                    (
+                        "Legacy route/lifecycle reconciliation; current "
+                        "amenity authority disabled."
+                    )
+            }
+        )
+
+
+    return results

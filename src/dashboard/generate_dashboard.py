@@ -2,7 +2,6 @@
 Generate live HTML implementation dashboard.
 """
 
-import json
 from pathlib import Path
 from string import Template
 
@@ -19,8 +18,6 @@ from src.dashboard.data import (
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
-
-INPUT_FILE = BASE_DIR / "implementation_summary.json"
 
 TEMPLATE_FILE = (
     BASE_DIR /
@@ -46,10 +43,6 @@ def query_count(sql):
     return count
 
 def generate_dashboard():
-
-    with open(INPUT_FILE) as f:
-        data = json.load(f)
-
 
 
     geography_totals = "\n".join(
@@ -122,7 +115,7 @@ def generate_dashboard():
 
 
     template = Template(
-        TEMPLATE_FILE.read_text()
+        TEMPLATE_FILE.read_text(encoding="utf-8")
     )
 
 
@@ -144,7 +137,7 @@ def generate_dashboard():
         STOPS_NEEDING_REVIEW=f"{metrics['benches']['stops_needing_review']:,}",
         TOTAL_ROUTES=f"{metrics['routes']['total_routes']:,}",
         FULLY_VERIFIED_ROUTES=f"{metrics['routes']['fully_verified_routes']:,}",
-        PARTIAL_ROUTES=f"{metrics['routes']['partially_verified_routes']:,}",        total_projects=data["total_projects"],
+        PARTIAL_ROUTES=f"{metrics['routes']['partially_verified_routes']:,}",
 
         COMPLETED_REVIEWS=f"{metrics['consensus']['completed_reviews']:,}",
         PENDING_REVIEWS=f"{metrics['consensus']['pending_reviews']:,}",
@@ -162,7 +155,10 @@ def generate_dashboard():
     )
 
 
-    OUTPUT_FILE.write_text(html)
+    OUTPUT_FILE.write_text(
+    html,
+    encoding="utf-8"
+    )
 
 
 if __name__ == "__main__":

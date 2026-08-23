@@ -36,10 +36,13 @@ def create_assignments():
 
 
     tasks = cur.execute("""
-        SELECT physical_stop_id
-        FROM review_queue
-        WHERE review_status = 'pending'
-        ORDER BY priority_rank
+        SELECT rq.physical_stop_id
+        FROM review_queue rq
+        JOIN stop_gtfs_status sgs
+          ON sgs.physical_stop_id = rq.physical_stop_id
+         AND sgs.current_gtfs = 1
+        WHERE rq.review_status = 'pending'
+        ORDER BY rq.priority_rank
     """).fetchall()
 
 

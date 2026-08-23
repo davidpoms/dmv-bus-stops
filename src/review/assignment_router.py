@@ -1,60 +1,28 @@
-"""
-Volunteer assignment router.
-
-Creates reviewer identities and assigns stops
-based on dashboard scenarios.
-"""
-
 import sqlite3
 import uuid
 from pathlib import Path
 
 
+BASE_DIR = Path(__file__).resolve().parents[2]
+
 DB = (
-    Path(__file__).resolve()
-    .parents[1]
+    BASE_DIR
+    / "src"
     / "database"
     / "dmv_bus_stops.db"
 )
 
 
-# Minimum independent reviews before consensus
-MIN_REVIEWERS = 3
-
-
 def get_or_create_reviewer(reviewer_key=None):
 
     conn = sqlite3.connect(DB)
+
     cur = conn.cursor()
-
-
-    def stop_is_active(stop_id):
-
-        row = cur.execute(
-            """
-            SELECT
-                w.wmata_status
-            FROM physical_stops p
-            LEFT JOIN stop_wmata_evidence w
-                ON p.id = w.physical_stop_id
-            WHERE p.id=?
-            """,
-            (stop_id,)
-        ).fetchone()
-
-
-        if not row:
-            return True
-
-
-        status = row[0]
-
-        return status != "ABS"
 
 
     if reviewer_key:
 
-        row = cur.execute(
+        existing = cur.execute(
             """
             SELECT id
             FROM community_reviewers
@@ -63,72 +31,59 @@ def get_or_create_reviewer(reviewer_key=None):
             (reviewer_key,)
         ).fetchone()
 
-        if row:
+
+        if existing:
+
             conn.close()
-            return row[0], reviewer_key
+
+            return existing[0], reviewer_key
 
 
-    new_key = (
-        "reviewer_"
-        +
-        uuid.uuid4().hex[:8]
-    )
+
+    reviewer_key = uuid.uuid4().hex
+
 
     cur.execute(
         """
         INSERT INTO community_reviewers
         (
-            reviewer_key,
-            display_name
+            reviewer_key
         )
-        VALUES (?,?)
+        VALUES (?)
         """,
         (
-            new_key,
-            "Community Reviewer"
+            reviewer_key,
         )
     )
+
 
     reviewer_id = cur.lastrowid
 
     conn.commit()
     conn.close()
 
-    return reviewer_id, new_key
+
+    return reviewer_id, reviewer_key
 
 
 
 def stop_is_active(stop_id):
 
     conn = sqlite3.connect(DB)
-    cur = conn.cursor()
 
-    row = cur.execute(
+    row = conn.execute(
         """
-        SELECT
-            wmata_status
-        FROM stop_wmata_evidence
+        SELECT physical_stop_id
+        FROM stop_gtfs_status
         WHERE physical_stop_id=?
+          AND current_gtfs=1
         """,
         (stop_id,)
     ).fetchone()
 
     conn.close()
 
-    if not row:
-        return True
-
-    status = row[0]
-
-    # WMATA statuses:
-    # PRS = published/active stop
-    # ABS = abandoned/inactive stop
-    # Other unknown values are allowed for now
-
-    if status == "ABS":
-        return False
-
-    return True
+    return row is not None
 
 
 
@@ -143,137 +98,287 @@ def assign_stop(
     conn = sqlite3.connect(DB)
     cur = conn.cursor()
 
-    existing = cur.execute(
-        """
-        SELECT
-            id,
-            stop_id
-        FROM stop_review_assignments
-        WHERE reviewer_id=?
-        AND scenario=?
-        AND status='assigned'
-        ORDER BY id DESC
-        LIMIT 1
-        """ ,
-        (
-            reviewer_id,
-            scenario
-        )
-    ).fetchone()
-
-
-    if existing and scenario == "opportunity":
+    # Previous assignments and proxy evidence never establish active status.
+    if stop_id and not stop_is_active(stop_id):
         conn.close()
-        return existing[0], existing[1]
+        return None
 
+    # Return existing assignment if reviewer already has this stop assigned
 
     if stop_id:
 
-        if not stop_is_active(stop_id):
-            conn.close()
-            return None
-
-        stop = (
-            stop_id,
-        )
-
-
-    elif scenario == "opportunity":
-
-        stop = cur.execute(
-            """
-            SELECT rq.physical_stop_id
-            FROM review_queue rq
-            LEFT JOIN stop_wmata_evidence w
-                ON rq.physical_stop_id = w.physical_stop_id
-            WHERE rq.verification_needed=1
-            AND (
-                w.wmata_status IS NULL
-                OR w.wmata_status != 'ABS'
-            )
-            ORDER BY rq.priority_rank
-            LIMIT 1
-            """
-        ).fetchone()
-
-
-    elif scenario == "nearby":
-
-        # Use provided coordinates when available.
-        # Fall back to highest priority nearby-capable stop.
-        stop = cur.execute(
+        existing = cur.execute(
             """
             SELECT
-                rq.physical_stop_id
-            FROM review_queue rq
-            JOIN physical_stops ps
-                ON ps.id = rq.physical_stop_id
-            LEFT JOIN stop_wmata_evidence w
-                ON rq.physical_stop_id = w.physical_stop_id
-            WHERE rq.community_review_available=1
-            AND (
-                w.wmata_status IS NULL
-                OR w.wmata_status != 'ABS'
-            )
-            ORDER BY
-                CASE
-                    WHEN ? IS NOT NULL AND ? IS NOT NULL THEN
-                        (
-                            (ps.latitude - ?) * (ps.latitude - ?)
-                            +
-                            (ps.longitude - ?) * (ps.longitude - ?)
-                        )
-                    ELSE rq.priority_rank
-                END
+                id,
+                stop_id
+
+            FROM stop_review_assignments
+
+            WHERE stop_id=?
+            AND reviewer_id=?
+            AND status='assigned'
+
             LIMIT 1
-            """
-        ,
-        (
-            latitude,
-            longitude,
-            latitude,
-            latitude,
-            longitude,
-            longitude
-        )
+            """,
+            (
+                stop_id,
+                reviewer_id
+            )
         ).fetchone()
 
+
+        if existing:
+
+            conn.close()
+
+            return existing[0], existing[1]
+
+    # -------------------------------------------------
+    # Specific requested stop
+    # -------------------------------------------------
+
+    if stop_id:
+
+        row = cur.execute(
+            """
+            SELECT
+                rq.id,
+                rq.physical_stop_id
+
+            FROM review_queue rq
+
+            JOIN stop_gtfs_status sgs
+                ON sgs.physical_stop_id = rq.physical_stop_id
+               AND sgs.current_gtfs = 1
+
+            WHERE rq.physical_stop_id=?
+
+            LIMIT 1
+            """,
+            (
+                stop_id,
+            )
+        ).fetchone()
+
+
+
+    # -------------------------------------------------
+    # Route mode
+    # -------------------------------------------------
 
     elif scenario == "route":
 
-        # Route filtering requires a stop_routes table.
-        # Until route data is loaded, use highest priority available stop.
-        stop = cur.execute(
+        row = cur.execute(
             """
-            SELECT rq.physical_stop_id
+            SELECT
+                rq.id,
+                rq.physical_stop_id
+
             FROM review_queue rq
-            LEFT JOIN stop_wmata_evidence w
-                ON rq.physical_stop_id = w.physical_stop_id
-            WHERE rq.community_review_available=1
-            AND (
-                w.wmata_status IS NULL
-                OR w.wmata_status != 'ABS'
+
+            JOIN stop_gtfs_status sgs
+                ON sgs.physical_stop_id = rq.physical_stop_id
+               AND sgs.current_gtfs = 1
+
+            JOIN physical_stop_members psm
+                ON psm.physical_stop_id = rq.physical_stop_id
+
+            JOIN stop_routes sr
+                ON sr.stop_id = psm.bus_stop_id
+
+            JOIN routes r
+                ON r.id = sr.route_id
+
+            JOIN community_reviewer_routes crr
+                ON crr.route_id = r.route_id
+
+            WHERE crr.reviewer_id = ?
+
+            AND rq.review_status='pending'
+
+            AND rq.community_review_available=1
+
+            AND rq.physical_stop_id NOT IN (
+
+                SELECT stop_id
+
+                FROM stop_review_assignments
+
+                WHERE reviewer_id=?
+
             )
+
+            AND rq.physical_stop_id NOT IN (
+
+                SELECT stop_id
+
+                FROM stop_review_assignments
+
+                WHERE status='assigned'
+
+            )
+
+            GROUP BY rq.physical_stop_id
+
             ORDER BY rq.priority_rank
+
             LIMIT 1
-            """
+
+            """,
+            (
+                reviewer_id,
+                reviewer_id
+            )
         ).fetchone()
 
 
+
+    # -------------------------------------------------
+    # Nearby mode
+    # -------------------------------------------------
+
+    elif scenario == "nearby" and latitude and longitude:
+
+        row = cur.execute(
+            """
+            SELECT
+                rq.id,
+                rq.physical_stop_id
+
+
+            FROM review_queue rq
+
+            JOIN stop_gtfs_status sgs
+                ON sgs.physical_stop_id = rq.physical_stop_id
+               AND sgs.current_gtfs = 1
+
+
+            JOIN physical_stops ps
+
+                ON ps.id = rq.physical_stop_id
+
+
+            WHERE rq.review_status='pending'
+
+            AND rq.community_review_available=1
+
+
+            AND rq.physical_stop_id NOT IN (
+
+                SELECT stop_id
+
+                FROM stop_review_assignments
+
+                WHERE reviewer_id=?
+
+            )
+
+
+            ORDER BY
+
+            (
+                (ps.latitude - ?) *
+                (ps.latitude - ?)
+
+                +
+
+                (ps.longitude - ?) *
+                (ps.longitude - ?)
+
+            )
+
+
+            LIMIT 1
+            """,
+            (
+                reviewer_id,
+                latitude,
+                latitude,
+                longitude,
+                longitude
+            )
+        ).fetchone()
+
+
+
+    # -------------------------------------------------
+    # Opportunity/default mode
+    # -------------------------------------------------
+
     else:
 
-        raise ValueError(
-            "Unknown scenario"
-        )
+        row = cur.execute(
+            """
+            SELECT
+                rq.id,
+                rq.physical_stop_id
 
 
-    if not stop:
+            FROM review_queue rq
+
+            JOIN stop_gtfs_status sgs
+                ON sgs.physical_stop_id = rq.physical_stop_id
+               AND sgs.current_gtfs = 1
+
+
+            LEFT JOIN opportunity_assessments oa
+
+                ON oa.physical_stop_id = rq.physical_stop_id
+
+
+            WHERE rq.review_status='pending'
+
+            AND rq.community_review_available=1
+
+
+            AND rq.physical_stop_id NOT IN (
+
+                SELECT stop_id
+
+                FROM stop_review_assignments
+
+                WHERE reviewer_id=?
+
+            )
+
+
+            AND rq.physical_stop_id NOT IN (
+
+                SELECT stop_id
+
+                FROM stop_review_assignments
+
+                WHERE status='assigned'
+
+            )
+
+
+            ORDER BY
+
+                oa.combined_route_weekday_boardings DESC,
+
+                rq.priority_rank ASC
+
+
+            LIMIT 1
+
+            """,
+            (
+                reviewer_id,
+            )
+        ).fetchone()
+
+
+
+    if not row:
 
         conn.close()
         return None
 
 
-    stop_id = stop[0]
+
+    assigned_stop_id = row[1]
 
 
     cur.execute(
@@ -282,36 +387,25 @@ def assign_stop(
         (
             stop_id,
             reviewer_id,
-            scenario
+            scenario,
+            status
         )
-        VALUES (?, ?, ?)
+
+        VALUES (?, ?, ?, 'assigned')
         """,
         (
-            stop_id,
+            assigned_stop_id,
             reviewer_id,
             scenario
         )
     )
 
 
-    assignment = cur.execute(
-        """
-        SELECT id
-        FROM stop_review_assignments
-        WHERE stop_id=?
-        AND reviewer_id=?
-        ORDER BY id DESC
-        LIMIT 1
-        """,
-        (
-            stop_id,
-            reviewer_id
-        )
-    ).fetchone()
+    assignment_id = cur.lastrowid
 
 
     conn.commit()
     conn.close()
 
 
-    return assignment[0], stop_id
+    return assignment_id, assigned_stop_id
