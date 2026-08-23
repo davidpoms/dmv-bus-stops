@@ -24,9 +24,10 @@ URL = (
 SOURCE = "DDOT_ARCGIS"
 JURISDICTION = "DISTRICT_OF_COLUMBIA"
 
-# Chosen after inspecting the live nearest-DC-stop distribution. Records over
-# 50m remain visible in the report but cannot become evidence automatically.
-ACCEPT_DISTANCE_M = 50.0
+# Chosen after inspecting the live nearest-DC-stop distribution. There is no
+# clean global break; 25m accepts the validated problem cases while the long
+# tail remains review-only or unmatched.
+ACCEPT_DISTANCE_M = 25.0
 REVIEW_DISTANCE_M = 100.0
 REQUIRED_UNIQUE_COLUMNS = (
     "physical_stop_id", "source", "source_record_id", "amenity_type"
