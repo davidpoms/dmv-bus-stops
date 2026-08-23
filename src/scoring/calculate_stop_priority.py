@@ -145,7 +145,7 @@ def calculate_scores():
             ) AS routes
 
 
-        
+
 FROM physical_stops ps
 
 
@@ -162,10 +162,9 @@ JOIN physical_stop_routes psr
 
 
 
-	
 
 
-        
+
 LEFT JOIN route_exposure rd
 
     ON psr.route_id = rd.route_id

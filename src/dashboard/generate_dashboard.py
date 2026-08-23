@@ -137,7 +137,7 @@ def generate_dashboard():
         STOPS_NEEDING_REVIEW=f"{metrics['benches']['stops_needing_review']:,}",
         TOTAL_ROUTES=f"{metrics['routes']['total_routes']:,}",
         FULLY_VERIFIED_ROUTES=f"{metrics['routes']['fully_verified_routes']:,}",
-        PARTIAL_ROUTES=f"{metrics['routes']['partially_verified_routes']:,}",        
+        PARTIAL_ROUTES=f"{metrics['routes']['partially_verified_routes']:,}",
 
         COMPLETED_REVIEWS=f"{metrics['consensus']['completed_reviews']:,}",
         PENDING_REVIEWS=f"{metrics['consensus']['pending_reviews']:,}",

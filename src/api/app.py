@@ -133,6 +133,31 @@ def query_db(sql, params=()):
     return rows
 
 
+def get_current_amenity_evidence(stop_id):
+    """Return normalized evidence allowed in current public amenity views."""
+    return query_db(
+        """
+        SELECT
+            id,
+            source,
+            source_record_id,
+            amenity_type,
+            present,
+            confidence,
+            match_distance_m,
+            notes,
+            jurisdiction,
+            value,
+            raw_value
+        FROM stop_amenity_evidence
+        WHERE physical_stop_id=?
+          AND source != 'DDOT'
+        ORDER BY created_at DESC, id DESC
+        """,
+        (stop_id,)
+    )
+
+
 def stop_is_current(stop_id):
     rows = query_db(
         """
@@ -1955,26 +1980,7 @@ def review_stop_info(stop_id):
         }
 
 
-    amenity_evidence = query_db(
-        """
-        SELECT
-            id,
-            source,
-            source_record_id,
-            amenity_type,
-            present,
-            confidence,
-            match_distance_m,
-            notes,
-            jurisdiction,
-            value,
-            raw_value
-        FROM stop_amenity_evidence
-        WHERE physical_stop_id=?
-        ORDER BY created_at DESC, id DESC
-        """,
-        (stop_id,)
-    )
+    amenity_evidence = get_current_amenity_evidence(stop_id)
 
 
     improvement_recommendations = query_db(
@@ -3476,7 +3482,7 @@ def map_stops():
         ELSE 'low'
     END
     ,
-                
+
     CASE
         WHEN io.opportunity_score >= 80 THEN 'very_high'
         WHEN io.opportunity_score >= 60 THEN 'high'
@@ -3509,7 +3515,6 @@ def map_stops():
             JOIN improvement_opportunities io
                 ON ps.id = io.physical_stop_id
 
-            
             LEFT JOIN stop_consensus ca
                 ON ps.id = ca.stop_id
 
@@ -3520,38 +3525,38 @@ def map_stops():
                 ? IS NULL
                 OR (
                     ? = 'high'
-                    AND 
+                    AND
                     CASE
                         WHEN io.opportunity_score >= 80 THEN 'very_high'
                         WHEN io.opportunity_score >= 60 THEN 'high'
                         WHEN io.opportunity_score >= 40 THEN 'medium'
                         ELSE 'low'
                     END IN ('high', 'very_high')
-        
+
                 )
                 OR (
                     ? = 'very_high'
-                    AND 
+                    AND
                     CASE
                         WHEN io.opportunity_score >= 80 THEN 'very_high'
                         WHEN io.opportunity_score >= 60 THEN 'high'
                         WHEN io.opportunity_score >= 40 THEN 'medium'
                         ELSE 'low'
                     END = 'very_high'
-        
+
                 )
             )
 
             AND (
                 ? IS NULL
-                OR 
+                OR
                     CASE
                         WHEN io.opportunity_score >= 80 THEN 'very_high'
                         WHEN io.opportunity_score >= 60 THEN 'high'
                         WHEN io.opportunity_score >= 40 THEN 'medium'
                         ELSE 'low'
                     END = ?
-        
+
             )
 
             AND (
@@ -3673,7 +3678,6 @@ def map_stops():
             ]
         }
     )
-
 
 
 
@@ -3924,6 +3928,26 @@ def validation_status_summary():
 @app.route("/priority-summary")
 def priority_summary():
 
+    columns = {
+        row[1]
+        for row in query_db(
+            "PRAGMA table_info(stop_improvement_impact)"
+        )
+    }
+
+    # priority_level is a derived classification populated by
+    # scripts/generate_priority_levels.py. Before that rebuild has run, the
+    # endpoint has no classifications to report; impact_level is not a proxy.
+    if "priority_level" not in columns:
+        return jsonify(
+            {
+                "P1": 0,
+                "P2": 0,
+                "P3": 0,
+                "monitor": 0
+            }
+        )
+
     rows = query_db(
         """
         SELECT
@@ -4110,7 +4134,7 @@ def routes():
 FROM routes r
 
 JOIN stop_routes sr
-    ON r.route_id = sr.route_id
+    ON r.id = sr.route_id
 
 JOIN bus_stops bs
     ON sr.stop_id = bs.id

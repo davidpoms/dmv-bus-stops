@@ -728,7 +728,7 @@ function renderPipeline(rows){
     body.innerHTML="";
 
 
-    
+
 rows.forEach(row=>{
 
 body.innerHTML += `

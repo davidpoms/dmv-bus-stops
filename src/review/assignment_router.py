@@ -187,8 +187,11 @@ def assign_stop(
             JOIN stop_routes sr
                 ON sr.stop_id = psm.bus_stop_id
 
+            JOIN routes r
+                ON r.id = sr.route_id
+
             JOIN community_reviewer_routes crr
-                ON crr.route_id = sr.route_id
+                ON crr.route_id = r.route_id
 
             WHERE crr.reviewer_id = ?
 
