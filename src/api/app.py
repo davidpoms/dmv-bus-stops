@@ -3474,7 +3474,7 @@ def map_stops():
                 ps.latitude AS lat,
                 ps.longitude AS lon,
                 io.opportunity_score,
-                
+
     CASE
         WHEN io.opportunity_score >= 80 THEN 'very_high'
         WHEN io.opportunity_score >= 60 THEN 'high'
@@ -3678,8 +3678,6 @@ def map_stops():
             ]
         }
     )
-
-
 
 
 
@@ -4853,5 +4851,4 @@ if __name__ == "__main__":
         debug=False,
         use_reloader=False
     )
-
 
