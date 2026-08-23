@@ -379,6 +379,10 @@ localEvidence.forEach(item => {
 
         localEvidenceGroups[key] = {
 
+            source:
+                item.source ||
+                null,
+
             jurisdiction:
                 item.jurisdiction ||
                 item.source ||
@@ -425,6 +429,8 @@ const localEvidenceHtml =
                 ${
                     item.jurisdiction === "MONTGOMERY_COUNTY"
                     ? "Montgomery County"
+                    : item.jurisdiction === "DISTRICT_OF_COLUMBIA"
+                      ? "District of Columbia"
                     : item.jurisdiction ||
                       "Local jurisdiction"
                 }
@@ -439,15 +445,22 @@ const localEvidenceHtml =
 
             <br>
 
-            Bench:
-            <strong>
-                ${item.bench || "Not recorded"}
-            </strong>
+            ${
+                item.jurisdiction !== "DISTRICT_OF_COLUMBIA"
+                ? `
+                    Bench:
+                    <strong>
+                        ${item.bench || "Not recorded"}
+                    </strong>
 
-            <br>
+                    <br>
+                `
+                : ""
+            }
 
             ${
-                item.source === "DDOT"
+                item.jurisdiction === "DISTRICT_OF_COLUMBIA" &&
+                item.source === "DDOT_ARCGIS"
                 ? `
                     Source:
                     <strong>
@@ -570,63 +583,6 @@ const latestCommunity =
                         Be the first to review this stop.
                     </div>
                 `;
-
-        const ddotEvidenceHtml =
-            stop.ddot_interpretation &&
-            stop.ddot_interpretation.length
-                ? stop.ddot_interpretation.map(item => {
-
-                    const ddotSourceLabel =
-                        item.source_type === "api"
-                            ? "DDOT API shelter asset record"
-                            : item.source_type === "procurement"
-                                ? "DDOT shelter procurement inventory"
-                                : item.source || "DDOT evidence record";
-
-                    return `
-                    <div class="ddot-evidence-item">
-
-                        <strong>
-                            ${ddotSourceLabel}
-                        </strong>
-
-                        <br><br>
-
-                        ${item.finding || "Finding not recorded."}
-
-                        <br><br>
-
-                        Confidence:
-
-                        <strong>
-                            ${item.confidence || "Unknown"}
-                        </strong>
-
-                        ${
-                            item.source_record
-                                ? `
-                                    <br><br>
-                                    Source record:
-                                    ${item.source_record}
-                                `
-                                : ""
-                        }
-
-                        ${
-                            item.routes &&
-                            item.routes.length
-                                ? `
-                                    <br><br>
-                                    Routes:
-                                    ${item.routes.join(", ")}
-                                `
-                                : ""
-                        }
-
-                    </div>
-                    `;
-                }).join("")
-                : "No DDOT evidence available.";
 
         details.innerHTML = `
 

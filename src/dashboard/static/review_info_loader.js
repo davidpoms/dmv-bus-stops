@@ -293,6 +293,10 @@ document.addEventListener(
                                             if (!grouped[key]) {
 
                                                 grouped[key] = {
+                                                    source:
+                                                        evidence.source ||
+                                                        null,
+
                                                     jurisdiction:
                                                         evidence.jurisdiction ||
                                                         evidence.source ||
@@ -301,13 +305,6 @@ document.addEventListener(
                                                     source_record:
                                                         evidence.source_record ||
                                                         null,
-
-                                                    confidence:
-                                                        evidence.confidence ||
-                                                        "Unknown",
-
-                                                    match_distance_m:
-                                                        evidence.match_distance_m,
 
                                                     shelter: null,
 
@@ -346,6 +343,9 @@ document.addEventListener(
                                             evidence.jurisdiction ===
                                             "MONTGOMERY_COUNTY"
                                             ? "Montgomery County"
+                                            : evidence.jurisdiction ===
+                                              "DISTRICT_OF_COLUMBIA"
+                                              ? "District of Columbia"
                                             : evidence.jurisdiction ||
                                               "Local jurisdiction"
                                         }
@@ -363,31 +363,37 @@ document.addEventListener(
 
                                         <br>
 
-                                        Bench:
-                                        <strong>
                                         ${
-                                            evidence.bench ||
-                                            "Not recorded"
-                                        }
-                                        </strong>
+                                            evidence.jurisdiction !==
+                                            "DISTRICT_OF_COLUMBIA"
+                                            ? `
+                                                Bench:
+                                                <strong>
+                                                ${
+                                                    evidence.bench ||
+                                                    "Not recorded"
+                                                }
+                                                </strong>
 
-                                        <br>
-
-                                        Confidence:
-                                        ${
-                                            evidence.confidence
-                                        }
-
-                                        <br>
-
-                                        Match distance:
-                                        ${
-                                            evidence.match_distance_m !== null
-                                            ? evidence.match_distance_m.toFixed(1) + " m"
-                                            : "Unknown"
+                                                <br>
+                                            `
+                                            : ""
                                         }
 
-                                        <br>
+                                        ${
+                                            evidence.jurisdiction ===
+                                                "DISTRICT_OF_COLUMBIA" &&
+                                            evidence.source === "DDOT_ARCGIS"
+                                            ? `
+                                                Source:
+                                                <strong>
+                                                    DDOT shelter asset record
+                                                </strong>
+
+                                                <br>
+                                            `
+                                            : ""
+                                        }
 
                                         Source record:
                                         ${
