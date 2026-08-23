@@ -82,6 +82,12 @@ def generate_impact_summary():
 
         FROM improvement_opportunities io
 
+        JOIN stop_gtfs_status sgs
+
+            ON sgs.physical_stop_id = io.physical_stop_id
+
+           AND sgs.current_gtfs = 1
+
         LEFT JOIN opportunity_assessments oa
 
             ON io.physical_stop_id = oa.physical_stop_id

@@ -77,8 +77,11 @@ def create_assessments():
 
     cursor.execute(
         """
-        SELECT id
-        FROM physical_stops;
+        SELECT ps.id
+        FROM physical_stops ps
+        JOIN stop_gtfs_status sgs
+          ON sgs.physical_stop_id = ps.id
+         AND sgs.current_gtfs = 1;
         """
     )
 

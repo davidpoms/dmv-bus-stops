@@ -165,6 +165,14 @@ def score_opportunities():
         FROM opportunity_assessments oa
 
 
+        JOIN stop_gtfs_status sgs
+
+            ON sgs.physical_stop_id =
+               oa.physical_stop_id
+
+           AND sgs.current_gtfs = 1
+
+
         LEFT JOIN stop_priority_snapshots sps
 
             ON sps.stop_id =
@@ -195,6 +203,8 @@ def score_opportunities():
             "No assessments found."
         )
 
+        conn.commit()
+        conn.close()
         return
 
 

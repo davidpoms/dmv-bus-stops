@@ -149,6 +149,13 @@ def calculate_scores():
 FROM physical_stops ps
 
 
+JOIN stop_gtfs_status sgs
+
+    ON sgs.physical_stop_id = ps.id
+
+   AND sgs.current_gtfs = 1
+
+
 JOIN physical_stop_routes psr
 
     ON psr.physical_stop_id = ps.id
@@ -179,6 +186,8 @@ LEFT JOIN route_exposure rd
             "No stop data found"
         )
 
+        conn.commit()
+        conn.close()
         return
 
 
