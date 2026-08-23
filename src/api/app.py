@@ -96,10 +96,6 @@ def get_wmata_evidence(stop_id):
         """
         SELECT
             wmata_stop_id,
-            wmata_status,
-            wmata_bench,
-            wmata_shelter,
-            wmata_accessible,
             match_confidence,
             match_distance_m
 
@@ -107,13 +103,7 @@ def get_wmata_evidence(stop_id):
 
         WHERE physical_stop_id = ?
 
-        ORDER BY
-            CASE
-                WHEN wmata_status = 'PRS'
-                THEN 0
-                ELSE 1
-            END,
-            match_distance_m ASC
+        ORDER BY match_distance_m ASC
 
         LIMIT 1
         """,
@@ -964,8 +954,6 @@ GROUP BY ps.id
     )
 
 
-    wmata_history = get_wmata_history(stop_id)
-
     wmata_evidence = get_wmata_evidence(stop_id)
 
 
@@ -1583,14 +1571,14 @@ def review_stop_info(stop_id):
             p.county,
             p.municipality,
 
-            w.wmata_stop_id,
-            w.wmata_status,
-            w.wmata_heading,
-            w.wmata_bench,
-            w.wmata_shelter,
-            w.wmata_accessible,
-            w.match_distance_m,
-            w.match_confidence,
+            NULL AS wmata_stop_id,
+            NULL AS wmata_status,
+            NULL AS wmata_heading,
+            NULL AS wmata_bench,
+            NULL AS wmata_shelter,
+            NULL AS wmata_accessible,
+            NULL AS match_distance_m,
+            NULL AS match_confidence,
 
             (
                 SELECT bs.external_stop_id
@@ -1602,9 +1590,6 @@ def review_stop_info(stop_id):
             ) AS external_stop_id
 
         FROM physical_stops p
-
-        LEFT JOIN active_wmata_evidence w
-        ON p.id = w.physical_stop_id
 
         WHERE p.id=?
         """,
@@ -2089,33 +2074,6 @@ def review_stop_info(stop_id):
                 row[11],
 
             "streetview_url": streetview_url,
-
-            "wmata": {
-                "availability":
-                    "confirmed"
-                    if row[9]
-                    else "unavailable",
-
-                "stop_id": row[9],
-                "status": row[10],
-                "bench": row[12],
-                "shelter": row[13],
-                "accessible": row[14],
-                "match_distance_m": row[15],
-                "match_confidence": row[16]
-            },
-
-            "wmata_evidence": {
-                "wmata_stop_id": row[9],
-                "wmata_status": row[10],
-                "wmata_heading": row[11],
-                "wmata_bench": row[12],
-                "wmata_shelter": row[13],
-                "wmata_accessible": row[14],
-                "match_distance_m": row[15],
-                "match_confidence": row[16]
-            },
-
 
             "ddot_evidence":
                 ddot_evidence_payload,
@@ -3264,6 +3222,10 @@ def top_priorities():
         JOIN physical_stops ps
             ON io.physical_stop_id = ps.id
 
+        JOIN stop_gtfs_status sgs
+            ON sgs.physical_stop_id = ps.id
+           AND sgs.current_gtfs = 1
+
         ORDER BY io.opportunity_score DESC
 
         LIMIT 10;
@@ -3453,8 +3415,9 @@ def map_stops():
 
             FROM physical_stops ps
 
-            JOIN active_wmata_evidence aw
-                ON ps.id = aw.physical_stop_id
+            JOIN stop_gtfs_status sgs
+                ON sgs.physical_stop_id = ps.id
+               AND sgs.current_gtfs = 1
 
             JOIN improvement_opportunities io
                 ON ps.id = io.physical_stop_id
@@ -3533,8 +3496,9 @@ def map_stops():
 
             FROM physical_stops ps
 
-            JOIN active_wmata_evidence aw
-                ON ps.id = aw.physical_stop_id
+            JOIN stop_gtfs_status sgs
+                ON sgs.physical_stop_id = ps.id
+               AND sgs.current_gtfs = 1
 
             LEFT JOIN physical_stop_members psm
                 ON ps.id = psm.physical_stop_id
@@ -3968,6 +3932,11 @@ def priority_summary():
 
         FROM stop_improvement_impact
 
+        JOIN stop_gtfs_status sgs
+            ON sgs.physical_stop_id =
+               stop_improvement_impact.physical_stop_id
+           AND sgs.current_gtfs = 1
+
         GROUP BY priority_level;
         """
     )
@@ -4151,6 +4120,10 @@ JOIN physical_stop_members psm
 
 JOIN physical_stops ps
     ON psm.physical_stop_id = ps.id
+
+JOIN stop_gtfs_status sgs
+    ON sgs.physical_stop_id = ps.id
+   AND sgs.current_gtfs = 1
 
 GROUP BY
     r.route_id,
@@ -4502,38 +4475,66 @@ def evidence_summary():
 
         SUM(
             CASE
-            WHEN
-                COALESCE(w.wmata_shelter,'') != ''
-                OR COALESCE(o.osm_shelter,0)=1
+            WHEN EXISTS (
+                SELECT 1
+                FROM stop_amenity_evidence e
+                WHERE e.physical_stop_id = p.id
+                  AND e.source != 'DDOT'
+                  AND e.amenity_type = 'shelter'
+                  AND e.present = 1
+            ) OR EXISTS (
+                SELECT 1
+                FROM stop_consensus sc
+                WHERE sc.stop_id = p.id
+                  AND sc.has_shelter = 1
+            )
             THEN 1 ELSE 0
             END
         ) AS likely_shelter,
 
         SUM(
             CASE
-            WHEN
-                COALESCE(w.wmata_bench,'') != ''
-                OR COALESCE(o.osm_bench,0)=1
+            WHEN EXISTS (
+                SELECT 1
+                FROM stop_amenity_evidence e
+                WHERE e.physical_stop_id = p.id
+                  AND e.source != 'DDOT'
+                  AND e.amenity_type = 'bench'
+                  AND e.present = 1
+            ) OR EXISTS (
+                SELECT 1
+                FROM stop_consensus sc
+                WHERE sc.stop_id = p.id
+                  AND sc.has_bench = 1
+            )
             THEN 1 ELSE 0
             END
         ) AS likely_bench,
 
         SUM(
             CASE
-            WHEN
-                COALESCE(w.wmata_shelter,'')=''
-                AND COALESCE(o.osm_shelter,0)=0
+            WHEN NOT EXISTS (
+                SELECT 1
+                FROM stop_amenity_evidence e
+                WHERE e.physical_stop_id = p.id
+                  AND e.source != 'DDOT'
+                  AND e.amenity_type = 'shelter'
+                  AND e.present = 1
+            ) AND NOT EXISTS (
+                SELECT 1
+                FROM stop_consensus sc
+                WHERE sc.stop_id = p.id
+                  AND sc.has_shelter = 1
+            )
             THEN 1 ELSE 0
             END
         ) AS no_shelter_evidence
 
         FROM physical_stops p
 
-        LEFT JOIN active_wmata_evidence w
-        ON p.id=w.physical_stop_id
-
-        LEFT JOIN stop_osm_evidence o
-        ON p.id=o.stop_id
+        JOIN stop_gtfs_status sgs
+          ON sgs.physical_stop_id = p.id
+         AND sgs.current_gtfs = 1
 
         """
     )[0]
@@ -4592,10 +4593,13 @@ def pipeline_geography():
             "DC Ward",
             """
             SELECT
-                dc_ward as geography,
-                stop_id
-            FROM stop_jurisdiction
-            WHERE dc_ward IS NOT NULL
+                sj.dc_ward as geography,
+                sj.stop_id
+            FROM stop_jurisdiction sj
+            JOIN stop_gtfs_status sgs
+              ON sgs.physical_stop_id = sj.stop_id
+             AND sgs.current_gtfs = 1
+            WHERE sj.dc_ward IS NOT NULL
             """
         ),
 
@@ -4603,10 +4607,13 @@ def pipeline_geography():
             "ANC",
             """
             SELECT
-                dc_anc as geography,
-                stop_id
-            FROM stop_jurisdiction
-            WHERE dc_anc IS NOT NULL
+                sj.dc_anc as geography,
+                sj.stop_id
+            FROM stop_jurisdiction sj
+            JOIN stop_gtfs_status sgs
+              ON sgs.physical_stop_id = sj.stop_id
+             AND sgs.current_gtfs = 1
+            WHERE sj.dc_anc IS NOT NULL
             """
         ),
 
@@ -4614,10 +4621,13 @@ def pipeline_geography():
             "County",
             """
             SELECT
-                state || ' - ' || county as geography,
-                stop_id
-            FROM stop_jurisdiction
-            WHERE county IS NOT NULL
+                sj.state || ' - ' || sj.county as geography,
+                sj.stop_id
+            FROM stop_jurisdiction sj
+            JOIN stop_gtfs_status sgs
+              ON sgs.physical_stop_id = sj.stop_id
+             AND sgs.current_gtfs = 1
+            WHERE sj.county IS NOT NULL
             """
         ),
 
@@ -4625,10 +4635,13 @@ def pipeline_geography():
             "Municipality",
             """
             SELECT
-                state || ' - ' || municipality as geography,
-                stop_id
-            FROM stop_jurisdiction
-            WHERE municipality IS NOT NULL
+                sj.state || ' - ' || sj.municipality as geography,
+                sj.stop_id
+            FROM stop_jurisdiction sj
+            JOIN stop_gtfs_status sgs
+              ON sgs.physical_stop_id = sj.stop_id
+             AND sgs.current_gtfs = 1
+            WHERE sj.municipality IS NOT NULL
             """
         )
 
@@ -4671,11 +4684,21 @@ def pipeline_geography():
             SELECT COUNT(DISTINCT p.id)
             FROM physical_stops p
             WHERE p.id IN ({})
-            AND EXISTS (
-                SELECT 1
-                FROM active_wmata_evidence w
-                WHERE w.physical_stop_id = p.id
-                AND w.wmata_shelter = 1
+            AND (
+                EXISTS (
+                    SELECT 1
+                    FROM stop_amenity_evidence e
+                    WHERE e.physical_stop_id = p.id
+                      AND e.source != 'DDOT'
+                      AND e.amenity_type = 'shelter'
+                      AND e.present = 1
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM stop_consensus sc
+                    WHERE sc.stop_id = p.id
+                      AND sc.has_shelter = 1
+                )
             )
             """)
 
@@ -4684,11 +4707,21 @@ def pipeline_geography():
             SELECT COUNT(DISTINCT p.id)
             FROM physical_stops p
             WHERE p.id IN ({})
-            AND EXISTS (
-                SELECT 1
-                FROM active_wmata_evidence w
-                WHERE w.physical_stop_id = p.id
-                AND w.wmata_bench = 1
+            AND (
+                EXISTS (
+                    SELECT 1
+                    FROM stop_amenity_evidence e
+                    WHERE e.physical_stop_id = p.id
+                      AND e.source != 'DDOT'
+                      AND e.amenity_type = 'bench'
+                      AND e.present = 1
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM stop_consensus sc
+                    WHERE sc.stop_id = p.id
+                      AND sc.has_bench = 1
+                )
             )
             """)
 
@@ -4697,13 +4730,22 @@ def pipeline_geography():
             SELECT COUNT(DISTINCT p.id)
             FROM physical_stops p
             WHERE p.id IN ({})
-            AND EXISTS (
-                SELECT 1
-                FROM active_wmata_evidence w
-                WHERE w.physical_stop_id = p.id
-                AND (
-                    w.wmata_shelter = 1
-                    OR w.wmata_bench = 1
+            AND (
+                EXISTS (
+                    SELECT 1
+                    FROM stop_amenity_evidence e
+                    WHERE e.physical_stop_id = p.id
+                      AND e.source != 'DDOT'
+                      AND e.amenity_type IN ('shelter', 'bench')
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM stop_consensus sc
+                    WHERE sc.stop_id = p.id
+                      AND (
+                          sc.has_shelter IS NOT NULL
+                          OR sc.has_bench IS NOT NULL
+                      )
                 )
             )
             """)

@@ -67,13 +67,7 @@ function loadEvidence(stopId) {
                     data.evidence?.osm || {},
 
                 observations:
-                    data.evidence?.reviews || [],
-
-                wmata_history:
-                    data.wmata_history || [],
-
-                wmata_evidence:
-                    data.wmata_evidence || null
+                    data.evidence?.reviews || []
 
             };
 
@@ -273,21 +267,13 @@ function loadStops() {
                         .then(
                             (detail) => {
 
-                                detail.amenities = {
-                                    wmata:
-                                        detail.wmata_evidence
-                                };
-
                                 const evidence = {
 
                                     osm:
                                         detail.evidence?.osm || {},
 
                                     observations:
-                                        detail.evidence?.reviews || [],
-
-                                    wmata_evidence:
-                                        detail.wmata_evidence || null
+                                        detail.evidence?.reviews || []
 
                                 };
 
@@ -297,48 +283,12 @@ function loadStops() {
 
 
                                 if (
-                                    detail.amenities?.wmata &&
-                                    evidence.osm &&
-                                    (
-                                        (
-                                            detail.amenities.wmata.shelter === "0" &&
-                                            evidence.osm.osm_shelter === 1
-                                        )
-                                        ||
-                                        (
-                                            detail.amenities.wmata.bench === "0" &&
-                                            evidence.osm.osm_bench === 1
-                                        )
-                                    )
-                                ) {
-
-                                    reviewReason =
-                                        "Available records disagree about existing amenities at this stop. Public mapping suggests some waiting amenities may be present, while WMATA inventory does not show them. Your review will help confirm current conditions and identify whether improvements may be needed.";
-
-                                }
-
-
-                                else if (
                                     evidence.observations &&
                                     evidence.observations.length > 0
                                 ) {
 
                                     reviewReason =
                                         "Community members have already provided feedback about this stop. Additional observations help improve confidence in the available information.";
-
-                                }
-
-
-                                else if (
-                                    detail.wmata_evidence &&
-                                    (
-                                        detail.wmata_evidence.wmata_shelter === "1" ||
-                                        detail.wmata_evidence.shelter === "1"
-                                    )
-                                ) {
-
-                                    reviewReason =
-                                        "Available records indicate this stop likely has a shelter. Your review will help confirm current conditions and identify whether additional waiting area improvements could better support riders.";
 
                                 }
 
@@ -353,21 +303,6 @@ function loadStops() {
                                         "This stop appears to have a shelter, but seating information needs verification. Your review helps document current waiting conditions and available amenities.";
 
                                 }
-
-
-                                else if (
-                                    detail.wmata_evidence &&
-                                    detail.wmata_evidence.wmata_shelter === "0" &&
-                                    evidence.osm &&
-                                    evidence.osm.osm_shelter === 0 &&
-                                    evidence.osm.osm_bench === 0
-                                ) {
-
-                                    reviewReason =
-                                        "Available records do not show a shelter or bench. Your review helps confirm current stop conditions and improve the accuracy of public information.";
-
-                                }
-
 
 
                                 let popup = `
@@ -492,46 +427,13 @@ function loadStops() {
 
 
                                 if (
-                                    evidence.osm ||
-                                    detail.amenities?.wmata
+                                    evidence.osm
                                 ) {
 
                                     popup += `
                                     <br>
                                     <b>Existing stop information</b><br>
                                     `;
-
-
-                                    if (detail.amenities?.wmata) {
-
-                                        popup += `
-                                        Shelter:
-                                        ${
-                                            detail.amenities.wmata.shelter === "1"
-                                            ? "Yes"
-                                            : "No"
-                                        }
-                                        (WMATA inventory)<br>
-
-                                        Bench:
-                                        ${
-                                            detail.amenities.wmata.bench === "1"
-                                            ? "Yes"
-                                            : "No"
-                                        }
-                                        (WMATA inventory)<br>
-
-                                        WMATA accessibility rating:
-                                        ${
-                                            detail.amenities.wmata.accessible === "Y"
-                                            ? "Accessible"
-                                            : detail.amenities.wmata.accessible === "N"
-                                            ? "Not rated accessible"
-                                            : "Unknown"
-                                        }<br>
-                                        `;
-
-                                    }
 
 
                                     if (evidence.osm) {
@@ -553,20 +455,6 @@ function loadStops() {
                                             : "No"
                                         }<br>
 
-
-                                        ${
-                                            detail.amenities?.wmata &&
-                                            detail.amenities.wmata.shelter !==
-                                            (evidence.osm.osm_shelter === 1 ? "1" : "0")
-                                            ?
-                                            `
-                                            <br>
-                                            <b>Data note:</b><br>
-                                            WMATA inventory and public mapping sources differ on shelter status. A community review can help confirm current waiting conditions.<br>
-                                            `
-                                            :
-                                            ""
-                                        }
                                         `;
 
                                     }

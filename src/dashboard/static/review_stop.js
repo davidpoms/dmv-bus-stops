@@ -85,50 +85,6 @@ document.addEventListener(
                 ${data.lat.toFixed(5)},
                 ${data.lon.toFixed(5)}
 
-                ${
-                    data.wmata_evidence
-                    ?
-                    `
-                    <br><br>
-
-                    <strong>WMATA-reported stop amenities</strong>
-                    <br><br>
-
-                    Shelter:
-                    ${
-                        data.wmata_evidence.shelter === "1"
-                        ? "Yes"
-                        : "No"
-                    }
-
-                    <br>
-
-                    Bench:
-                    ${
-                        data.wmata_evidence.bench === "1"
-                        ? "Yes"
-                        : "No"
-                    }
-
-                    <br>
-
-                    Accessible:
-                    ${
-                        data.wmata_evidence.accessible === "Y"
-                        ? "Yes"
-                        : "No"
-                    }
-
-                    <br>
-
-                    Data match confidence:
-                    ${data.wmata_evidence.confidence}
-
-                    `
-                    :
-                    ""
-                }
-
                 <br><br>
 
                 <a
