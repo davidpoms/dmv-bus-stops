@@ -1,3 +1,14 @@
+"""QUARANTINED normalizer for unsafe legacy DDOT lifecycle records.
+
+Lifecycle and route labels are not shelter-presence evidence. The historical
+implementation remains below for auditability, but cannot execute.
+"""
+
+raise SystemExit(
+    "QUARANTINED LEGACY PATH: stop_ddot_shelter_evidence cannot populate "
+    "current normalized amenity evidence."
+)
+
 import sqlite3
 from pathlib import Path
 

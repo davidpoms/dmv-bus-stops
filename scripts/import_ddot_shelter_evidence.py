@@ -1,3 +1,14 @@
+"""QUARANTINED importer for unsafe legacy DDOT reconciliation output.
+
+The implementation remains below for auditability. Execution is disabled
+before files or the database are opened.
+"""
+
+raise SystemExit(
+    "QUARANTINED LEGACY PATH: importing DDOT route reconciliation is disabled. "
+    "Historical stop_ddot_shelter_evidence rows are retained for audit only."
+)
+
 import sqlite3
 import pandas as pd
 from datetime import datetime

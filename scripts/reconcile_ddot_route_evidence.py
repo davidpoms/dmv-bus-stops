@@ -1,3 +1,14 @@
+"""QUARANTINED legacy DDOT/GTFS reconciliation.
+
+Retained for audit history only. Its suffix match can attach DDOT records to
+unrelated jurisdictions and must never be executed.
+"""
+
+raise SystemExit(
+    "QUARANTINED LEGACY PATH: unsafe DDOT GTFS suffix reconciliation is disabled. "
+    "Use scripts/import_ddot_arcgis_amenities.py --dry-run."
+)
+
 import sqlite3
 import pandas as pd
 

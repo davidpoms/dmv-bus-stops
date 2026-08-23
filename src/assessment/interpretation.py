@@ -137,12 +137,7 @@ def summarize_stop_evidence(evidence):
             "records":
                 len(ddot),
 
-            "confirmed_active":
-                any(
-                    r.get("lifecycle_status")
-                    == "CONFIRMED_ACTIVE"
-                    for r in ddot
-                ),
+            "confirmed_active": False,
 
             "possible_new":
                 any(
@@ -231,95 +226,12 @@ def interpret_ddot_evidence(ddot_records):
             "lifecycle_status"
         )
 
-        has_inventory_match = (
-            status == "CONFIRMED_ACTIVE"
-            and record.get("ddot_id")
-            and str(record.get("ddot_id")).lower() != "nan"
+        evidence_class = "quarantined_legacy"
+        public_status = "Quarantined legacy DDOT reconciliation record"
+        finding = (
+            "This historical reconciliation record is retained for audit "
+            "only and is not used to determine current shelter status."
         )
-
-        has_api_only = (
-            status == "API_ONLY_ACTIVE_STOP"
-            or (
-                record.get("api_id")
-                and not has_inventory_match
-            )
-        )
-
-
-        if has_inventory_match:
-
-            evidence_class = "current_asset"
-
-            public_status = (
-                "Verified DDOT shelter asset"
-            )
-
-            finding = (
-                "DDOT shelter records identify a "
-                "shelter asset associated with this stop."
-            )
-
-
-        elif status == "POSSIBLE_NEW_DDOT_SHELTER":
-
-            evidence_class = "possible_asset"
-
-            public_status = (
-                "DDOT shelter record requires validation"
-            )
-
-            finding = (
-                "DDOT records suggest a possible "
-                "new shelter location requiring "
-                "additional validation."
-            )
-
-
-        elif status == "REMOVED_BUT_ROUTE_ACTIVE":
-
-            evidence_class = "historical_asset"
-
-            public_status = (
-                "Historical DDOT shelter record"
-            )
-
-            finding = (
-                "DDOT records previously associated "
-                "shelter infrastructure with this "
-                "location, but current installation "
-                "status is uncertain."
-            )
-
-
-        elif has_api_only:
-
-            evidence_class = "api_only"
-
-            public_status = (
-                "DDOT asset record requires validation"
-            )
-
-            finding = (
-                "DDOT asset records identify shelter "
-                "infrastructure associated with this "
-                "location, but a current inventory "
-                "match was not found."
-            )
-
-
-        else:
-
-            evidence_class = "unverified"
-
-            public_status = (
-                "DDOT record requires validation"
-            )
-
-            finding = (
-                "DDOT shelter-related evidence exists "
-                "for this location, but installation "
-                "status could not be confirmed."
-            )
 
 
         source_label = (
@@ -367,9 +279,8 @@ def interpret_ddot_evidence(ddot_records):
 
                 "details":
                     (
-                        "Matched DDOT asset record."
-                        if evidence_class == "current_asset"
-                        else None
+                        "Legacy route/lifecycle reconciliation; current "
+                        "amenity authority disabled."
                     )
             }
         )
