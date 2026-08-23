@@ -68,13 +68,17 @@ class ActiveReviewWorkflowTests(unittest.TestCase):
             INSERT INTO physical_stop_members VALUES (1,101),(2,102),(3,103);
             CREATE TABLE stop_routes (stop_id INTEGER, route_id INTEGER);
             INSERT INTO stop_routes VALUES (101,10),(102,10),(103,10);
+            CREATE TABLE routes (
+                id INTEGER PRIMARY KEY, route_id TEXT, route_name TEXT
+            );
+            INSERT INTO routes VALUES (10,'C61','Route C61');
             CREATE TABLE community_reviewers (
                 id INTEGER PRIMARY KEY, reviewer_key TEXT,
                 display_name TEXT, profile_created_at TEXT
             );
             INSERT INTO community_reviewers VALUES (1,'reviewer',NULL,NULL);
-            CREATE TABLE community_reviewer_routes (reviewer_id INTEGER, route_id INTEGER);
-            INSERT INTO community_reviewer_routes VALUES (1,10);
+            CREATE TABLE community_reviewer_routes (reviewer_id INTEGER, route_id TEXT);
+            INSERT INTO community_reviewer_routes VALUES (1,'C61');
             CREATE TABLE stop_review_assignments (
                 id INTEGER PRIMARY KEY, stop_id INTEGER, reviewer_id INTEGER,
                 scenario TEXT, status TEXT, completed_at TEXT

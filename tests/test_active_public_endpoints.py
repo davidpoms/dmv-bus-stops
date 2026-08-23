@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from scripts import generate_priority_levels
 from src.api import app as public_api
 
 
@@ -58,18 +59,30 @@ class ActivePublicEndpointTests(unittest.TestCase):
                 (3,'DC','Test',NULL,NULL,NULL),(4,'DC','Test',NULL,NULL,NULL),
                 (5,'DC','Test',NULL,NULL,NULL);
             CREATE TABLE stop_amenity_evidence (
-                physical_stop_id INTEGER, source TEXT,
-                amenity_type TEXT, present INTEGER
+                id INTEGER PRIMARY KEY, physical_stop_id INTEGER, source TEXT,
+                source_record_id TEXT, amenity_type TEXT, present INTEGER,
+                confidence TEXT, match_distance_m REAL, notes TEXT,
+                jurisdiction TEXT, value TEXT, raw_value TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
             INSERT INTO stop_amenity_evidence VALUES
-                (1,'DDOT_ARCGIS','shelter',1),
-                (4,'DDOT_ARCGIS','shelter',1),
-                (5,'DDOT_ARCGIS','bench',1);
+                (1,1,'DDOT','legacy-1','shelter',1,'low',1,'legacy',
+                 'DISTRICT_OF_COLUMBIA','yes','1','2026-01-01'),
+                (2,1,'DDOT_ARCGIS','arcgis-1','shelter',1,'high',1,'clean',
+                 'DISTRICT_OF_COLUMBIA','yes','1','2026-01-02'),
+                (3,2,'ALEXANDRIA','alex-1','bench',1,'high',1,'local',
+                 'ALEXANDRIA','yes','1','2026-01-01'),
+                (4,4,'DDOT_ARCGIS','arcgis-4','shelter',1,'high',1,'inactive',
+                 'DISTRICT_OF_COLUMBIA','yes','1','2026-01-01'),
+                (5,5,'DDOT_ARCGIS','arcgis-5','bench',1,'high',1,'missing',
+                 'DISTRICT_OF_COLUMBIA','yes','1','2026-01-01');
             CREATE TABLE stop_improvement_impact (
-                physical_stop_id INTEGER, priority_level TEXT
+                physical_stop_id INTEGER, opportunity_score REAL,
+                impact_level TEXT
             );
             INSERT INTO stop_improvement_impact VALUES
-                (1,'P1'),(2,'P2'),(3,'P3'),(4,'P1'),(5,'P1');
+                (1,50,'high'),(2,40,'medium'),(3,30,'low'),
+                (4,100,'very_high'),(5,90,'very_high');
             CREATE TABLE physical_stop_members (
                 physical_stop_id INTEGER, bus_stop_id INTEGER
             );
@@ -80,8 +93,8 @@ class ActivePublicEndpointTests(unittest.TestCase):
             CREATE TABLE stop_routes (stop_id INTEGER, route_id INTEGER);
             INSERT INTO stop_routes VALUES
                 (101,10),(102,10),(103,10),(104,10),(105,10);
-            CREATE TABLE routes (id INTEGER PRIMARY KEY, route_id INTEGER, route_name TEXT);
-            INSERT INTO routes VALUES (10,10,'Route A1');
+            CREATE TABLE routes (id INTEGER PRIMARY KEY, route_id TEXT, route_name TEXT);
+            INSERT INTO routes VALUES (10,'C61','Route C61');
             """
         )
         conn.commit()
@@ -108,10 +121,36 @@ class ActivePublicEndpointTests(unittest.TestCase):
         )
 
         routes = self.client.get("/routes").get_json()
+        self.assertEqual("C61", routes[0]["route_id"])
         self.assertEqual(3, routes[0]["stop_count"])
 
-        priorities = self.client.get("/priority-summary").get_json()
-        self.assertEqual({"P1": 1, "P2": 1, "P3": 1, "monitor": 0}, priorities)
+    def test_priority_summary_is_safe_before_and_populated_after_rebuild(self):
+        response = self.client.get("/priority-summary")
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(
+            {"P1": 0, "P2": 0, "P3": 0, "monitor": 0},
+            response.get_json(),
+        )
+
+        generate_priority_levels.generate_priority_levels(self.db)
+        self.assertEqual(
+            {"P1": 0, "P2": 0, "P3": 1, "monitor": 2},
+            self.client.get("/priority-summary").get_json(),
+        )
+
+    def test_current_amenity_boundary_quarantines_legacy_ddot(self):
+        evidence = public_api.get_current_amenity_evidence(1)
+        self.assertEqual({"DDOT_ARCGIS"}, {row[1] for row in evidence})
+
+        supported = public_api.get_current_amenity_evidence(2)
+        self.assertEqual({"ALEXANDRIA"}, {row[1] for row in supported})
+
+        conn = sqlite3.connect(self.db)
+        legacy_rows = conn.execute(
+            "SELECT COUNT(*) FROM stop_amenity_evidence WHERE source='DDOT'"
+        ).fetchone()[0]
+        conn.close()
+        self.assertEqual(1, legacy_rows)
 
     def test_public_amenity_counts_use_local_and_community_evidence(self):
         summary = self.client.get("/api/evidence-summary").get_json()
