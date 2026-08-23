@@ -95,6 +95,12 @@ def create_review_queue():
 
         FROM improvement_opportunities io
 
+        JOIN stop_gtfs_status sgs
+
+            ON sgs.physical_stop_id = io.physical_stop_id
+
+           AND sgs.current_gtfs = 1
+
         JOIN physical_stops ps
 
             ON io.physical_stop_id = ps.id

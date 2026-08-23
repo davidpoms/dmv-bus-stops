@@ -73,9 +73,10 @@ def stop_is_active(stop_id):
 
     row = conn.execute(
         """
-        SELECT id
-        FROM physical_stops
-        WHERE id=?
+        SELECT physical_stop_id
+        FROM stop_gtfs_status
+        WHERE physical_stop_id=?
+          AND current_gtfs=1
         """,
         (stop_id,)
     ).fetchone()
@@ -96,6 +97,11 @@ def assign_stop(
 
     conn = sqlite3.connect(DB)
     cur = conn.cursor()
+
+    # Previous assignments and proxy evidence never establish active status.
+    if stop_id and not stop_is_active(stop_id):
+        conn.close()
+        return None
 
     # Return existing assignment if reviewer already has this stop assigned
 
@@ -134,20 +140,19 @@ def assign_stop(
 
     if stop_id:
 
-        if not stop_is_active(stop_id):
-            conn.close()
-            return None
-
-
         row = cur.execute(
             """
             SELECT
-                id,
-                physical_stop_id
+                rq.id,
+                rq.physical_stop_id
 
-            FROM review_queue
+            FROM review_queue rq
 
-            WHERE physical_stop_id=?
+            JOIN stop_gtfs_status sgs
+                ON sgs.physical_stop_id = rq.physical_stop_id
+               AND sgs.current_gtfs = 1
+
+            WHERE rq.physical_stop_id=?
 
             LIMIT 1
             """,
@@ -171,6 +176,10 @@ def assign_stop(
                 rq.physical_stop_id
 
             FROM review_queue rq
+
+            JOIN stop_gtfs_status sgs
+                ON sgs.physical_stop_id = rq.physical_stop_id
+               AND sgs.current_gtfs = 1
 
             JOIN physical_stop_members psm
                 ON psm.physical_stop_id = rq.physical_stop_id
@@ -237,6 +246,10 @@ def assign_stop(
 
             FROM review_queue rq
 
+            JOIN stop_gtfs_status sgs
+                ON sgs.physical_stop_id = rq.physical_stop_id
+               AND sgs.current_gtfs = 1
+
 
             JOIN physical_stops ps
 
@@ -300,6 +313,10 @@ def assign_stop(
 
 
             FROM review_queue rq
+
+            JOIN stop_gtfs_status sgs
+                ON sgs.physical_stop_id = rq.physical_stop_id
+               AND sgs.current_gtfs = 1
 
 
             LEFT JOIN opportunity_assessments oa

@@ -143,6 +143,29 @@ def query_db(sql, params=()):
     return rows
 
 
+def stop_is_current(stop_id):
+    rows = query_db(
+        """
+        SELECT physical_stop_id
+        FROM stop_gtfs_status
+        WHERE physical_stop_id=?
+          AND current_gtfs=1
+        """,
+        (stop_id,)
+    )
+    return bool(rows)
+
+
+def inactive_stop_response(stop_id):
+    return jsonify(
+        {
+            "error": "Stop is not current and cannot receive active review work",
+            "code": "stop_not_current",
+            "stop_id": stop_id,
+        }
+    ), 409
+
+
 
 
 
@@ -527,6 +550,10 @@ def validation_queue():
             )
 
         FROM physical_stops ps
+
+        JOIN stop_gtfs_status sgs
+            ON sgs.physical_stop_id = ps.id
+           AND sgs.current_gtfs = 1
 
         LEFT JOIN improvement_opportunities io
             ON ps.id = io.physical_stop_id
@@ -1416,6 +1443,19 @@ def review_start():
         )
     )
 
+    stop_id_requested = request.args.get("stop_id")
+
+    requested_stop_id = None
+
+    if stop_id_requested:
+        try:
+            requested_stop_id = int(stop_id_requested)
+        except (TypeError, ValueError):
+            return {"error": "valid stop_id required"}, 400
+
+        if not stop_is_current(requested_stop_id):
+            return inactive_stop_response(requested_stop_id)
+
     reviewer_key = session.get(
         "reviewer_key"
     )
@@ -1431,10 +1471,6 @@ def review_start():
     session["reviewer_key"] = reviewer_key
 
 
-    stop_id_requested = request.args.get(
-        "stop_id"
-    )
-
     latitude = request.args.get("lat")
     longitude = request.args.get("lon")
 
@@ -1444,7 +1480,7 @@ def review_start():
         result = assign_stop(
             reviewer_id,
             scenario,
-            stop_id=int(stop_id_requested)
+            stop_id=requested_stop_id
         )
 
     else:
@@ -1475,6 +1511,9 @@ def review_start():
 def review_page(stop_id):
 
     from src.review.render_survey import render_survey
+
+    if not stop_is_current(stop_id):
+        return inactive_stop_response(stop_id)
 
     stop = query_db(
         """
@@ -2161,6 +2200,9 @@ def review_stop_info(stop_id):
 @app.route("/review/<int:stop_id>/assignment")
 def review_assignment(stop_id):
 
+    if not stop_is_current(stop_id):
+        return inactive_stop_response(stop_id)
+
     reviewer_key = session.get(
         "reviewer_key"
     )
@@ -2508,6 +2550,12 @@ def submit_review():
         return {
             "error": "valid stop_id required"
         }, 400
+
+    # Historical assignments remain stored, but cannot be completed as new
+    # active work after the stop becomes non-current.
+    if not stop_is_current(stop_id):
+        return inactive_stop_response(stop_id)
+
     reviewer_key = session.get(
         "reviewer_key"
     )
@@ -3094,6 +3142,10 @@ def review_queue():
 
         JOIN physical_stops ps
             ON ps.id = rq.physical_stop_id
+
+        JOIN stop_gtfs_status sgs
+            ON sgs.physical_stop_id = rq.physical_stop_id
+           AND sgs.current_gtfs = 1
 
         WHERE rq.review_status = 'pending'
 
