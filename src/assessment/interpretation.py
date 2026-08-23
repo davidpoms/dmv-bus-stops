@@ -255,9 +255,8 @@ def interpret_ddot_evidence(ddot_records):
             )
 
             finding = (
-                "DDOT shelter inventory records "
-                "identify a shelter asset associated "
-                "with this stop."
+                "DDOT shelter records identify a "
+                "shelter asset associated with this stop."
             )
 
 

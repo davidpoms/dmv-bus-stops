@@ -54,7 +54,7 @@ async function loadStopProfile() {
                 const name = routeNames[i] || "";
 
                 if (id && name) {
-                    combined.push(`${id} â€” ${name}`);
+                    combined.push(`${id} &mdash; ${name}`);
                 } else if (id) {
                     combined.push(id);
                 } else if (name) {
@@ -94,6 +94,241 @@ async function loadStopProfile() {
             Array.isArray(communityData)
                 ? communityData
                 : communityData.reviews || [];
+
+
+        const recommendations =
+            Array.isArray(stop.recommendations)
+                ? stop.recommendations
+                : [];
+
+        const opportunityRecommendations =
+            Array.isArray(stop.opportunity?.recommendations)
+                ? stop.opportunity.recommendations
+                : [];
+
+
+        function recommendationLabel(type) {
+
+            const labels = {
+
+                bench_presence_review:
+                    "Bench presence needs verification",
+
+                shelter_presence_review:
+                    "Shelter presence needs verification",
+
+                bench_installation_candidate:
+                    "Bench installation candidate",
+
+                shelter_installation_candidate:
+                    "Shelter installation candidate",
+
+                seating_review:
+                    "Seating information needs verification",
+
+                seating_review_needed:
+                    "Seating information needs verification",
+
+                comfort_upgrade_candidate:
+                    "Rider comfort improvement opportunity",
+
+                bench_feasibility_review:
+                    "Bench installation feasibility review",
+
+                accessibility_review:
+                    "Accessibility information needs verification",
+
+                general_amenity_review:
+                    "Amenity information needs verification"
+
+            };
+
+            return labels[type] || "Improvement review";
+        }
+
+
+        function recommendationPriority(priority) {
+
+            if (!priority) {
+                return "Not specified";
+            }
+
+            return String(priority)
+                .replace(/_/g, " ")
+                .replace(/\b\w/g, char => char.toUpperCase());
+        }
+
+
+        function recommendationConfidence(confidence) {
+
+            if (!confidence) {
+                return "Not specified";
+            }
+
+            return String(confidence)
+                .replace(/_/g, " ")
+                .replace(/\b\w/g, char => char.toUpperCase());
+        }
+
+
+        function opportunityLabel(type) {
+
+            const labels = {
+
+                priority_review:
+                    "Priority review",
+
+                ridership_based_improvement_review:
+                    "Ridership-based improvement review"
+
+            };
+
+            return labels[type] || "Additional review";
+        }
+
+
+        const assessmentHtml =
+            opportunityRecommendations.length
+                ? `
+
+                    <div class="card assessment-card">
+
+                        <strong>
+                            Current assessment
+                        </strong>
+
+                        <p>
+                            This stop has been identified for additional
+                            verification or follow-up based on available
+                            transit and rider-exposure evidence.
+                        </p>
+
+                        <div class="assessment-list">
+
+                            ${opportunityRecommendations.map(
+                                recommendation => `
+
+                                    <div class="assessment-item">
+
+                                        <strong>
+                                            ${opportunityLabel(
+                                                recommendation
+                                            )}
+                                        </strong>
+
+                                    </div>
+
+                                `
+                            ).join("")}
+
+                        </div>
+
+                        <p class="assessment-note">
+                            This assessment does not by itself indicate
+                            that a physical improvement should be installed.
+                            Specific improvement recommendations require
+                            additional evidence.
+                        </p>
+
+                    </div>
+
+                `
+                : "";
+
+
+        const recommendationHtml =
+            recommendations.length
+                ? recommendations.map(rec => `
+
+                    <div class="recommendation-item">
+
+                        <div class="recommendation-header">
+
+                            <strong>
+                                ${recommendationLabel(rec.type)}
+                            </strong>
+
+                        </div>
+
+                        <p class="recommendation-description">
+                            The available evidence supports consideration
+                            of this potential improvement or follow-up action.
+                            Community evidence and local conditions should
+                            still be considered before implementation.
+                        </p>
+
+                        <div class="recommendation-meta">
+
+                            <span>
+                                Priority:
+                                <strong>
+                                    ${recommendationPriority(rec.priority)}
+                                </strong>
+                            </span>
+
+                            <span>
+                                Confidence:
+                                <strong>
+                                    ${recommendationConfidence(rec.confidence)}
+                                </strong>
+                            </span>
+
+                        </div>
+
+                        ${
+                            Array.isArray(rec.reasons) &&
+                            rec.reasons.length
+                                ? `
+
+                                    <div class="recommendation-reasons-title">
+                                        Why this stop was flagged
+                                    </div>
+
+                                    <ul class="recommendation-reasons">
+
+                                        ${rec.reasons.map(reason => `
+                                            <li>
+                                                ${reason}
+                                            </li>
+                                        `).join("")}
+
+                                    </ul>
+
+                                `
+                                : ""
+                        }
+
+                        <div class="recommendation-action">
+
+                            <a
+                                href="/review/${stopId}?mode=opportunity"
+                                class="recommendation-review-button"
+                            >
+                                Review this stop
+                            </a>
+
+                        </div>
+
+                    </div>
+
+                `).join("")
+
+                : `
+
+                    <div class="recommendation-empty">
+
+                        No specific physical improvement recommendation
+                        is currently generated for this stop.
+
+                        <div class="recommendation-action-note">
+                            The current assessment may still indicate that
+                            additional verification is useful.
+                        </div>
+
+                    </div>
+
+                `;
+
 
         function amenityValue(value) {
             if (
@@ -211,20 +446,18 @@ const localEvidenceHtml =
 
             <br>
 
-            Confidence:
-            ${item.confidence}
-
-            <br>
-
-            Match distance:
             ${
-                item.match_distance_m !== null &&
-                item.match_distance_m !== undefined
-                ? item.match_distance_m.toFixed(1) + " m"
-                : "Unknown"
-            }
+                item.source === "DDOT"
+                ? `
+                    Source:
+                    <strong>
+                        DDOT shelter asset record
+                    </strong>
 
-            <br>
+                    <br>
+                `
+                : ""
+            }
 
             Source record:
             ${item.source_record || "Not recorded"}
@@ -341,29 +574,38 @@ const latestCommunity =
         const ddotEvidenceHtml =
             stop.ddot_interpretation &&
             stop.ddot_interpretation.length
-                ? stop.ddot_interpretation.map(item => `
-                    <div>
+                ? stop.ddot_interpretation.map(item => {
+
+                    const ddotSourceLabel =
+                        item.source_type === "api"
+                            ? "DDOT API shelter asset record"
+                            : item.source_type === "procurement"
+                                ? "DDOT shelter procurement inventory"
+                                : item.source || "DDOT evidence record";
+
+                    return `
+                    <div class="ddot-evidence-item">
 
                         <strong>
-                            ${item.public_status || item.source}
+                            ${ddotSourceLabel}
                         </strong>
 
-                        <br>
+                        <br><br>
 
-                        ${item.finding}
+                        ${item.finding || "Finding not recorded."}
 
-                        <br>
+                        <br><br>
 
                         Confidence:
 
                         <strong>
-                            ${item.confidence}
+                            ${item.confidence || "Unknown"}
                         </strong>
 
                         ${
                             item.source_record
                                 ? `
-                                    <br>
+                                    <br><br>
                                     Source record:
                                     ${item.source_record}
                                 `
@@ -374,7 +616,7 @@ const latestCommunity =
                             item.routes &&
                             item.routes.length
                                 ? `
-                                    <br>
+                                    <br><br>
                                     Routes:
                                     ${item.routes.join(", ")}
                                 `
@@ -382,10 +624,9 @@ const latestCommunity =
                         }
 
                     </div>
-
-                    <br>
-                `).join("")
-                : "No external evidence available.";
+                    `;
+                }).join("")
+                : "No DDOT evidence available.";
 
         details.innerHTML = `
 
@@ -511,6 +752,29 @@ const latestCommunity =
             </div>
 
 
+            ${assessmentHtml}
+
+            <div class="card recommendation-card">
+
+                <strong>
+                    Potential improvement recommendations
+                </strong>
+
+                <p>
+                    These recommendations are generated only when the
+                    available evidence supports consideration of a more
+                    specific improvement or follow-up action.
+                </p>
+
+                <div class="recommendation-list">
+
+                    ${recommendationHtml}
+
+                </div>
+
+            </div>
+
+
             <div class="card">
                 <strong>
                     Community-verified amenity status
@@ -623,7 +887,7 @@ const latestCommunity =
 
                 <br><br>
 
-                <a
+                                <a
                     class="stop-review-button"
                     href="/review/${stopId}?mode=opportunity">
 

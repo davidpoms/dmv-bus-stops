@@ -18,6 +18,21 @@ Community Bus Stop Review
 </h1>
 
 
+<div style="margin: 12px 0 20px 0;">
+
+<a
+href="#"
+id="viewStopDetailsButton"
+class="dashboard-button"
+style="display: inline-block; text-decoration: none;">
+
+View stop details
+
+</a>
+
+</div>
+
+
 <div id="stopInfo">
 Loading stop information...
 </div>
@@ -175,6 +190,25 @@ async function(){
 </script>
 
 
+<script>
+
+const reviewStopId =
+window.location.pathname.split("/").pop();
+
+
+const viewStopDetailsButton =
+document.getElementById(
+    "viewStopDetailsButton"
+);
+
+
+viewStopDetailsButton.href =
+    `/stops/${reviewStopId}`;
+
+
+</script>
+
+
 
 <script src="/static/review_info_loader.js"></script>
 <script src="/static/review_survey.js"></script>
@@ -223,6 +257,12 @@ async function loadAssignment(){
     .getElementById("assignment_id")
     .value =
         data.assignment_id;
+
+
+    document
+    .getElementById("review_action")
+    .value =
+        data.review_action || "new";
 
 
 }
@@ -389,19 +429,19 @@ This review
 
 
 <p>
-This stop is served by routes representing approximately
+This stop serves approximately
 <strong>
 ${
-    result.community_impact.daily_route_exposure
+    result.community_impact.average_weekday_boardings
     ?
     Math.round(
-        result.community_impact.daily_route_exposure
+        result.community_impact.average_weekday_boardings
     ).toLocaleString()
     :
     "unknown"
 }
 </strong>
-weekday boardings.
+average weekday boardings.
 </p>
 
 

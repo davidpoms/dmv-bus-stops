@@ -31,9 +31,6 @@ DATABASE_PATH = (
 )
 
 
-WEEKDAY_DIVISOR = 31
-
-
 def setup_table(cursor):
 
     cursor.execute("""
@@ -116,13 +113,17 @@ def create_assessments():
         cursor.execute(
             """
             SELECT DISTINCT
-                sr.route_id
+                r.route_id
 
             FROM physical_stop_members pm
 
             JOIN stop_routes sr
 
                 ON sr.stop_id = pm.bus_stop_id
+
+            JOIN routes r
+
+                ON r.id = sr.route_id
 
             WHERE pm.physical_stop_id = ?;
             """,
@@ -161,6 +162,11 @@ def create_assessments():
                 WHERE route_id IN
                 (
                     {placeholders}
+                )
+
+                AND period = (
+                    SELECT MAX(period)
+                    FROM ridership_snapshots
                 );
                 """,
                 routes
@@ -171,7 +177,7 @@ def create_assessments():
 
 
             values = [
-                row[1] / WEEKDAY_DIVISOR
+                row[1]
                 for row in ridership
                 if row[1]
             ]

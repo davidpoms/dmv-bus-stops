@@ -24,6 +24,8 @@ from src.assessment.interpretation import (
     interpret_review_priority,
 )
 
+from src.review.consensus import calculate_stop_consensus
+
 
 app = Flask(
     __name__,
@@ -313,7 +315,7 @@ def create_observation():
         )
         
 VALUES
-        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 
         """,
         (
@@ -1000,30 +1002,110 @@ GROUP BY ps.id
 
     ridership = query_db(
         '''
-        SELECT
-            SUM(rs.weekday_boardings) AS weekday_total,
-            COUNT(DISTINCT r.route_id) AS route_count,
-            GROUP_CONCAT(DISTINCT r.route_id) AS routes
+        WITH physical_stop_routes AS (
 
-        FROM physical_stop_members psm
+            SELECT DISTINCT
+                psm.physical_stop_id,
+                r.route_id
 
-        JOIN stop_routes sr
-            ON psm.bus_stop_id = sr.stop_id
+            FROM physical_stop_members psm
 
-        JOIN routes r
-            ON sr.route_id = r.id
+            JOIN stop_routes sr
+                ON psm.bus_stop_id = sr.stop_id
 
-        JOIN ridership_snapshots rs
-            ON r.route_id = rs.route_id
+            JOIN routes r
+                ON sr.route_id = r.id
 
-        WHERE psm.physical_stop_id = ?
+            WHERE psm.physical_stop_id = ?
 
-        AND rs.period = (
-            SELECT MAX(period)
+        ),
+
+        latest_ridership AS (
+
+            SELECT
+                route_id,
+                weekday_boardings,
+                period
+
             FROM ridership_snapshots
+
+            WHERE period = (
+                SELECT MAX(period)
+                FROM ridership_snapshots
+            )
+
         )
 
-        GROUP BY psm.physical_stop_id
+        SELECT
+            SUM(lr.weekday_boardings) AS weekday_total,
+
+            COUNT(DISTINCT psr.route_id) AS route_count,
+
+            GROUP_CONCAT(DISTINCT psr.route_id) AS routes,
+
+            (
+                SELECT COUNT(*)
+
+                FROM (
+                    SELECT 1 AS day
+                    UNION ALL SELECT 2
+                    UNION ALL SELECT 3
+                    UNION ALL SELECT 4
+                    UNION ALL SELECT 5
+                    UNION ALL SELECT 6
+                    UNION ALL SELECT 7
+                    UNION ALL SELECT 8
+                    UNION ALL SELECT 9
+                    UNION ALL SELECT 10
+                    UNION ALL SELECT 11
+                    UNION ALL SELECT 12
+                    UNION ALL SELECT 13
+                    UNION ALL SELECT 14
+                    UNION ALL SELECT 15
+                    UNION ALL SELECT 16
+                    UNION ALL SELECT 17
+                    UNION ALL SELECT 18
+                    UNION ALL SELECT 19
+                    UNION ALL SELECT 20
+                    UNION ALL SELECT 21
+                    UNION ALL SELECT 22
+                    UNION ALL SELECT 23
+                    UNION ALL SELECT 24
+                    UNION ALL SELECT 25
+                    UNION ALL SELECT 26
+                    UNION ALL SELECT 27
+                    UNION ALL SELECT 28
+                    UNION ALL SELECT 29
+                    UNION ALL SELECT 30
+                    UNION ALL SELECT 31
+                ) days
+
+                WHERE days.day <= CAST(
+                    strftime(
+                        '%d',
+                        date(
+                            lr.period,
+                            'start of month',
+                            '+1 month',
+                            '-1 day'
+                        )
+                    ) AS INTEGER
+                )
+
+                AND strftime(
+                    '%w',
+                    date(
+                        lr.period,
+                        'start of month',
+                        '+' || (days.day - 1) || ' days'
+                    )
+                ) BETWEEN '1' AND '5'
+            ) AS weekdays_in_period
+
+        FROM physical_stop_routes psr
+
+        JOIN latest_ridership lr
+            ON psr.route_id = lr.route_id
         ''',
         (stop_id,)
     )
@@ -1071,8 +1153,12 @@ GROUP BY ps.id
                 else 0,
 
             "average_weekday_boardings":
-                round(ridership[0][0] / 23)
-                if ridership[0][0]
+                round(
+                    ridership[0][0]
+                    /
+                    ridership[0][3]
+                )
+                if ridership[0][0] and ridership[0][3]
                 else 0,
 
             "route_count":
@@ -1111,63 +1197,6 @@ GROUP BY ps.id
         f"&heading={heading}"
         "&pitch=0"
         "&fov=90"
-    )
-
-
-    ridership = query_db(
-        '''
-        SELECT
-            SUM(rs.weekday_boardings) AS weekday_total,
-            COUNT(DISTINCT r.route_id) AS route_count,
-            GROUP_CONCAT(DISTINCT r.route_id) AS routes
-
-        FROM physical_stop_members psm
-
-        JOIN stop_routes sr
-            ON psm.bus_stop_id = sr.stop_id
-
-        JOIN routes r
-            ON sr.route_id = r.id
-
-        JOIN ridership_snapshots rs
-            ON r.route_id = rs.route_id
-
-        WHERE psm.physical_stop_id = ?
-
-        AND rs.period = (
-            SELECT MAX(period)
-            FROM ridership_snapshots
-        )
-
-        GROUP BY psm.physical_stop_id
-        ''',
-        (stop_id,)
-    )
-
-
-    ridership_exposure = (
-        {
-            "weekday_boardings_total":
-                round(ridership[0][0])
-                if ridership[0][0]
-                else 0,
-
-            "average_weekday_boardings":
-                round(ridership[0][0] / 23)
-                if ridership[0][0]
-                else 0,
-
-            "route_count":
-                ridership[0][1]
-                or 0,
-
-            "routes":
-                ridership[0][2].split(",")
-                if ridership[0][2]
-                else []
-        }
-        if ridership
-        else None
     )
 
 
@@ -1326,6 +1355,9 @@ GROUP BY ps.id
 
             "community_review":
                 community_review,
+
+            "recommendations":
+                recommendation_payload,
 
             "impact_summary":
                 {
@@ -1824,6 +1856,81 @@ def review_stop_info(stop_id):
     )
 
 
+    community_consensus = query_db(
+        """
+        SELECT
+            has_shelter,
+            has_bench,
+            ada_accessible,
+            confidence,
+            seating_type_consensus,
+            rider_comfort_consensus,
+            hostile_design_consensus,
+            bench_feasible
+        FROM stop_consensus
+        WHERE stop_id=?
+        """,
+        (stop_id,)
+    )
+
+
+    community_consensus_payload = None
+
+    if community_consensus:
+
+        consensus = community_consensus[0]
+
+        required_reviews = 3
+        completed_reviews = len(community_reviews)
+
+        confidence = consensus[3]
+
+        if completed_reviews < required_reviews:
+            consensus_status = "awaiting_consensus"
+
+        elif confidence is not None and confidence >= 0.75:
+            consensus_status = "consensus_reached"
+
+        else:
+            consensus_status = "needs_more_agreement"
+
+        community_consensus_payload = {
+
+            "has_shelter":
+                consensus[0],
+
+            "has_bench":
+                consensus[1],
+
+            "ada_accessible":
+                consensus[2],
+
+            "confidence":
+                confidence,
+
+            "seating_type":
+                consensus[4],
+
+            "rider_comfort":
+                consensus[5],
+
+            "hostile_design":
+                consensus[6],
+
+            "bench_feasible":
+                consensus[7],
+
+            "review_count":
+                completed_reviews,
+
+            "required_reviews":
+                required_reviews,
+
+            "status":
+                consensus_status
+        }
+
+
     amenity_evidence = query_db(
         """
         SELECT
@@ -1844,6 +1951,61 @@ def review_stop_info(stop_id):
         """,
         (stop_id,)
     )
+
+
+    improvement_recommendations = query_db(
+        """
+        SELECT
+            id,
+            recommendation_type,
+            priority,
+            reasons,
+            confidence,
+            evidence,
+            created_at
+        FROM improvement_recommendations
+        WHERE physical_stop_id=?
+        ORDER BY
+            CASE priority
+                WHEN 'high' THEN 1
+                WHEN 'medium' THEN 2
+                WHEN 'low' THEN 3
+                ELSE 4
+            END,
+            id DESC
+        """,
+        (stop_id,)
+    )
+
+
+    improvement_recommendations_payload = [
+        {
+            "id": recommendation[0],
+
+            "type":
+                recommendation[1],
+
+            "priority":
+                recommendation[2],
+
+            "reasons":
+                json.loads(recommendation[3])
+                if recommendation[3]
+                else [],
+
+            "confidence":
+                recommendation[4],
+
+            "evidence":
+                json.loads(recommendation[5])
+                if recommendation[5]
+                else {},
+
+            "created_at":
+                recommendation[6]
+        }
+        for recommendation in improvement_recommendations
+    ]
 
 
     amenity_evidence_payload = [
@@ -1928,6 +2090,10 @@ def review_stop_info(stop_id):
                 amenity_evidence_payload,
 
 
+            "recommendations":
+                improvement_recommendations_payload,
+
+
             "community_reviews": {
                 "review_count": len(community_reviews),
 
@@ -1942,6 +2108,10 @@ def review_stop_info(stop_id):
                     for review in community_reviews
                 ]
             },
+
+
+            "community_consensus":
+                community_consensus_payload,
 
 
             "ridership_exposure":
@@ -2024,6 +2194,25 @@ def review_assignment(stop_id):
                 assignment_id,
             )
         )
+
+        if assignment and assignment[0][2] != stop_id:
+
+            return jsonify(
+                {
+                    "error":
+                        "Assignment does not belong to requested stop"
+                }
+            ), 400
+
+
+        if assignment and assignment[0][1] != reviewer_id:
+
+            return jsonify(
+                {
+                    "error":
+                        "Assignment does not belong to current reviewer"
+                }
+            ), 403
 
     else:
 
@@ -2112,16 +2301,51 @@ def review_assignment(stop_id):
         ), 404
 
 
+    assignment_reviewer_id = assignment[0][1]
+
+    existing_review = query_db(
+        """
+        SELECT id
+        FROM stop_observations
+        WHERE physical_stop_id=?
+        AND reviewer_id=?
+        AND source='community_review'
+        LIMIT 1
+        """,
+        (
+            assignment[0][2],
+            assignment_reviewer_id
+        )
+    )
+
+
+    print(
+        "ASSIGNMENT DEBUG:",
+        "DB=", DATABASE_PATH,
+        "request_stop_id=", stop_id,
+        "session_reviewer_id=", reviewer_id,
+        "assignment_reviewer_id=", assignment_reviewer_id,
+        "assignment_id=", assignment_id,
+        "assignment_row=", assignment[0],
+        "existing_review=", existing_review
+    )
+
+
     return jsonify(
         {
             "assignment_id":
                 assignment[0][0],
 
             "reviewer_id":
-                assignment[0][1],
+                assignment_reviewer_id,
 
             "stop_id":
-                assignment[0][2]
+                assignment[0][2],
+
+            "review_action":
+                "update"
+                if existing_review
+                else "new"
         }
     )
 
@@ -2180,12 +2404,21 @@ def submit_review():
     )
 
 
-    if isinstance(data.get("seating_type"), list):
-        data["seating_type"] = ",".join(
-            data["seating_type"]
-        )
+    # Preserve the original multi-select seating values before
+    # converting them to the storage representation used by bench_type.
+    seating_values = data.get("seating_type", [])
 
+    if isinstance(seating_values, str):
+        seating_values = [seating_values]
 
+    if not isinstance(seating_values, list):
+        seating_values = []
+
+    seating_values = [
+        str(value).strip()
+        for value in seating_values
+        if str(value).strip()
+    ]
 
     data["shelter_type"] = (
         data.get("shelter_type")
@@ -2195,9 +2428,46 @@ def submit_review():
 
     data["bench_type"] = (
         data.get("bench_type")
-        or data.get("seating_type")
-        or ""
+        or ",".join(seating_values)
     )
+
+    # Normalize seating selections into a conservative bench status.
+    #
+    # A bench is present only when an actual bench seating type was
+    # selected. Individual seats, leaning support, and no seating are
+    # explicitly not benches. "Other" and "unknown" cannot establish
+    # whether a bench is present.
+    bench_seating_types = {
+        "full_bench",
+        "shelter_bench",
+        "non_shelter_bench",
+    }
+
+    no_bench_types = {
+        "individual_seats",
+        "leaning_support",
+        "none",
+    }
+
+    unknown_types = {
+        "other",
+        "unknown",
+    }
+
+    if any(value in bench_seating_types for value in seating_values):
+        data["bench_present"] = "yes"
+
+    elif any(value in no_bench_types for value in seating_values):
+        data["bench_present"] = "no"
+
+    elif any(value in unknown_types for value in seating_values):
+        data["bench_present"] = "unknown"
+
+    elif data.get("bench_present") in ("yes", "no", "unknown"):
+        data["bench_present"] = data.get("bench_present")
+
+    else:
+        data["bench_present"] = None
 
     data["bench_condition"] = (
         data.get("bench_condition")
@@ -2232,7 +2502,12 @@ def submit_review():
     stop_id = data.get("stop_id")
     assignment_id = data.get("assignment_id")
 
-
+    try:
+        stop_id = int(stop_id)
+    except (TypeError, ValueError):
+        return {
+            "error": "valid stop_id required"
+        }, 400
     reviewer_key = session.get(
         "reviewer_key"
     )
@@ -2274,6 +2549,60 @@ def submit_review():
         }, 400
 
 
+    assignment = query_db(
+        """
+        SELECT
+            id,
+            reviewer_id,
+            stop_id,
+            status
+        FROM stop_review_assignments
+        WHERE id=?
+        LIMIT 1
+        """,
+        (
+            assignment_id,
+        )
+    )
+
+
+    if not assignment:
+
+        return {
+            "error":
+                "Assignment not found"
+        }, 404
+
+
+    assignment_reviewer_id = assignment[0][1]
+    assignment_stop_id = assignment[0][2]
+    assignment_status = assignment[0][3]
+
+
+    if assignment_stop_id != stop_id:
+
+        return {
+            "error":
+                "Assignment does not belong to submitted stop"
+        }, 400
+
+
+    if assignment_reviewer_id != reviewer_id:
+
+        return {
+            "error":
+                "Assignment does not belong to current reviewer"
+        }, 403
+
+
+    if assignment_status == "completed":
+
+        return {
+            "error":
+                "Review already submitted"
+        }, 409
+
+
     existing_review = query_db(
         """
         SELECT id
@@ -2284,10 +2613,13 @@ def submit_review():
         LIMIT 1
         """,
         (
-            stop_id,
-            reviewer_id
+            assignment_stop_id,
+            assignment_reviewer_id
         )
     )
+
+
+    reviewer_id = assignment_reviewer_id
 
 
     review_action = data.get(
@@ -2302,41 +2634,66 @@ def submit_review():
             """
             UPDATE stop_observations
             SET
+                observer=?,
                 shelter_present=?,
                 bench_present=?,
                 trash_present=?,
                 bench_feasible=?,
+                concrete_pad_needed=?,
                 ada_clearance_possible=?,
+                bench_type=?,
+                bench_condition=?,
+                shelter_type=?,
+                rider_comfort_category=?,
+                accessibility_status=?,
+                hostile_design=?,
                 notes=?,
-            streetview_imagery_month=?,
+                confidence=?,
+                review_mode=?,
+                reviewer_relationship=?,
+                rider_activity=?,
+                usage_times=?,
+                property_owner_outreach=?,
+                steward_email=?,
+                steward_candidate=?,
+                streetview_imagery_month=?,
                 observed_at=CURRENT_TIMESTAMP
             WHERE id=?
             """,
             (
+                data.get("observer", ""),
                 data.get("shelter_present"),
                 data.get("bench_present"),
                 data.get("trash_present"),
                 data.get("bench_feasible"),
+                data.get("concrete_pad_needed"),
                 data.get("ada_clearance_possible"),
+                data.get("bench_type", ""),
+                data.get("bench_condition", ""),
+                data.get("shelter_type", ""),
+                data.get("rider_comfort_category", ""),
+                data.get("accessibility_status"),
+                data.get("hostile_design"),
                 data.get("notes"),
-            data.get("streetview_imagery_month"),
+                data.get("reviewer_confidence", "unknown"),
+                data.get("review_mode"),
+                data.get("reviewer_relationship"),
+                data.get("rider_activity"),
+                data.get("usage_times"),
+                data.get("property_owner_outreach", ""),
+                data.get("steward_email"),
+                data.get("steward_candidate", 0),
+                data.get("streetview_imagery_month"),
                 existing_review[0][0]
             )
         )
 
 
-        return {
-            "success": True,
-            "message": "Review updated",
-            "stop_id": stop_id
-        }
+    if not (existing_review and review_action == "update"):
 
-
-
-
-    query_db(
-        """
-        INSERT INTO stop_observations
+        query_db(
+            """
+            INSERT INTO stop_observations
         (
             physical_stop_id,
             observer,
@@ -2350,6 +2707,7 @@ def submit_review():
             shelter_type,
             rider_comfort_category,
             accessibility_status,
+            hostile_design,
             notes,
             reviewer_id,
             confidence,
@@ -2366,22 +2724,23 @@ def submit_review():
         )
 
         VALUES
-        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 
         """,
         (
             stop_id,
             data.get("observer", ""),
             data.get("shelter_present"),
-            "yes" if data.get("bench_type") else data.get("bench_present"),
+            data.get("bench_present"),
             data.get("trash_present"),
             data.get("bench_feasible"),
-            data.get("accessibility_status"),
+            data.get("ada_clearance_possible"),
             data.get("bench_type", ""),
             data.get("bench_condition", ""),
             data.get("shelter_type", ""),
             data.get("rider_comfort_category", ""),
             data.get("accessibility_status"),
+            data.get("hostile_design"),
             data.get("notes"),
             reviewer_id,
             data.get("reviewer_confidence", "unknown"),
@@ -2397,6 +2756,10 @@ def submit_review():
             data.get("streetview_imagery_month")
         )
     )
+
+
+    # Recalculate community consensus from saved observations.
+    consensus = calculate_stop_consensus(stop_id)
 
 
     query_db(
@@ -2438,7 +2801,8 @@ def submit_review():
     impact = query_db(
         """
         SELECT
-            daily_route_exposure
+            daily_route_exposure,
+            average_weekday_boardings
         FROM stop_improvement_impact
         WHERE physical_stop_id=?
         """,
@@ -2451,6 +2815,8 @@ def submit_review():
         "stop_id": stop_id,
         "assignment_id": assignment_id,
         "reviewer_id": reviewer_id,
+
+        "consensus": consensus,
 
         "reviewer_stats": {
 
@@ -2585,6 +2951,11 @@ def submit_review():
         },
 
 "community_impact": {
+
+    "average_weekday_boardings":
+        impact[0][1]
+        if impact
+        else None,
 
     "daily_route_exposure":
         impact[0][0]
@@ -4364,4 +4735,5 @@ if __name__ == "__main__":
         debug=False,
         use_reloader=False
     )
+
 

@@ -32,6 +32,8 @@ def setup_table(cursor):
 
             daily_route_exposure REAL,
 
+            average_weekday_boardings REAL,
+
             opportunity_score REAL,
 
             impact_level TEXT,
@@ -72,11 +74,17 @@ def generate_impact_summary():
 
             io.opportunity_score,
 
+            oa.assessment_json,
+
             GROUP_CONCAT(
                 ir.recommendation_type
             )
 
         FROM improvement_opportunities io
+
+        LEFT JOIN opportunity_assessments oa
+
+            ON io.physical_stop_id = oa.physical_stop_id
 
         LEFT JOIN improvement_recommendations ir
 
@@ -109,12 +117,19 @@ def generate_impact_summary():
             stop_id,
             factors_json,
             opportunity_score,
+            assessment_json,
             recommendations
         ) = row
 
 
         factors = json.loads(
             factors_json
+        )
+
+        assessment = (
+            json.loads(assessment_json)
+            if assessment_json
+            else {}
         )
 
 
@@ -125,6 +140,77 @@ def generate_impact_summary():
                 "combined_route_weekday_boardings",
                 0
             )
+        )
+
+
+        cursor.execute(
+            "SELECT MAX(period) FROM ridership_snapshots"
+        )
+
+        latest_period = cursor.fetchone()[0]
+
+
+        weekdays_in_period = 0
+
+        if latest_period:
+
+            cursor.execute(
+                "SELECT COUNT(*) FROM ("
+                "SELECT 1 AS day "
+                "UNION ALL SELECT 2 "
+                "UNION ALL SELECT 3 "
+                "UNION ALL SELECT 4 "
+                "UNION ALL SELECT 5 "
+                "UNION ALL SELECT 6 "
+                "UNION ALL SELECT 7 "
+                "UNION ALL SELECT 8 "
+                "UNION ALL SELECT 9 "
+                "UNION ALL SELECT 10 "
+                "UNION ALL SELECT 11 "
+                "UNION ALL SELECT 12 "
+                "UNION ALL SELECT 13 "
+                "UNION ALL SELECT 14 "
+                "UNION ALL SELECT 15 "
+                "UNION ALL SELECT 16 "
+                "UNION ALL SELECT 17 "
+                "UNION ALL SELECT 18 "
+                "UNION ALL SELECT 19 "
+                "UNION ALL SELECT 20 "
+                "UNION ALL SELECT 21 "
+                "UNION ALL SELECT 22 "
+                "UNION ALL SELECT 23 "
+                "UNION ALL SELECT 24 "
+                "UNION ALL SELECT 25 "
+                "UNION ALL SELECT 26 "
+                "UNION ALL SELECT 27 "
+                "UNION ALL SELECT 28 "
+                "UNION ALL SELECT 29 "
+                "UNION ALL SELECT 30 "
+                "UNION ALL SELECT 31"
+                ") days "
+                "WHERE days.day <= CAST(strftime('%d', "
+                "date(?, 'start of month', '+1 month', '-1 day')"
+                ") AS INTEGER) "
+                "AND strftime('%w', "
+                "date(?, 'start of month', "
+                "'+' || (days.day - 1) || ' days')"
+                ") BETWEEN '1' AND '5'",
+                (latest_period, latest_period)
+            )
+
+            weekdays_in_period = (
+                cursor.fetchone()[0] or 0
+            )
+
+
+        average_weekday_boardings = (
+            round(
+                daily_route_exposure
+                / weekdays_in_period,
+                2
+            )
+            if daily_route_exposure and weekdays_in_period
+            else 0
         )
 
 
@@ -177,7 +263,6 @@ def generate_impact_summary():
                     "priority_review"
                 )
 
-
             if assessment_score > 0:
 
                 recommendation_list.append(
@@ -186,12 +271,13 @@ def generate_impact_summary():
 
 
         summary = (
-            f"Bus stop with "
-            f"{round(daily_route_exposure):,} combined weekday boardings across serving routes."
+            f"Bus stop with approximately "
+            f"{round(average_weekday_boardings):,} average weekday "
+            f"boardings across serving routes."
         )
 
 
-        percentile = factors.get(
+        percentile = assessment.get(
             "rider_exposure_percentile"
         )
 
@@ -255,18 +341,20 @@ def generate_impact_summary():
             (
                 physical_stop_id,
                 daily_route_exposure,
+                average_weekday_boardings,
                 opportunity_score,
                 impact_level,
                 recommendations,
                 summary
             )
 
-            VALUES (?, ?, ?, ?, ?, ?);
+            VALUES (?, ?, ?, ?, ?, ?, ?);
 
             """,
             (
                 stop_id,
                 daily_route_exposure,
+                average_weekday_boardings,
                 opportunity_score,
                 impact_level,
                 json.dumps(recommendation_list),
