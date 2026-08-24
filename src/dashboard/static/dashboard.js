@@ -1554,3 +1554,55 @@ window.addEventListener(
     loadCommunityProfileCard
 );
 
+let benchCandidateRows = [];
+
+function humanizeBenchCandidateValue(value) {
+    return String(value || "unknown")
+        .replace(/_/g, " ")
+        .replace(/\b\w/g, character => character.toUpperCase());
+}
+
+function renderBenchCandidates(rows) {
+    const body = document.getElementById("benchCandidateBody");
+    if (!body) return;
+    body.innerHTML = rows.length ? rows.map(candidate => `
+        <tr>
+            <td>${candidate.candidate_rank}</td>
+            <td><a href="/stop/${candidate.physical_stop_id}">${candidate.name || "Unnamed stop"}</a></td>
+            <td>${[candidate.municipality, candidate.county, candidate.state].filter(Boolean).join(", ")}</td>
+            <td>${candidate.opportunity_score.toFixed(1)}</td>
+            <td>${candidate.rider_exposure_percentile.toFixed(1)}th percentile</td>
+            <td>${humanizeBenchCandidateValue(candidate.evidence_strength)}</td>
+            <td>${humanizeBenchCandidateValue(candidate.clearance_status)}</td>
+            <td>${humanizeBenchCandidateValue(candidate.next_action)}</td>
+        </tr>`).join("") : `<tr><td colspan="8">No matching candidates.</td></tr>`;
+}
+
+function filterBenchCandidates() {
+    const query = (document.getElementById("benchCandidateSearch")?.value || "").toLowerCase();
+    renderBenchCandidates(benchCandidateRows.filter(candidate =>
+        JSON.stringify(candidate).toLowerCase().includes(query)
+    ));
+}
+
+async function loadBenchCandidates() {
+    if (!document.getElementById("benchCandidateBody")) return;
+    try {
+        const response = await fetch("/bench-candidates");
+        const data = await response.json();
+        benchCandidateRows = data.candidates || [];
+        const summary = data.summary || {};
+        document.getElementById("benchCandidateMetrics").innerHTML = `
+            <strong>${summary.bench_candidates || 0}</strong> candidates &middot;
+            <strong>${summary.high_ridership_bench_candidates || 0}</strong> high-ridership &middot;
+            <strong>${summary.needing_clearance_observation || 0}</strong> need clearance observation &middot;
+            <strong>${summary.ready_for_planning_review || 0}</strong> ready for planning review`;
+        renderBenchCandidates(benchCandidateRows);
+    } catch (error) {
+        document.getElementById("benchCandidateBody").innerHTML =
+            `<tr><td colspan="8">Bench candidates are unavailable.</td></tr>`;
+    }
+}
+
+window.addEventListener("load", loadBenchCandidates);
+

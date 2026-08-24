@@ -243,6 +243,22 @@ Apply Filters
 
 
 
+<div class="card bench-candidate-card">
+<h2>Bench installation candidates</h2>
+<p>
+Candidates meet canonical absence-evidence and planning-score requirements.
+Preliminary clearance is a field observation, not engineering feasibility.
+</p>
+<div id="benchCandidateMetrics">Loading bench candidates...</div>
+<input id="benchCandidateSearch" placeholder="Search candidates..." onkeyup="filterBenchCandidates()" />
+<div class="pipeline-table-container">
+<table id="benchCandidateTable">
+<thead><tr><th>Rank</th><th>Stop</th><th>Jurisdiction</th><th>Opportunity</th><th>Rider exposure</th><th>Evidence</th><th>Clearance</th><th>Next action</th></tr></thead>
+<tbody id="benchCandidateBody"><tr><td colspan="8">Loading candidates...</td></tr></tbody>
+</table>
+</div>
+</div>
+
 <h2>
 Review Pipeline Coverage
 </h2>

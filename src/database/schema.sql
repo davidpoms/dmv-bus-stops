@@ -166,6 +166,39 @@ CREATE TABLE IF NOT EXISTS stop_amenity_review_priority (
 CREATE INDEX IF NOT EXISTS idx_amenity_review_priority_order
 ON stop_amenity_review_priority(priority_tier, review_priority_score DESC);
 
+CREATE TABLE IF NOT EXISTS bench_installation_candidates (
+    physical_stop_id INTEGER PRIMARY KEY,
+    candidate_rank INTEGER NOT NULL,
+    primary_name TEXT,
+    state TEXT,
+    county TEXT,
+    municipality TEXT,
+    canonical_status TEXT NOT NULL,
+    evidence_strength TEXT NOT NULL,
+    local_negative_sources TEXT NOT NULL,
+    osm_negative INTEGER NOT NULL,
+    community_negative_count INTEGER NOT NULL,
+    community_consensus_status TEXT NOT NULL,
+    opportunity_score REAL NOT NULL,
+    rider_exposure_percentile REAL NOT NULL,
+    review_priority_score REAL,
+    review_priority_tier TEXT,
+    clearance_status TEXT NOT NULL,
+    clearance_yes_count INTEGER NOT NULL,
+    clearance_no_count INTEGER NOT NULL,
+    recommendation_confidence TEXT NOT NULL,
+    rationale TEXT NOT NULL,
+    next_action TEXT NOT NULL,
+    verification_still_needed INTEGER NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_bench_candidates_order
+ON bench_installation_candidates(
+    next_action, opportunity_score DESC,
+    rider_exposure_percentile DESC, physical_stop_id
+);
+
 
 
 

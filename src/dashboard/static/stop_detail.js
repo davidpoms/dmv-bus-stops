@@ -106,6 +106,11 @@ async function loadStopProfile() {
                 ? stop.opportunity.recommendations
                 : [];
 
+        const benchCandidate =
+            stop.bench_installation_candidate ||
+            review.bench_installation_candidate ||
+            null;
+
 
         function recommendationLabel(type) {
 
@@ -486,6 +491,30 @@ const latestCommunity =
 
             </div>
 
+
+            ${
+                benchCandidate
+                    ? `
+                    <div class="card bench-installation-candidate-card">
+                        <strong>Bench installation candidate</strong>
+                        <p>
+                            Bench status: <strong>${recommendationPriority(benchCandidate.canonical_bench_status)}</strong><br>
+                            Evidence: <strong>${(benchCandidate.local_negative_sources || []).join(", ") || recommendationPriority(benchCandidate.evidence_strength)}</strong><br>
+                            Opportunity score: <strong>${benchCandidate.opportunity_score.toFixed(1)}</strong><br>
+                            Rider exposure: <strong>${benchCandidate.rider_exposure_percentile.toFixed(1)}th percentile</strong><br>
+                            Review priority: <strong>${benchCandidate.review_priority_score === null ? "Resolved or unavailable" : benchCandidate.review_priority_score.toFixed(1)}</strong><br>
+                            Preliminary clearance: <strong>${recommendationPriority(benchCandidate.clearance_status)}</strong><br>
+                            Next action: <strong>${recommendationPriority(benchCandidate.next_action)}</strong>
+                        </p>
+                        <p>${benchCandidate.rationale.join(" ")}</p>
+                        <p class="impact-note">
+                            Preliminary clearance does not establish engineering feasibility,
+                            ADA compliance, ownership, utilities, permits, or construction readiness.
+                        </p>
+                        ${benchCandidate.verification_still_needed ? `<p><strong>Bench-presence verification remains useful in parallel.</strong></p>` : ""}
+                    </div>`
+                    : ""
+            }
 
             <div class="card rider-exposure-card">
 

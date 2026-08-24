@@ -4,6 +4,11 @@ import json
 import sqlite3
 from pathlib import Path
 
+from src.assessment.amenity_recommendation_policy import (
+    ELIGIBLE_LOCAL_NEGATIVE_SOURCES,
+    classify_negative_evidence,
+    source_applies_to_jurisdiction,
+)
 from src.assessment.interpretation import amenity_status_sentence
 
 
@@ -12,16 +17,6 @@ DATABASE_PATH = BASE_DIR / "src" / "database" / "dmv_bus_stops.db"
 ABSENCE_STATUSES = {"confirmed_no", "likely_no"}
 VERIFICATION_STATUSES = {"likely_yes", "likely_no", "conflicting", "unknown"}
 INSTALLATION_OPPORTUNITY_THRESHOLD = 70
-ELIGIBLE_LOCAL_NEGATIVE_SOURCES = {
-    "ALEXANDRIA",
-    "MONTGOMERY_COUNTY_WMATA",
-    "PRINCE_GEORGES_COUNTY_THEBUS",
-}
-LOCAL_SOURCE_JURISDICTIONS = {
-    "ALEXANDRIA": ("VA", "Alexandria"),
-    "MONTGOMERY_COUNTY_WMATA": ("MD", "Montgomery"),
-    "PRINCE_GEORGES_COUNTY_THEBUS": ("MD", "Prince George's"),
-}
 PRELIMINARY_CLEARANCE_OBSERVATIONS_REQUIRED = 3
 
 
@@ -42,11 +37,6 @@ def setup_table(cursor):
     )
 
 
-def source_applies_to_jurisdiction(source, state, county):
-    """Fail closed when local evidence is attached outside its authority."""
-    return LOCAL_SOURCE_JURISDICTIONS.get(source) == (state, county)
-
-
 def build_amenity_recommendations(
     amenity, status, opportunity_score, community_observation_count,
     negative_evidence=None, bench_clearance_yes_count=0,
@@ -56,29 +46,9 @@ def build_amenity_recommendations(
     recommendations = []
     wording = amenity_status_sentence(amenity, status)
     negative_evidence = negative_evidence or {}
-    high_local_sources = sorted(
-        set(negative_evidence.get("high_local_sources", ()))
-        & ELIGIBLE_LOCAL_NEGATIVE_SOURCES
-    )
-    medium_local_sources = sorted(
-        set(negative_evidence.get("medium_local_sources", ()))
-        & ELIGIBLE_LOCAL_NEGATIVE_SOURCES
-    )
-    osm_negative = bool(negative_evidence.get("osm_negative"))
-    community_negative = bool(negative_evidence.get("community_negative"))
-    corroborating_local = bool(high_local_sources or medium_local_sources)
-    evidence_classes = [
-        name for name, present in (
-            ("local_jurisdiction", corroborating_local),
-            ("identity_matched_osm", osm_negative),
-            ("community_observation", community_negative),
-        ) if present
-    ]
-    corroborated = len(evidence_classes) >= 2
-    provenance_eligible = bool(high_local_sources) or corroborated
-    status_eligible = status == "confirmed_no" or (
-        status == "likely_no" and provenance_eligible
-    )
+    policy = classify_negative_evidence(status, negative_evidence)
+    evidence_classes = policy["negative_evidence_classes"]
+    corroborated = policy["evidence_strength"] == "corroborated_likely_absence"
     preliminary_clearance_observed = (
         bench_clearance_yes_count >= PRELIMINARY_CLEARANCE_OBSERVATIONS_REQUIRED
         and bench_clearance_no_count == 0
@@ -90,14 +60,9 @@ def build_amenity_recommendations(
         "community_observation_count": community_observation_count,
         "opportunity_score": opportunity_score,
         "negative_evidence_classes": evidence_classes,
-        "eligible_local_negative_sources": sorted(
-            set(high_local_sources + medium_local_sources)
-        ),
-        "local_match_quality": (
-            "high" if high_local_sources
-            else "medium" if medium_local_sources
-            else None
-        ),
+        "eligible_local_negative_sources":
+            policy["eligible_local_negative_sources"],
+        "local_match_quality": policy["local_match_quality"],
     }
     if amenity == "bench":
         evidence.update({
@@ -109,9 +74,9 @@ def build_amenity_recommendations(
         })
 
     installation_allowed = (
-        status_eligible
+        policy["eligible"]
         and opportunity_score >= INSTALLATION_OPPORTUNITY_THRESHOLD
-        and (amenity != "bench" or preliminary_clearance_observed)
+        and amenity != "bench"
     )
     if installation_allowed:
         if status == "confirmed_no":

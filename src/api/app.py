@@ -216,6 +216,38 @@ def get_amenity_review_priority(stop_id):
     )
 
 
+def serialize_bench_candidate(row):
+    return {
+        "physical_stop_id": row[0], "candidate_rank": row[1],
+        "name": row[2], "state": row[3], "county": row[4],
+        "municipality": row[5], "canonical_bench_status": row[6],
+        "evidence_strength": row[7],
+        "local_negative_sources": json.loads(row[8]) if row[8] else [],
+        "osm_negative": bool(row[9]), "community_negative_count": row[10],
+        "community_consensus_status": row[11], "opportunity_score": row[12],
+        "rider_exposure_percentile": row[13], "review_priority_score": row[14],
+        "review_priority_tier": row[15], "clearance_status": row[16],
+        "clearance_yes_count": row[17], "clearance_no_count": row[18],
+        "recommendation_confidence": row[19],
+        "rationale": json.loads(row[20]) if row[20] else [],
+        "next_action": row[21], "verification_still_needed": bool(row[22]),
+        "engineering_feasibility_established": False, "updated_at": row[23],
+    }
+
+
+def get_bench_candidate(stop_id):
+    if not query_db(
+        "SELECT 1 FROM sqlite_master WHERE type='table' "
+        "AND name='bench_installation_candidates'"
+    ):
+        return None
+    rows = query_db(
+        "SELECT * FROM bench_installation_candidates WHERE physical_stop_id=?",
+        (stop_id,),
+    )
+    return serialize_bench_candidate(rows[0]) if rows else None
+
+
 def stop_is_current(stop_id):
     rows = query_db(
         """
@@ -2025,6 +2057,7 @@ def review_stop_info(stop_id):
     amenity_evidence = get_current_amenity_evidence(stop_id)
     amenity_status = get_current_amenity_status(stop_id)
     amenity_review_priority = get_amenity_review_priority(stop_id)
+    bench_candidate = get_bench_candidate(stop_id)
 
 
     improvement_recommendations = query_db(
@@ -2168,6 +2201,8 @@ def review_stop_info(stop_id):
 
             "amenity_review_priority": amenity_review_priority_payload,
 
+            "bench_installation_candidate": bench_candidate,
+
 
             "recommendations":
                 improvement_recommendations_payload,
@@ -2232,6 +2267,55 @@ def review_stop_info(stop_id):
                 opportunity_summary
         }
     )
+
+
+@app.route("/bench-candidates")
+def bench_candidates():
+    if not query_db(
+        "SELECT 1 FROM sqlite_master WHERE type='table' "
+        "AND name='bench_installation_candidates'"
+    ):
+        return jsonify({"summary": {}, "candidates": []})
+    clauses, params = [], []
+    for column in ("state", "county", "municipality", "evidence_strength",
+                   "clearance_status", "next_action"):
+        value = request.args.get(column)
+        if value:
+            clauses.append(f"{column}=?")
+            params.append(value)
+    for column, operator, argument in (
+        ("opportunity_score", ">=", "min_opportunity_score"),
+        ("rider_exposure_percentile", ">=", "min_rider_exposure_percentile"),
+    ):
+        value = request.args.get(argument)
+        if value is not None:
+            try:
+                params.append(float(value))
+            except ValueError:
+                return jsonify({"error": f"{argument} must be numeric"}), 400
+            clauses.append(f"{column}{operator}?")
+    where = " WHERE " + " AND ".join(clauses) if clauses else ""
+    rows = query_db(
+        "SELECT * FROM bench_installation_candidates" + where
+        + " ORDER BY candidate_rank", tuple(params)
+    )
+    candidates = [serialize_bench_candidate(row) for row in rows]
+    summary = {
+        "bench_candidates": len(candidates),
+        "high_ridership_bench_candidates": sum(
+            item["rider_exposure_percentile"] >= 90 for item in candidates
+        ),
+        "needing_clearance_observation": sum(
+            item["next_action"] == "collect_clearance_observation"
+            for item in candidates
+        ),
+        "ready_for_planning_review": sum(
+            item["next_action"] in
+            ("planning_review", "candidate_ready_for_planning")
+            for item in candidates
+        ),
+    }
+    return jsonify({"summary": summary, "candidates": candidates})
 
 
 

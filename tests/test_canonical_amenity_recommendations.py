@@ -34,8 +34,11 @@ class CanonicalAmenityRecommendationTests(unittest.TestCase):
                 self.assertEqual([], self.recommendations(amenity, "confirmed_yes", 3))
             with self.subTest(amenity=amenity, status="confirmed_no"):
                 rows = self.recommendations(amenity, "confirmed_no", 3)
-                self.assertEqual(f"{amenity}_installation_candidate", rows[0]["type"])
-                self.assertEqual("high", rows[0]["confidence"])
+                if amenity == "bench":
+                    self.assertFalse(any("installation" in row["type"] for row in rows))
+                else:
+                    self.assertEqual(f"{amenity}_installation_candidate", rows[0]["type"])
+                    self.assertEqual("high", rows[0]["confidence"])
 
     def test_likely_statuses_preserve_uncertainty(self):
         for amenity in ("bench", "shelter"):
@@ -48,10 +51,13 @@ class CanonicalAmenityRecommendationTests(unittest.TestCase):
                     amenity, "likely_no", 1,
                     {"high_local_sources": {"ALEXANDRIA"}},
                 )
-                self.assertEqual(f"{amenity}_installation_candidate", rows[0]["type"])
-                self.assertEqual("medium", rows[0]["confidence"])
-                self.assertTrue(any("consensus has not been reached" in reason
-                                    for reason in rows[0]["reasons"]))
+                if amenity == "bench":
+                    self.assertFalse(any("installation" in row["type"] for row in rows))
+                else:
+                    self.assertEqual(f"{amenity}_installation_candidate", rows[0]["type"])
+                    self.assertEqual("medium", rows[0]["confidence"])
+                    self.assertTrue(any("consensus has not been reached" in reason
+                                        for reason in rows[0]["reasons"]))
 
     def test_likely_no_requires_eligible_provenance(self):
         for amenity in ("bench", "shelter"):
@@ -85,10 +91,13 @@ class CanonicalAmenityRecommendationTests(unittest.TestCase):
                     "osm_negative": True,
                 },
             )
-            self.assertEqual(
-                f"{amenity}_installation_candidate", corroborated[0]["type"]
-            )
-            self.assertIn("Multiple independent", corroborated[0]["reasons"][0])
+            if amenity == "bench":
+                self.assertFalse(any("installation" in row["type"] for row in corroborated))
+            else:
+                self.assertEqual(
+                    f"{amenity}_installation_candidate", corroborated[0]["type"]
+                )
+                self.assertIn("Multiple independent", corroborated[0]["reasons"][0])
 
     def test_osm_requires_explicit_identity_matched_canonical_signal(self):
         for negative in ({}, {"osm_proximity_only": True}, {"osm_missing": True}):
@@ -121,8 +130,7 @@ class CanonicalAmenityRecommendationTests(unittest.TestCase):
             "bench", "likely_no", observations=3, negative=negative,
             clearance_yes=3,
         )
-        self.assertEqual("bench_installation_candidate", three[0]["type"])
-        self.assertFalse(three[0]["evidence"]["engineering_feasibility_established"])
+        self.assertFalse(any("installation" in row["type"] for row in three))
 
     def test_conflicting_and_unknown_are_verification_not_installation(self):
         for amenity in ("bench", "shelter"):
