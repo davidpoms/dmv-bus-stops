@@ -6,6 +6,8 @@ import sqlite3
 import json
 from pathlib import Path
 
+from src.assessment.interpretation import amenity_status_sentence
+
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 
@@ -49,9 +51,9 @@ def setup_table(cursor):
     )
 
 
-def generate_impact_summary():
+def generate_impact_summary(database_path=None):
 
-    conn = sqlite3.connect(DATABASE_PATH)
+    conn = sqlite3.connect(database_path or DATABASE_PATH)
 
     cursor = conn.cursor()
 
@@ -78,7 +80,11 @@ def generate_impact_summary():
 
             GROUP_CONCAT(
                 ir.recommendation_type
-            )
+            ),
+
+            bench.derived_status,
+
+            shelter.derived_status
 
         FROM improvement_opportunities io
 
@@ -96,6 +102,18 @@ def generate_impact_summary():
 
             ON io.physical_stop_id = ir.physical_stop_id
 
+        JOIN stop_amenity_status bench
+
+            ON bench.physical_stop_id = io.physical_stop_id
+
+           AND bench.amenity_type = 'bench'
+
+        JOIN stop_amenity_status shelter
+
+            ON shelter.physical_stop_id = io.physical_stop_id
+
+           AND shelter.amenity_type = 'shelter'
+
         GROUP BY
 
             io.physical_stop_id,
@@ -103,6 +121,10 @@ def generate_impact_summary():
             io.factors,
 
             io.opportunity_score
+
+            ,bench.derived_status
+
+            ,shelter.derived_status
 
         ORDER BY
 
@@ -124,7 +146,9 @@ def generate_impact_summary():
             factors_json,
             opportunity_score,
             assessment_json,
-            recommendations
+            recommendations,
+            bench_status,
+            shelter_status
         ) = row
 
 
@@ -281,6 +305,9 @@ def generate_impact_summary():
             f"{round(average_weekday_boardings):,} average weekday "
             f"boardings across serving routes."
         )
+
+        summary += " " + amenity_status_sentence("bench", bench_status)
+        summary += " " + amenity_status_sentence("shelter", shelter_status)
 
 
         percentile = assessment.get(

@@ -7,105 +7,75 @@ Evidence = observed facts.
 Interpretation = what the system concludes from those facts.
 """
 
+STATUS_WORDING = {
+    "confirmed_yes": "Community consensus indicates {article} {amenity} is present.",
+    "confirmed_no": "Community consensus indicates no {amenity} is present.",
+    "likely_yes": (
+        "Available evidence suggests {article} {amenity} is present, but "
+        "community consensus has not been reached."
+    ),
+    "likely_no": (
+        "Available evidence suggests no {amenity} is present, but community "
+        "consensus has not been reached."
+    ),
+    "conflicting": (
+        "Available evidence about {amenity} presence conflicts; verification "
+        "is recommended."
+    ),
+    "unknown": (
+        "Current evidence is insufficient to determine whether {article} "
+        "{amenity} is present."
+    ),
+}
+
+
+def amenity_status_sentence(amenity, status):
+    article = "a" if amenity == "bench" else "a"
+    return STATUS_WORDING[status].format(amenity=amenity, article=article)
+
+
+def _canonical_status(evidence, amenity):
+    statuses = evidence.get("amenity_status") or {}
+    if isinstance(statuses, dict):
+        value = statuses.get(amenity)
+        return value.get("derived_status") if isinstance(value, dict) else value
+    for row in statuses:
+        if row.get("amenity_type") == amenity:
+            return row.get("derived_status")
+    return "unknown"
 
 
 def interpret_bench_status(evidence):
-
-    osm = evidence.get("osm")
-    transit = evidence.get("transit")
-
-    if not osm:
-        return {
-            "status": "unknown",
-            "label": "No evidence yet",
-            "confidence": "low",
-            "observed": [],
-            "inferred": [
-                "Bench status cannot be determined"
-            ]
-        }
-
-    if osm.get("osm_bench") == 1:
-        return {
-            "status": "confirmed_bench",
-            "label": "Confirmed bench",
-            "confidence": "high",
-            "observed": [
-                "Bench mapped in OSM"
-            ],
-            "inferred": []
-        }
-
-    if osm.get("osm_shelter") == 1:
-        return {
-            "status": "bench_unknown_shelter_present",
-            "label": "Shelter present, bench needs verification",
-            "confidence": "medium",
-            "observed": [
-                "Shelter mapped in OSM"
-            ],
-            "inferred": [
-                "Bench may exist but requires verification"
-            ]
-        }
-
-    observed = [
-        "No bench mapped in OSM"
-    ]
-
-    if transit and transit.get("gtfs_bus_stop") == 1:
-        observed.append(
-            "Transit stop confirmed by GTFS"
-        )
-
+    status = _canonical_status(evidence, "bench")
     return {
-        "status": "needs_review",
-        "label": "Needs bench review",
-        "confidence": "medium",
-        "observed": observed,
-        "inferred": [
-            "Physical verification recommended"
-        ]
+        "status": status,
+        "label": status.replace("_", " ").title(),
+        "confidence": "high" if status.startswith("confirmed_") else "medium",
+        "observed": [amenity_status_sentence("bench", status)],
+        "inferred": (
+            ["Physical verification recommended"]
+            if status in ("likely_yes", "likely_no", "conflicting", "unknown")
+            else []
+        ),
     }
 
 
 
 def interpret_review_priority(evidence, bench_status, context=None):
-
-    osm = evidence.get("osm")
-    transit = evidence.get("transit")
-
-    if bench_status["status"] == "confirmed_bench":
+    status = bench_status["status"]
+    if status in ("confirmed_yes", "confirmed_no"):
         return {
             "level": "low",
-            "reasons": [
-                "Bench already mapped"
-            ]
+            "reasons": [amenity_status_sentence("bench", status)]
         }
-
-    if osm and osm.get("osm_shelter") == 1:
+    if status == "conflicting":
         return {
-            "level": "medium",
-            "reasons": [
-                "Shelter mapped",
-                "Bench status requires verification"
-            ]
+            "level": "high",
+            "reasons": [amenity_status_sentence("bench", status)]
         }
-
-    reasons = [
-        "No bench evidence",
-        "Volunteer review needed"
-    ]
-
-    if transit and transit.get("gtfs_bus_stop") == 1:
-        reasons.insert(
-            0,
-            "Active transit stop confirmed"
-        )
-
     return {
-        "level": "high",
-        "reasons": reasons
+        "level": "medium",
+        "reasons": [amenity_status_sentence("bench", status)]
     }
 
 
@@ -120,12 +90,9 @@ def summarize_stop_evidence(evidence):
         "transit_confirmed":
             transit.get("gtfs_bus_stop", 0) == 1,
 
-        "osm_features": {
-            "bench":
-                osm.get("osm_bench", 0) == 1,
-
-            "shelter":
-                osm.get("osm_shelter", 0) == 1
+        "canonical_amenity_status": {
+            "bench": _canonical_status(evidence, "bench"),
+            "shelter": _canonical_status(evidence, "shelter"),
         },
 
         "community_reviews":
@@ -180,26 +147,12 @@ def summarize_stop_evidence(evidence):
 
 
 def generate_review_action_summary(evidence, review_priority):
-
-    transit = evidence.get("transit") or {}
-    osm = evidence.get("osm") or {}
-
     actions = []
-
-    if transit.get("gtfs_bus_stop") == 1:
-        actions.append(
-            "Verify physical stop amenities"
-        )
-
-    if osm.get("osm_bench", 0) == 0:
-        actions.append(
-            "Confirm whether bench exists"
-        )
-
-    if osm.get("osm_shelter", 0) == 0:
-        actions.append(
-            "Confirm whether shelter exists"
-        )
+    for amenity in ("bench", "shelter"):
+        if _canonical_status(evidence, amenity) in (
+            "likely_yes", "likely_no", "conflicting", "unknown"
+        ):
+            actions.append(f"Confirm whether {amenity} exists")
 
     if not evidence.get("reviews"):
         actions.append(

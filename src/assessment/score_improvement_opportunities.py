@@ -82,32 +82,39 @@ def normalize(value, maximum):
 
 
 
-def calculate_amenity_gap(
-    osm_bench,
-    osm_shelter,
-    consensus_bench,
-    consensus_shelter
-):
-
-    score = 0
-
-
-    if not osm_bench and consensus_bench != 1:
-        score += 50
+ABSENCE_STATUSES = {"confirmed_no", "likely_no"}
+VERIFICATION_SIGNALS = {
+    "confirmed_yes": 0,
+    "confirmed_no": 0,
+    "likely_yes": 0.5,
+    "likely_no": 0.5,
+    "conflicting": 1,
+    "unknown": 1,
+}
 
 
-    if not osm_shelter and consensus_shelter != 1:
-        score += 50
+def amenity_features(status):
+    """Translate canonical status without treating missing evidence as absence."""
+    return {
+        "status": status,
+        "absence_signal": 1 if status in ABSENCE_STATUSES else 0,
+        "verification_need": VERIFICATION_SIGNALS[status],
+    }
 
 
-    return score
+def calculate_amenity_gap(bench_status, shelter_status):
+    """Preserve the existing 50-points-per-amenity gap slot."""
+    return 50 * sum(
+        status in ABSENCE_STATUSES
+        for status in (bench_status, shelter_status)
+    )
 
 
 
-def score_opportunities():
+def score_opportunities(database_path=None):
 
     conn = sqlite3.connect(
-        DATABASE_PATH
+        database_path or DATABASE_PATH
     )
 
     cursor = conn.cursor()
@@ -141,25 +148,9 @@ def score_opportunities():
 
             oa.wmata_stop_records,
 
-            COALESCE(
-                ose.osm_bench,
-                0
-            ),
+            bench.derived_status,
 
-            COALESCE(
-                ose.osm_shelter,
-                0
-            ),
-
-            COALESCE(
-                sc.has_bench,
-                NULL
-            ),
-
-            COALESCE(
-                sc.has_shelter,
-                NULL
-            )
+            shelter.derived_status
 
 
         FROM opportunity_assessments oa
@@ -179,16 +170,18 @@ def score_opportunities():
                oa.physical_stop_id
 
 
-        LEFT JOIN stop_osm_evidence ose
+        JOIN stop_amenity_status bench
 
-            ON ose.stop_id =
-               oa.physical_stop_id
+            ON bench.physical_stop_id = oa.physical_stop_id
+
+           AND bench.amenity_type = 'bench'
 
 
-        LEFT JOIN stop_consensus sc
+        JOIN stop_amenity_status shelter
 
-            ON sc.stop_id =
-               oa.physical_stop_id
+            ON shelter.physical_stop_id = oa.physical_stop_id
+
+           AND shelter.amenity_type = 'shelter'
 
         """
     )
@@ -238,13 +231,9 @@ def score_opportunities():
 
             records,
 
-            osm_bench,
+            bench_status,
 
-            osm_shelter,
-
-            consensus_bench,
-
-            consensus_shelter
+            shelter_status
 
         ) = row
 
@@ -296,10 +285,8 @@ def score_opportunities():
 
 
         amenity_gap_score = calculate_amenity_gap(
-            osm_bench,
-            osm_shelter,
-            consensus_bench,
-            consensus_shelter
+            bench_status,
+            shelter_status
         )
 
 
@@ -373,17 +360,9 @@ def score_opportunities():
 
             "amenity_gap": {
 
-                "osm_bench":
-                    bool(osm_bench),
+                "bench": amenity_features(bench_status),
 
-                "osm_shelter":
-                    bool(osm_shelter),
-
-                "consensus_bench":
-                    consensus_bench,
-
-                "consensus_shelter":
-                    consensus_shelter,
+                "shelter": amenity_features(shelter_status),
 
                 "score":
                     amenity_gap_score

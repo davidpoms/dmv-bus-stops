@@ -133,7 +133,7 @@ async function loadStopProfile() {
                     "Rider comfort improvement opportunity",
 
                 bench_feasibility_review:
-                    "Bench installation feasibility review",
+                    "Preliminary bench clearance review",
 
                 accessibility_review:
                     "Accessibility information needs verification",

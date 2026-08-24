@@ -28,6 +28,11 @@ class ActiveStopPipelineTests(unittest.TestCase):
                 current_gtfs INTEGER NOT NULL
             );
             INSERT INTO stop_gtfs_status VALUES (1, 1), (2, 0);
+            CREATE TABLE stop_jurisdiction (
+                stop_id INTEGER, state TEXT, county TEXT
+            );
+            INSERT INTO stop_jurisdiction VALUES
+                (1,'DC',NULL),(2,'DC',NULL),(3,'DC',NULL);
 
             CREATE TABLE physical_stop_members (
                 physical_stop_id INTEGER, bus_stop_id INTEGER
@@ -71,6 +76,10 @@ class ActiveStopPipelineTests(unittest.TestCase):
                 stop_id INTEGER, osm_bench INTEGER, osm_shelter INTEGER
             );
             INSERT INTO stop_osm_evidence VALUES (1,0,0),(2,0,0),(3,0,0);
+            CREATE TABLE stop_amenity_evidence (
+                physical_stop_id INTEGER, source TEXT, amenity_type TEXT,
+                present INTEGER, confidence TEXT
+            );
             CREATE TABLE stop_transit_evidence (stop_id INTEGER, gtfs_bus_stop INTEGER);
             INSERT INTO stop_transit_evidence VALUES (1,1),(2,1),(3,1);
             CREATE TABLE stop_consensus (
@@ -84,11 +93,22 @@ class ActiveStopPipelineTests(unittest.TestCase):
                 (1,0,0,1,1.0,NULL,NULL,NULL,1,2,'verified'),
                 (2,0,0,1,1.0,NULL,NULL,NULL,1,2,'verified'),
                 (3,0,0,1,1.0,NULL,NULL,NULL,1,2,'verified');
+            CREATE TABLE stop_amenity_status (
+                physical_stop_id INTEGER, amenity_type TEXT,
+                derived_status TEXT, consensus_status TEXT,
+                community_observation_count INTEGER,
+                community_no_count INTEGER, osm_no INTEGER
+            );
+            INSERT INTO stop_amenity_status VALUES
+                (1,'bench','conflicting','not_reached',1,0,0),
+                (1,'shelter','conflicting','not_reached',1,0,0);
             CREATE TABLE stop_observations (
-                id INTEGER PRIMARY KEY, physical_stop_id INTEGER, source TEXT
+                id INTEGER PRIMARY KEY, physical_stop_id INTEGER, source TEXT,
+                bench_feasible TEXT
             );
             INSERT INTO stop_observations VALUES
-                (1,1,'community_review'),(2,2,'community_review'),(3,3,'community_review');
+                (1,1,'community_review',NULL),(2,2,'community_review',NULL),
+                (3,3,'community_review',NULL);
             CREATE TABLE improvement_recommendations (
                 id INTEGER PRIMARY KEY, physical_stop_id INTEGER,
                 recommendation_type TEXT, priority TEXT, reasons TEXT,

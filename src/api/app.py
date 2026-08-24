@@ -289,6 +289,16 @@ def get_stop_evidence_summary(stop_id):
         (stop_id,)
     ).fetchall()
 
+    amenity_status = conn.execute(
+        """
+        SELECT amenity_type, derived_status, consensus_status,
+               evidence_conflict, consensus_conflicts_with_other_evidence
+        FROM stop_amenity_status
+        WHERE physical_stop_id=?
+        """,
+        (stop_id,)
+    ).fetchall()
+
 
     conn.close()
 
@@ -306,7 +316,12 @@ def get_stop_evidence_summary(stop_id):
         "reviews": [
             dict(r)
             for r in reviews
-        ]
+        ],
+
+        "amenity_status": {
+            row["amenity_type"]: dict(row)
+            for row in amenity_status
+        }
     }
 
 
@@ -1435,6 +1450,10 @@ GROUP BY ps.id
 
             "community_review":
                 community_review,
+
+            "amenity_status": list(
+                (evidence.get("amenity_status") or {}).values()
+            ),
 
             "recommendations":
                 recommendation_payload,
@@ -3243,8 +3262,8 @@ def stop_review_summary(stop_id):
     evidence = get_stop_evidence_summary(stop_id)
 
     transit = evidence.get("transit") or {}
-    osm = evidence.get("osm") or {}
     reviews = evidence.get("reviews") or []
+    amenity_status = evidence.get("amenity_status") or {}
 
     reasons = []
 
@@ -3253,15 +3272,10 @@ def stop_review_summary(stop_id):
             "Active transit stop confirmed"
         )
 
-    if not osm.get("osm_bench"):
-        reasons.append(
-            "No public data evidence of bench"
-        )
-
-    if not osm.get("osm_shelter"):
-        reasons.append(
-            "No public data evidence of shelter"
-        )
+    for amenity in ("bench", "shelter"):
+        status = (amenity_status.get(amenity) or {}).get("derived_status", "unknown")
+        if status in ("likely_yes", "likely_no", "conflicting", "unknown"):
+            reasons.append(f"Canonical {amenity} status requires verification: {status}")
 
     if len(reviews) == 0:
         reasons.append(
@@ -3282,11 +3296,7 @@ def stop_review_summary(stop_id):
                 "gtfs_confirmed":
                     bool(transit.get("gtfs_bus_stop")),
 
-                "osm_bench":
-                    bool(osm.get("osm_bench")),
-
-                "osm_shelter":
-                    bool(osm.get("osm_shelter")),
+                "amenity_status": amenity_status,
 
                 "community_reviews":
                     len(reviews)

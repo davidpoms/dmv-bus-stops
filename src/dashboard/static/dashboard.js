@@ -277,6 +277,12 @@ function loadStops() {
 
                                 };
 
+                                const amenityStatus = Object.fromEntries(
+                                    (detail.amenity_status || []).map(
+                                        item => [item.amenity_type, item.derived_status]
+                                    )
+                                );
+
 
                                 let reviewReason =
                                     "This stop has been prioritized for community verification because available information suggests additional review would be valuable. Community feedback will help confirm current waiting conditions and document where additional verification is valuable.";
@@ -294,13 +300,16 @@ function loadStops() {
 
 
                                 else if (
-                                    evidence.osm &&
-                                    evidence.osm.osm_shelter === 1 &&
-                                    evidence.osm.osm_bench === 0
+                                    ["confirmed_yes", "likely_yes"].includes(
+                                        amenityStatus.shelter
+                                    ) &&
+                                    ["likely_no", "conflicting", "unknown"].includes(
+                                        amenityStatus.bench
+                                    )
                                 ) {
 
                                     reviewReason =
-                                        "This stop appears to have a shelter, but seating information needs verification. Your review helps document current waiting conditions and available amenities.";
+                                        "Canonical evidence suggests this stop has a shelter, but bench presence still needs verification. Your review helps document current waiting conditions and available amenities.";
 
                                 }
 
@@ -481,7 +490,7 @@ function loadStops() {
                                             Field observation - bench present:
                                             ${obs.bench_present}<br>
 
-                                            Feasible:
+                                            Preliminary pass-through clearance:
                                             ${obs.bench_feasible}<br>
 
                                             Confidence:
