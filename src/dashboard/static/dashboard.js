@@ -741,11 +741,15 @@ body.innerHTML += `
 
 <td>${row.total_stops}</td>
 
-<td>${row.shelter_likely_confirmed}</td>
+<td title="Confirmed: ${row.shelter_confirmed_yes}; Likely: ${row.shelter_likely_yes}">${row.shelter_known_or_likely_present}</td>
+<td title="Confirmed: ${row.shelter_confirmed_no}; Likely: ${row.shelter_likely_no}">${row.shelter_known_or_likely_absent}</td>
+<td>${row.shelter_conflicting}</td>
+<td>${row.shelter_unknown}</td>
 
-<td>${row.bench_likely_confirmed}</td>
-
-<td>${row.amenity_status_unknown}</td>
+<td title="Confirmed: ${row.bench_confirmed_yes}; Likely: ${row.bench_likely_yes}">${row.bench_known_or_likely_present}</td>
+<td title="Confirmed: ${row.bench_confirmed_no}; Likely: ${row.bench_likely_no}">${row.bench_known_or_likely_absent}</td>
+<td>${row.bench_conflicting}</td>
+<td>${row.bench_unknown}</td>
 
 </tr>
 
@@ -790,9 +794,9 @@ function searchPipeline(){
 
         pipelineData.filter(
             x =>
-            x.geography
-            .toLowerCase()
-            .includes(q)
+            `${x.type} ${x.geography}`
+                .toLowerCase()
+                .includes(q)
         )
 
     );

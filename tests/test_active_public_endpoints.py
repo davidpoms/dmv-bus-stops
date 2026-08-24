@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from scripts import generate_priority_levels
 from src.api import app as public_api
+from src.amenities.status_synthesis import SCHEMA_SQL
 
 
 class ActivePublicEndpointTests(unittest.TestCase):
@@ -46,10 +47,13 @@ class ActivePublicEndpointTests(unittest.TestCase):
                 (4,4,'W4','PRS',NULL,1,1,'Y',1,'high','2026-01-01'),
                 (5,5,'W5','PRS',NULL,1,1,'Y',1,'high','2026-01-01');
             CREATE TABLE stop_consensus (
-                stop_id INTEGER, confidence TEXT,
-                has_shelter INTEGER, has_bench INTEGER
+                stop_id INTEGER PRIMARY KEY, confidence TEXT,
+                has_shelter INTEGER, has_bench INTEGER,
+                notes TEXT, updated_at TEXT
             );
-            INSERT INTO stop_consensus VALUES (2,'validated',0,1);
+            INSERT INTO stop_consensus
+                (stop_id,confidence,has_shelter,has_bench)
+                VALUES (2,'validated',0,1);
             CREATE TABLE stop_jurisdiction (
                 stop_id INTEGER, state TEXT, county TEXT,
                 municipality TEXT, dc_ward TEXT, dc_anc TEXT
@@ -96,6 +100,19 @@ class ActivePublicEndpointTests(unittest.TestCase):
             CREATE TABLE routes (id INTEGER PRIMARY KEY, route_id TEXT, route_name TEXT);
             INSERT INTO routes VALUES (10,'C61','Route C61');
             """
+        )
+        conn.executescript(SCHEMA_SQL)
+        conn.executemany(
+            """
+            INSERT INTO stop_amenity_status(
+                physical_stop_id,amenity_type,derived_status,consensus_status,updated_at
+            ) VALUES (?,?,?,'not_reached','test')
+            """,
+            [
+                (1,"shelter","likely_yes"),(1,"bench","unknown"),
+                (2,"shelter","unknown"),(2,"bench","likely_yes"),
+                (3,"shelter","unknown"),(3,"bench","unknown"),
+            ],
         )
         conn.commit()
         conn.close()
@@ -152,6 +169,19 @@ class ActivePublicEndpointTests(unittest.TestCase):
         conn.close()
         self.assertEqual(1, legacy_rows)
 
+    def test_validation_update_uses_configured_database_path(self):
+        response = self.client.post(
+            "/validation/update",
+            json={"stop_id": 1, "confidence": "validated", "notes": "test"},
+        )
+        self.assertEqual(200, response.status_code)
+        conn = sqlite3.connect(self.db)
+        row = conn.execute(
+            "SELECT confidence,notes FROM stop_consensus WHERE stop_id=1"
+        ).fetchone()
+        conn.close()
+        self.assertEqual(("validated", "test"), row)
+
     def test_public_amenity_counts_use_local_and_community_evidence(self):
         summary = self.client.get("/api/evidence-summary").get_json()
         self.assertEqual(
@@ -167,9 +197,10 @@ class ActivePublicEndpointTests(unittest.TestCase):
         geography = self.client.get("/pipeline/geography").get_json()
         county = next(row for row in geography if row["type"] == "County")
         self.assertEqual(3, county["total_stops"])
-        self.assertEqual(1, county["shelter_likely_confirmed"])
-        self.assertEqual(1, county["bench_likely_confirmed"])
-        self.assertEqual(1, county["amenity_status_unknown"])
+        self.assertEqual(1, county["shelter_known_or_likely_present"])
+        self.assertEqual(1, county["bench_known_or_likely_present"])
+        self.assertEqual(2, county["shelter_unknown"])
+        self.assertEqual(2, county["bench_unknown"])
 
     def test_public_payload_and_frontends_do_not_claim_wmata_amenities(self):
         metadata = public_api.get_wmata_evidence(1)

@@ -253,6 +253,10 @@ Review Pipeline Coverage
 All
 </button>
 
+<button onclick="filterPipeline('State')">
+States
+</button>
+
 <button onclick="filterPipeline('DC Ward')">
 DC Wards
 </button>
@@ -288,9 +292,14 @@ onkeyup="searchPipeline()"
 <th>Type</th>
 <th>Geography</th>
 <th>Total Stops</th>
-<th>Shelter Likely / Confirmed</th>
-<th>Bench Likely / Confirmed</th>
-<th>Amenity Status Unknown</th>
+<th>Shelter Yes</th>
+<th>Shelter No</th>
+<th>Shelter Conflict</th>
+<th>Shelter Unknown</th>
+<th>Bench Yes</th>
+<th>Bench No</th>
+<th>Bench Conflict</th>
+<th>Bench Unknown</th>
 </tr>
 
 </thead>
@@ -298,7 +307,7 @@ onkeyup="searchPipeline()"
 <tbody id="pipelineBody">
 
 <tr>
-<td colspan="8">
+<td colspan="11">
 Loading pipeline...
 </td>
 </tr>
