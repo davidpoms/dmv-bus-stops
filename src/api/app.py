@@ -1,4 +1,5 @@
 import json
+import os
 
 """
 DMV Bus Stops Improvement API
@@ -25,6 +26,7 @@ from src.assessment.interpretation import (
 )
 
 from src.review.consensus import calculate_stop_consensus
+from src.amenities.status_synthesis import geography_status_rows
 
 
 app = Flask(
@@ -37,11 +39,11 @@ app.secret_key = "dmv-bus-stops-review-secret"
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 
-DATABASE_PATH = (
-    BASE_DIR
-    / "src"
-    / "database"
-    / "dmv_bus_stops.db"
+DATABASE_PATH = Path(
+    os.environ.get(
+        "DMV_BUS_STOPS_DB",
+        BASE_DIR / "src" / "database" / "dmv_bus_stops.db",
+    )
 )
 
 
@@ -153,6 +155,29 @@ def get_current_amenity_evidence(stop_id):
         WHERE physical_stop_id=?
           AND source != 'DDOT'
         ORDER BY created_at DESC, id DESC
+        """,
+        (stop_id,)
+    )
+
+
+def get_current_amenity_status(stop_id):
+    """Return canonical derived status when the rebuild has been applied."""
+    table_exists = query_db(
+        """
+        SELECT 1 FROM sqlite_master
+        WHERE type='table' AND name='stop_amenity_status'
+        """
+    )
+    if not table_exists:
+        return []
+    return query_db(
+        """
+        SELECT amenity_type, derived_status, consensus_status,
+               evidence_conflict, consensus_conflicts_with_other_evidence,
+               rationale, updated_at
+        FROM stop_amenity_status
+        WHERE physical_stop_id=?
+        ORDER BY CASE amenity_type WHEN 'shelter' THEN 1 ELSE 2 END
         """,
         (stop_id,)
     )
@@ -495,9 +520,7 @@ def validation_update():
     confidence = data.get("confidence", "needs_validation")
     notes = data.get("notes", "")
 
-    conn = sqlite3.connect(
-        "src/database/dmv_bus_stops.db"
-    )
+    conn = sqlite3.connect(DATABASE_PATH)
 
     cursor = conn.cursor()
 
@@ -1981,6 +2004,7 @@ def review_stop_info(stop_id):
 
 
     amenity_evidence = get_current_amenity_evidence(stop_id)
+    amenity_status = get_current_amenity_status(stop_id)
 
 
     improvement_recommendations = query_db(
@@ -2055,6 +2079,19 @@ def review_stop_info(stop_id):
         for row in amenity_evidence
     ]
 
+    amenity_status_payload = [
+        {
+            "amenity_type": status[0],
+            "derived_status": status[1],
+            "consensus_status": status[2],
+            "evidence_conflict": bool(status[3]),
+            "consensus_conflicts_with_other_evidence": bool(status[4]),
+            "rationale": json.loads(status[5]) if status[5] else [],
+            "updated_at": status[6]
+        }
+        for status in amenity_status
+    ]
+
 
     return jsonify(
         {
@@ -2091,6 +2128,9 @@ def review_stop_info(stop_id):
 
             "amenity_evidence":
                 amenity_evidence_payload,
+
+            "amenity_status":
+                amenity_status_payload,
 
 
             "recommendations":
@@ -4488,76 +4528,26 @@ def dashboard():
 
 @app.route("/api/evidence-summary")
 def evidence_summary():
+    table_exists = query_db(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='stop_amenity_status'"
+    )
+    if not table_exists:
+        total = query_db(
+            "SELECT COUNT(*) FROM stop_gtfs_status WHERE current_gtfs=1"
+        )[0][0]
+        return {
+            "total": total, "likely_shelter": 0, "likely_bench": 0,
+            "no_shelter_evidence": total
+        }
 
     summary = query_db(
         """
         SELECT
-
-        COUNT(*) AS total,
-
-        SUM(
-            CASE
-            WHEN EXISTS (
-                SELECT 1
-                FROM stop_amenity_evidence e
-                WHERE e.physical_stop_id = p.id
-                  AND e.source != 'DDOT'
-                  AND e.amenity_type = 'shelter'
-                  AND e.present = 1
-            ) OR EXISTS (
-                SELECT 1
-                FROM stop_consensus sc
-                WHERE sc.stop_id = p.id
-                  AND sc.has_shelter = 1
-            )
-            THEN 1 ELSE 0
-            END
-        ) AS likely_shelter,
-
-        SUM(
-            CASE
-            WHEN EXISTS (
-                SELECT 1
-                FROM stop_amenity_evidence e
-                WHERE e.physical_stop_id = p.id
-                  AND e.source != 'DDOT'
-                  AND e.amenity_type = 'bench'
-                  AND e.present = 1
-            ) OR EXISTS (
-                SELECT 1
-                FROM stop_consensus sc
-                WHERE sc.stop_id = p.id
-                  AND sc.has_bench = 1
-            )
-            THEN 1 ELSE 0
-            END
-        ) AS likely_bench,
-
-        SUM(
-            CASE
-            WHEN NOT EXISTS (
-                SELECT 1
-                FROM stop_amenity_evidence e
-                WHERE e.physical_stop_id = p.id
-                  AND e.source != 'DDOT'
-                  AND e.amenity_type = 'shelter'
-                  AND e.present = 1
-            ) AND NOT EXISTS (
-                SELECT 1
-                FROM stop_consensus sc
-                WHERE sc.stop_id = p.id
-                  AND sc.has_shelter = 1
-            )
-            THEN 1 ELSE 0
-            END
-        ) AS no_shelter_evidence
-
-        FROM physical_stops p
-
-        JOIN stop_gtfs_status sgs
-          ON sgs.physical_stop_id = p.id
-         AND sgs.current_gtfs = 1
-
+            COUNT(DISTINCT physical_stop_id) total,
+            SUM(amenity_type='shelter' AND derived_status IN ('confirmed_yes','likely_yes')) likely_shelter,
+            SUM(amenity_type='bench' AND derived_status IN ('confirmed_yes','likely_yes')) likely_bench,
+            SUM(amenity_type='shelter' AND derived_status='unknown') no_shelter_evidence
+        FROM stop_amenity_status
         """
     )[0]
 
@@ -4600,202 +4590,19 @@ def summary():
 
 @app.route("/pipeline/geography")
 def pipeline_geography():
-
     conn = sqlite3.connect(DATABASE_PATH)
     conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
-
-
-    rows = []
-
-
-    geographies = [
-
-        (
-            "DC Ward",
+    try:
+        table_exists = conn.execute(
             """
-            SELECT
-                sj.dc_ward as geography,
-                sj.stop_id
-            FROM stop_jurisdiction sj
-            JOIN stop_gtfs_status sgs
-              ON sgs.physical_stop_id = sj.stop_id
-             AND sgs.current_gtfs = 1
-            WHERE sj.dc_ward IS NOT NULL
+            SELECT 1 FROM sqlite_master
+            WHERE type='table' AND name='stop_amenity_status'
             """
-        ),
-
-        (
-            "ANC",
-            """
-            SELECT
-                sj.dc_anc as geography,
-                sj.stop_id
-            FROM stop_jurisdiction sj
-            JOIN stop_gtfs_status sgs
-              ON sgs.physical_stop_id = sj.stop_id
-             AND sgs.current_gtfs = 1
-            WHERE sj.dc_anc IS NOT NULL
-            """
-        ),
-
-        (
-            "County",
-            """
-            SELECT
-                sj.state || ' - ' || sj.county as geography,
-                sj.stop_id
-            FROM stop_jurisdiction sj
-            JOIN stop_gtfs_status sgs
-              ON sgs.physical_stop_id = sj.stop_id
-             AND sgs.current_gtfs = 1
-            WHERE sj.county IS NOT NULL
-            """
-        ),
-
-        (
-            "Municipality",
-            """
-            SELECT
-                sj.state || ' - ' || sj.municipality as geography,
-                sj.stop_id
-            FROM stop_jurisdiction sj
-            JOIN stop_gtfs_status sgs
-              ON sgs.physical_stop_id = sj.stop_id
-             AND sgs.current_gtfs = 1
-            WHERE sj.municipality IS NOT NULL
-            """
-        )
-
-    ]
-
-
-    for geo_type, query in geographies:
-
-        cur.execute(query)
-
-        groups = {}
-
-        for r in cur.fetchall():
-
-            groups.setdefault(
-                r["geography"],
-                []
-            ).append(
-                r["stop_id"]
-            )
-
-
-        for name, stops in groups.items():
-
-            placeholders = ",".join(
-                ["?"] * len(stops)
-            )
-
-
-            def count(sql):
-                cur.execute(
-                    sql.format(placeholders),
-                    stops
-                )
-                return cur.fetchone()[0]
-
-
-
-            shelter_count = count("""
-            SELECT COUNT(DISTINCT p.id)
-            FROM physical_stops p
-            WHERE p.id IN ({})
-            AND (
-                EXISTS (
-                    SELECT 1
-                    FROM stop_amenity_evidence e
-                    WHERE e.physical_stop_id = p.id
-                      AND e.source != 'DDOT'
-                      AND e.amenity_type = 'shelter'
-                      AND e.present = 1
-                )
-                OR EXISTS (
-                    SELECT 1
-                    FROM stop_consensus sc
-                    WHERE sc.stop_id = p.id
-                      AND sc.has_shelter = 1
-                )
-            )
-            """)
-
-
-            bench_count = count("""
-            SELECT COUNT(DISTINCT p.id)
-            FROM physical_stops p
-            WHERE p.id IN ({})
-            AND (
-                EXISTS (
-                    SELECT 1
-                    FROM stop_amenity_evidence e
-                    WHERE e.physical_stop_id = p.id
-                      AND e.source != 'DDOT'
-                      AND e.amenity_type = 'bench'
-                      AND e.present = 1
-                )
-                OR EXISTS (
-                    SELECT 1
-                    FROM stop_consensus sc
-                    WHERE sc.stop_id = p.id
-                      AND sc.has_bench = 1
-                )
-            )
-            """)
-
-
-            known_amenity_count = count("""
-            SELECT COUNT(DISTINCT p.id)
-            FROM physical_stops p
-            WHERE p.id IN ({})
-            AND (
-                EXISTS (
-                    SELECT 1
-                    FROM stop_amenity_evidence e
-                    WHERE e.physical_stop_id = p.id
-                      AND e.source != 'DDOT'
-                      AND e.amenity_type IN ('shelter', 'bench')
-                )
-                OR EXISTS (
-                    SELECT 1
-                    FROM stop_consensus sc
-                    WHERE sc.stop_id = p.id
-                      AND (
-                          sc.has_shelter IS NOT NULL
-                          OR sc.has_bench IS NOT NULL
-                      )
-                )
-            )
-            """)
-
-
-            rows.append(
-                {
-                    "type": geo_type,
-
-                    "geography": name,
-
-                    "total_stops": len(stops),
-
-                    "shelter_likely_confirmed":
-                        shelter_count,
-
-                    "bench_likely_confirmed":
-                        bench_count,
-
-                    "amenity_status_unknown":
-                        len(stops) - known_amenity_count
-                }
-            )
-
-
-    conn.close()
-
-    return jsonify(rows)
+        ).fetchone()
+        rows = geography_status_rows(conn) if table_exists else []
+        return jsonify(rows)
+    finally:
+        conn.close()
 
 
 

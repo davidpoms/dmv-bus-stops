@@ -112,6 +112,36 @@ CREATE TABLE IF NOT EXISTS stop_observations (
 );
 
 
+-- Rebuildable canonical shelter/bench synthesis. Source evidence remains in
+-- its own tables; this table contains normalized provenance only.
+CREATE TABLE IF NOT EXISTS stop_amenity_status (
+    physical_stop_id INTEGER NOT NULL,
+    amenity_type TEXT NOT NULL CHECK (amenity_type IN ('shelter', 'bench')),
+    derived_status TEXT NOT NULL CHECK (derived_status IN (
+        'confirmed_yes', 'confirmed_no', 'likely_yes', 'likely_no',
+        'conflicting', 'unknown'
+    )),
+    consensus_status TEXT NOT NULL,
+    local_yes_count INTEGER NOT NULL DEFAULT 0,
+    local_no_count INTEGER NOT NULL DEFAULT 0,
+    local_yes_sources TEXT NOT NULL DEFAULT '[]',
+    local_no_sources TEXT NOT NULL DEFAULT '[]',
+    osm_yes INTEGER NOT NULL DEFAULT 0,
+    osm_no INTEGER NOT NULL DEFAULT 0,
+    community_yes_count INTEGER NOT NULL DEFAULT 0,
+    community_no_count INTEGER NOT NULL DEFAULT 0,
+    community_observation_count INTEGER NOT NULL DEFAULT 0,
+    evidence_conflict INTEGER NOT NULL DEFAULT 0,
+    consensus_conflicts_with_other_evidence INTEGER NOT NULL DEFAULT 0,
+    rationale TEXT NOT NULL DEFAULT '[]',
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (physical_stop_id) REFERENCES physical_stops(id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_stop_amenity_status_identity
+ON stop_amenity_status (physical_stop_id, amenity_type);
+
+
 
 
 
