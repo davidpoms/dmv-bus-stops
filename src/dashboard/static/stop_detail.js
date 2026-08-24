@@ -356,133 +356,10 @@ async function loadStopProfile() {
             return "Not recorded";
         }
 
-        const localEvidence =
-    Array.isArray(review.amenity_evidence)
-    ? review.amenity_evidence.filter(
-        item =>
-            item.amenity_type === "shelter" ||
-            item.amenity_type === "bench"
-      )
-    : [];
-
-
-const localEvidenceGroups = {};
-
-localEvidence.forEach(item => {
-
-    const key =
-        (item.jurisdiction || item.source || "Local jurisdiction")
-        + "|"
-        + (item.source_record || "");
-
-    if (!localEvidenceGroups[key]) {
-
-        localEvidenceGroups[key] = {
-
-            source:
-                item.source ||
-                null,
-
-            jurisdiction:
-                item.jurisdiction ||
-                item.source ||
-                "Local jurisdiction",
-
-            source_record:
-                item.source_record ||
-                null,
-
-            confidence:
-                item.confidence ||
-                "Unknown",
-
-            match_distance_m:
-                item.match_distance_m,
-
-            shelter: null,
-
-            bench: null
-        };
-    }
-
-    if (item.amenity_type === "shelter") {
-
-        localEvidenceGroups[key].shelter =
-            amenityValue(item.value ?? item.present);
-    }
-
-    if (item.amenity_type === "bench") {
-
-        localEvidenceGroups[key].bench =
-            amenityValue(item.value ?? item.present);
-    }
-});
-
-
-const localEvidenceHtml =
-    Object.values(localEvidenceGroups).length
-    ? Object.values(localEvidenceGroups).map(item => `
-
-        <div class="evidence-item">
-
-            <strong>
-                ${
-                    item.jurisdiction === "MONTGOMERY_COUNTY"
-                    ? "Montgomery County"
-                    : item.jurisdiction === "DISTRICT_OF_COLUMBIA"
-                      ? "District of Columbia"
-                    : item.jurisdiction ||
-                      "Local jurisdiction"
-                }
-            </strong>
-
-            <br><br>
-
-            Shelter:
-            <strong>
-                ${item.shelter || "Not recorded"}
-            </strong>
-
-            <br>
-
-            ${
-                item.jurisdiction !== "DISTRICT_OF_COLUMBIA"
-                ? `
-                    Bench:
-                    <strong>
-                        ${item.bench || "Not recorded"}
-                    </strong>
-
-                    <br>
-                `
-                : ""
-            }
-
-            ${
-                item.jurisdiction === "DISTRICT_OF_COLUMBIA" &&
-                item.source === "DDOT_ARCGIS"
-                ? `
-                    Source:
-                    <strong>
-                        DDOT shelter asset record
-                    </strong>
-
-                    <br>
-                `
-                : ""
-            }
-
-            Source record:
-            ${item.source_record || "Not recorded"}
-
-        </div>
-
-    `).join("")
-    : `
-        <div class="community-observations-empty">
-            No current local jurisdiction amenity record available.
-        </div>
-    `;
+        const localEvidenceHtml = LocalEvidenceUI.render(
+            review.amenity_evidence,
+            {showEmpty: true}
+        );
 
 
 const latestCommunity =
@@ -779,9 +656,8 @@ const latestCommunity =
                 </strong>
 
                 <p>
-                    Supporting records for shelter and bench presence.
-                    These records have not been independently verified
-                    by a community observation.
+                    Supporting amenity records from local jurisdictions.
+                    Community observations are shown separately.
                 </p>
 
                 <br><br>

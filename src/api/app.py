@@ -147,8 +147,7 @@ def get_current_amenity_evidence(stop_id):
             match_distance_m,
             notes,
             jurisdiction,
-            value,
-            raw_value
+            value
         FROM stop_amenity_evidence
         WHERE physical_stop_id=?
           AND source != 'DDOT'
@@ -2049,8 +2048,7 @@ def review_stop_info(stop_id):
             "match_distance_m": row[6],
             "notes": row[7],
             "jurisdiction": row[8],
-            "value": row[9],
-            "raw_value": row[10]
+            "value": row[9]
         }
         for row in amenity_evidence
     ]
