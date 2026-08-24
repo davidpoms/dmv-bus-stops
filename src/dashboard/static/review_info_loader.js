@@ -142,6 +142,14 @@ document.addEventListener(
 
                             <br><br>
 
+                            ${
+                                info.amenity_review_priority &&
+                                info.amenity_review_priority.length
+                                ? `<strong>${info.amenity_review_priority[0].amenity_type}:</strong>
+                                   ${info.amenity_review_priority[0].reason}<br><br>`
+                                : ""
+                            }
+
                             Verification priorities consider rider exposure
                             and the need for better information about current
                             stop conditions.
@@ -149,7 +157,7 @@ document.addEventListener(
                             <br><br>
 
                             <strong>
-                            Rider exposure
+                            Rider exposure percentile
                             </strong>
 
                             <br><br>
@@ -167,6 +175,9 @@ document.addEventListener(
                             </strong>
 
                             of stops in the region.
+
+                            This is a route-based exposure estimate, not
+                            observed stop-level ridership.
 
                             <br><br>
 

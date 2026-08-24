@@ -120,7 +120,7 @@ def _derive_status(consensus_value, positive, negative):
     return "unknown"
 
 
-def synthesize_rows(conn, updated_at=None):
+def synthesize_rows(conn, updated_at=None, physical_stop_ids=None):
     """Return exactly two derived rows for every canonical current stop."""
     updated_at = updated_at or datetime.now(timezone.utc).isoformat()
     active_stops = {
@@ -129,6 +129,8 @@ def synthesize_rows(conn, updated_at=None):
             "SELECT physical_stop_id FROM stop_gtfs_status WHERE current_gtfs=1"
         )
     }
+    if physical_stop_ids is not None:
+        active_stops &= {int(stop_id) for stop_id in physical_stop_ids}
     external_ids = _external_stop_ids(conn)
 
     local = {
@@ -312,6 +314,19 @@ def rebuild_stop_amenity_status(conn):
         ).fetchone()
         if tuple(checks) != (expected, 0, 0):
             raise RuntimeError(f"Derived-table validation failed: {tuple(checks)}")
+    return rows
+
+
+def refresh_stop_amenity_status(conn, physical_stop_id):
+    """Refresh only one current stop's two canonical amenity rows."""
+    conn.executescript(SCHEMA_SQL)
+    rows = synthesize_rows(conn, physical_stop_ids=(physical_stop_id,))
+    with conn:
+        conn.execute(
+            "DELETE FROM stop_amenity_status WHERE physical_stop_id=?",
+            (physical_stop_id,),
+        )
+        conn.executemany(INSERT_SQL, rows)
     return rows
 
 

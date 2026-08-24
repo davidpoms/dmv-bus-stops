@@ -7,6 +7,8 @@ DMV Bus Stops Improvement API
 
 from flask import Flask, jsonify, send_from_directory, request, render_template, redirect, session
 import sqlite3
+import calendar
+from datetime import datetime
 from pathlib import Path
 
 
@@ -27,6 +29,7 @@ from src.assessment.interpretation import (
 
 from src.review.consensus import calculate_stop_consensus
 from src.amenities.status_synthesis import geography_status_rows
+from src.amenities.review_priority import refresh_after_community_mutation
 
 
 app = Flask(
@@ -135,6 +138,17 @@ def query_db(sql, params=()):
     return rows
 
 
+def latest_ridership_weekdays():
+    rows = query_db("SELECT MAX(period) FROM ridership_snapshots")
+    if not rows or not rows[0][0]:
+        return 0
+    period = datetime.strptime(rows[0][0], "%Y-%m-%d")
+    return sum(
+        datetime(period.year, period.month, day).weekday() < 5
+        for day in range(1, calendar.monthrange(period.year, period.month)[1] + 1)
+    )
+
+
 def get_current_amenity_evidence(stop_id):
     """Return normalized evidence allowed in current public amenity views."""
     return query_db(
@@ -179,6 +193,26 @@ def get_current_amenity_status(stop_id):
         ORDER BY CASE amenity_type WHEN 'shelter' THEN 1 ELSE 2 END
         """,
         (stop_id,)
+    )
+
+
+def get_amenity_review_priority(stop_id):
+    """Return concise workflow priority when its derived table is available."""
+    if not query_db(
+        "SELECT 1 FROM sqlite_master WHERE type='table' "
+        "AND name='stop_amenity_review_priority'"
+    ):
+        return []
+    return query_db(
+        """
+        SELECT amenity_type,derived_status,workflow_state,
+               rider_exposure_percentile,review_priority_score,priority_tier,
+               community_observation_count,observations_needed_for_consensus,
+               rationale
+        FROM stop_amenity_review_priority WHERE physical_stop_id=?
+        ORDER BY review_priority_score DESC,amenity_type
+        """,
+        (stop_id,),
     )
 
 
@@ -1177,7 +1211,7 @@ GROUP BY ps.id
     rider_exposure = query_db(
         '''
         SELECT
-            assessment_json
+            rider_exposure_percentile
 
         FROM opportunity_assessments
 
@@ -1186,25 +1220,9 @@ GROUP BY ps.id
         (stop_id,)
     )
 
-    rider_exposure_percentile = None
-
-    if rider_exposure and rider_exposure[0][0]:
-
-        try:
-
-            assessment = json.loads(
-                rider_exposure[0][0]
-            )
-
-            rider_exposure_percentile = (
-                assessment.get(
-                    "rider_exposure_percentile"
-                )
-            )
-
-        except Exception:
-
-            pass
+    rider_exposure_percentile = (
+        rider_exposure[0][0] if rider_exposure else None
+    )
 
 
     ridership_exposure = (
@@ -1722,8 +1740,8 @@ def review_stop_info(stop_id):
     ridership_exposure = (
         {
             "average_weekday_boardings":
-                round(ridership[0][0] / 23)
-                if ridership[0][0]
+                round(ridership[0][0] / latest_ridership_weekdays())
+                if ridership[0][0] and latest_ridership_weekdays()
                 else 0,
 
             "route_count":
@@ -1780,8 +1798,8 @@ def review_stop_info(stop_id):
                 else 0,
 
             "average_weekday_boardings":
-                round(ridership[0][0] / 23)
-                if ridership[0][0]
+                round(ridership[0][0] / latest_ridership_weekdays())
+                if ridership[0][0] and latest_ridership_weekdays()
                 else 0,
 
             "route_count":
@@ -1818,7 +1836,7 @@ def review_stop_info(stop_id):
     rider_exposure = query_db(
         '''
         SELECT
-            assessment_json
+            rider_exposure_percentile
 
         FROM opportunity_assessments
 
@@ -1828,26 +1846,9 @@ def review_stop_info(stop_id):
     )
 
 
-    rider_exposure_percentile = None
-
-
-    if rider_exposure and rider_exposure[0][0]:
-
-        try:
-
-            assessment = json.loads(
-                rider_exposure[0][0]
-            )
-
-            rider_exposure_percentile = (
-                assessment.get(
-                    "rider_exposure_percentile"
-                )
-            )
-
-        except Exception:
-
-            pass
+    rider_exposure_percentile = (
+        rider_exposure[0][0] if rider_exposure else None
+    )
 
 
 
@@ -2004,6 +2005,7 @@ def review_stop_info(stop_id):
 
     amenity_evidence = get_current_amenity_evidence(stop_id)
     amenity_status = get_current_amenity_status(stop_id)
+    amenity_review_priority = get_amenity_review_priority(stop_id)
 
 
     improvement_recommendations = query_db(
@@ -2090,6 +2092,21 @@ def review_stop_info(stop_id):
         for status in amenity_status
     ]
 
+    amenity_review_priority_payload = [
+        {
+            "amenity_type": item[0],
+            "derived_status": item[1],
+            "workflow_state": item[2],
+            "rider_exposure_percentile": item[3],
+            "review_priority_score": item[4],
+            "priority_tier": item[5],
+            "community_observation_count": item[6],
+            "observations_needed_for_consensus": item[7],
+            "reason": json.loads(item[8]).get("summary") if item[8] else None,
+        }
+        for item in amenity_review_priority
+    ]
+
 
     return jsonify(
         {
@@ -2129,6 +2146,8 @@ def review_stop_info(stop_id):
 
             "amenity_status":
                 amenity_status_payload,
+
+            "amenity_review_priority": amenity_review_priority_payload,
 
 
             "recommendations":
@@ -2809,7 +2828,25 @@ def submit_review():
 
 
     # Recalculate community consensus from saved observations.
-    consensus = calculate_stop_consensus(stop_id)
+    consensus = calculate_stop_consensus(stop_id, DATABASE_PATH)
+
+    refresh_conn = sqlite3.connect(DATABASE_PATH)
+    try:
+        try:
+            refresh_after_community_mutation(refresh_conn, stop_id)
+        except Exception:
+            app.logger.exception(
+                "Community evidence saved but derived amenity refresh failed "
+                "for stop %s",
+                stop_id,
+            )
+            return {
+                "error": "Community evidence was saved, but derived status refresh failed",
+                "code": "derived_refresh_failed",
+                "stop_id": stop_id,
+            }, 500
+    finally:
+        refresh_conn.close()
 
 
     query_db(
@@ -3128,8 +3165,20 @@ def review_queue():
     conn = sqlite3.connect(DATABASE_PATH)
     conn.row_factory = sqlite3.Row
 
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(review_queue)")}
+    has_priority = "review_priority_score" in columns
+    priority_select = (
+        "rq.review_priority_score,rq.priority_amenity,"
+        "rq.shelter_review_priority,rq.bench_review_priority,"
+        "rq.rider_exposure_percentile,rq.priority_reason"
+        if has_priority else
+        "NULL review_priority_score,NULL priority_amenity,"
+        "NULL shelter_review_priority,NULL bench_review_priority,"
+        "NULL rider_exposure_percentile,NULL priority_reason"
+    )
+    order = "rq.review_priority_score DESC," if has_priority else ""
     rows = conn.execute(
-        """
+        f"""
         SELECT
             rq.physical_stop_id,
             ps.latitude AS lat,
@@ -3138,7 +3187,8 @@ def review_queue():
             rq.opportunity_score,
             rq.location_name,
             rq.review_status,
-            rq.consensus_status
+            rq.consensus_status,
+            {priority_select}
 
         FROM review_queue rq
 
@@ -3152,6 +3202,7 @@ def review_queue():
         WHERE rq.review_status = 'pending'
 
         ORDER BY
+            {order}
             rq.priority_rank,
             rq.physical_stop_id
 
@@ -3172,7 +3223,13 @@ def review_queue():
                     "priority_rank": row["priority_rank"],
                     "opportunity_score": row["opportunity_score"],
                     "review_status": row["review_status"],
-                    "consensus_status": row["consensus_status"]
+                    "consensus_status": row["consensus_status"],
+                    "review_priority_score": row["review_priority_score"],
+                    "priority_amenity": row["priority_amenity"],
+                    "shelter_review_priority": row["shelter_review_priority"],
+                    "bench_review_priority": row["bench_review_priority"],
+                    "rider_exposure_percentile": row["rider_exposure_percentile"],
+                    "priority_reason": row["priority_reason"]
                 }
                 for row in rows
             ]

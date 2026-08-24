@@ -88,14 +88,14 @@ def _seating_values(rows):
     return values
 
 
-def calculate_stop_consensus(stop_id):
+def calculate_stop_consensus(stop_id, database_path=None):
     """
     Recalculate consensus for one stop.
 
     Only community_review observations are considered.
     """
 
-    conn = sqlite3.connect(DATABASE_PATH)
+    conn = sqlite3.connect(database_path or DATABASE_PATH)
     conn.row_factory = sqlite3.Row
 
     rows = conn.execute(

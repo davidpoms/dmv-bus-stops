@@ -17,6 +17,8 @@ import sqlite3
 import json
 from pathlib import Path
 
+from src.scoring.rider_exposure import persist_assessment_percentiles
+
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 
@@ -54,12 +56,21 @@ def setup_table(cursor):
     );
     """)
 
+    columns = {row[1] for row in cursor.execute(
+        "PRAGMA table_info(opportunity_assessments)"
+    )}
+    if "rider_exposure_percentile" not in columns:
+        cursor.execute(
+            "ALTER TABLE opportunity_assessments "
+            "ADD COLUMN rider_exposure_percentile REAL"
+        )
 
 
-def create_assessments():
+
+def create_assessments(database_path=None):
 
     conn = sqlite3.connect(
-        DATABASE_PATH
+        database_path or DATABASE_PATH
     )
 
     cursor = conn.cursor()
@@ -158,7 +169,7 @@ def create_assessments():
                 f"""
                 SELECT
                     route_id,
-                    weekday_boardings
+                    MAX(weekday_boardings) AS weekday_boardings
 
                 FROM ridership_snapshots
 
@@ -170,7 +181,9 @@ def create_assessments():
                 AND period = (
                     SELECT MAX(period)
                     FROM ridership_snapshots
-                );
+                )
+
+                GROUP BY route_id;
                 """,
                 routes
             )
@@ -277,6 +290,7 @@ def create_assessments():
 
 
 
+    persist_assessment_percentiles(conn)
     conn.commit()
     conn.close()
 

@@ -109,7 +109,7 @@ def calculate_scores():
 
                 route_id,
 
-                weekday_boardings
+                MAX(weekday_boardings) AS weekday_boardings
 
             FROM ridership_snapshots
 
@@ -117,6 +117,8 @@ def calculate_scores():
                 SELECT MAX(period)
                 FROM ridership_snapshots
             )
+
+            GROUP BY route_id
 
         )
 

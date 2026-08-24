@@ -141,6 +141,31 @@ CREATE TABLE IF NOT EXISTS stop_amenity_status (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_stop_amenity_status_identity
 ON stop_amenity_status (physical_stop_id, amenity_type);
 
+CREATE TABLE IF NOT EXISTS stop_amenity_review_priority (
+    physical_stop_id INTEGER NOT NULL,
+    amenity_type TEXT NOT NULL CHECK (amenity_type IN ('shelter','bench')),
+    derived_status TEXT NOT NULL,
+    consensus_status TEXT NOT NULL,
+    workflow_state TEXT NOT NULL,
+    rider_exposure_percentile REAL NOT NULL,
+    evidence_conflict_component REAL NOT NULL,
+    consensus_progress_component REAL NOT NULL,
+    exposure_component REAL NOT NULL,
+    review_priority_score REAL NOT NULL,
+    priority_tier TEXT NOT NULL,
+    evidence_conflict INTEGER NOT NULL,
+    consensus_conflicts_with_other_evidence INTEGER NOT NULL,
+    community_observation_count INTEGER NOT NULL,
+    observations_needed_for_consensus INTEGER NOT NULL,
+    rationale TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (physical_stop_id, amenity_type),
+    FOREIGN KEY (physical_stop_id) REFERENCES physical_stops(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_amenity_review_priority_order
+ON stop_amenity_review_priority(priority_tier, review_priority_score DESC);
+
 
 
 

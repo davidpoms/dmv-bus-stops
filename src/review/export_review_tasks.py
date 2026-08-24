@@ -38,8 +38,20 @@ def export_review_tasks(database_path=DATABASE_PATH, output_path=OUTPUT_PATH):
 
     cursor = conn.cursor()
 
+    columns = {row[1] for row in cursor.execute("PRAGMA table_info(review_queue)")}
+    has_priority = "review_priority_score" in columns
+    priority_select = (
+        "rq.review_priority_score, rq.priority_amenity, "
+        "rq.shelter_review_priority, rq.bench_review_priority, "
+        "rq.rider_exposure_percentile, rq.priority_reason"
+        if has_priority else
+        "NULL review_priority_score,NULL priority_amenity,"
+        "NULL shelter_review_priority,NULL bench_review_priority,"
+        "NULL rider_exposure_percentile,NULL priority_reason"
+    )
+    order = "rq.review_priority_score DESC, rq.priority_rank" if has_priority else "rq.priority_rank"
     cursor.execute(
-        """
+        f"""
         SELECT
 
             rq.id,
@@ -54,7 +66,8 @@ def export_review_tasks(database_path=DATABASE_PATH, output_path=OUTPUT_PATH):
 
             rq.review_status,
 
-            rq.review_questions
+            rq.review_questions,
+            {priority_select}
 
         FROM review_queue rq
 
@@ -64,7 +77,7 @@ def export_review_tasks(database_path=DATABASE_PATH, output_path=OUTPUT_PATH):
 
         WHERE rq.review_status = 'pending'
 
-        ORDER BY rq.priority_rank;
+        ORDER BY {order};
 
         """
     )
@@ -87,7 +100,13 @@ def export_review_tasks(database_path=DATABASE_PATH, output_path=OUTPUT_PATH):
                     row["review_questions"]
                 )
                 if row["review_questions"]
-                else []
+                else [],
+                "review_priority_score": row["review_priority_score"],
+                "priority_amenity": row["priority_amenity"],
+                "shelter_review_priority": row["shelter_review_priority"],
+                "bench_review_priority": row["bench_review_priority"],
+                "rider_exposure_percentile": row["rider_exposure_percentile"],
+                "priority_reason": row["priority_reason"],
             }
         )
 

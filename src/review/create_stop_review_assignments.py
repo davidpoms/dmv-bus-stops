@@ -35,14 +35,19 @@ def create_assignments():
         raise Exception("No reviewers found")
 
 
-    tasks = cur.execute("""
+    queue_columns = {row[1] for row in cur.execute("PRAGMA table_info(review_queue)")}
+    order = (
+        "rq.review_priority_score DESC, rq.priority_rank"
+        if "review_priority_score" in queue_columns else "rq.priority_rank"
+    )
+    tasks = cur.execute(f"""
         SELECT rq.physical_stop_id
         FROM review_queue rq
         JOIN stop_gtfs_status sgs
           ON sgs.physical_stop_id = rq.physical_stop_id
          AND sgs.current_gtfs = 1
         WHERE rq.review_status = 'pending'
-        ORDER BY rq.priority_rank
+        ORDER BY {order}
     """).fetchall()
 
 
