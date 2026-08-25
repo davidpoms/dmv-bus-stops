@@ -37,6 +37,15 @@ class ApiDatabasePathTests(unittest.TestCase):
     def test_environment_override_is_honored(self):
         override = ROOT / "configured" / "override.db"
         self.assertEqual(override, self.imported_database_path(override))
+        env = os.environ.copy()
+        env["DMV_BUS_STOPS_DB"] = str(override)
+        output = subprocess.check_output(
+            [sys.executable, "-c",
+             "from src.api.app import DATABASE_PATH; "
+             "from src.review.assignment_router import DB; print(DATABASE_PATH); print(DB)"],
+            cwd=ROOT, env=env, text=True,
+        ).splitlines()
+        self.assertEqual([str(override), str(override)], output)
 
     def test_app_has_no_cwd_relative_production_database_literal(self):
         source = APP_PATH.read_text(encoding="utf-8")

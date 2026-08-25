@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import uuid
 from pathlib import Path
@@ -5,12 +6,10 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 
-DB = (
-    BASE_DIR
-    / "src"
-    / "database"
-    / "dmv_bus_stops.db"
-)
+DB = Path(os.environ.get(
+    "DMV_BUS_STOPS_DB",
+    BASE_DIR / "src" / "database" / "dmv_bus_stops.db",
+))
 
 
 def get_or_create_reviewer(reviewer_key=None):
@@ -92,7 +91,8 @@ def assign_stop(
     scenario,
     stop_id=None,
     latitude=None,
-    longitude=None
+    longitude=None,
+    campaign=None,
 ):
 
     conn = sqlite3.connect(DB)
@@ -306,6 +306,32 @@ def assign_stop(
     # Opportunity/default mode
     # -------------------------------------------------
 
+    elif campaign in ("presence_verification", "seating_adequacy", "bench_clearance"):
+
+        desired_state = {
+            "presence_verification": "verify_presence",
+            "seating_adequacy": "assess_adequacy",
+            "bench_clearance": "collect_clearance_observation",
+        }[campaign]
+        row = cur.execute(
+            """
+            SELECT rq.id, rq.physical_stop_id
+            FROM review_queue rq
+            JOIN seating_improvement_opportunities sio
+              ON sio.physical_stop_id=rq.physical_stop_id
+            JOIN stop_gtfs_status sgs
+              ON sgs.physical_stop_id=rq.physical_stop_id AND sgs.current_gtfs=1
+            WHERE rq.review_status='pending' AND rq.community_review_available=1
+              AND sio.workflow_state=?
+              AND rq.physical_stop_id NOT IN
+                  (SELECT stop_id FROM stop_review_assignments WHERE reviewer_id=?)
+              AND rq.physical_stop_id NOT IN
+                  (SELECT stop_id FROM stop_review_assignments WHERE status='assigned')
+            ORDER BY sio.priority_score DESC, sio.physical_stop_id
+            LIMIT 1
+            """, (desired_state, reviewer_id)
+        ).fetchone()
+
     else:
 
         row = cur.execute(
@@ -381,24 +407,36 @@ def assign_stop(
     assigned_stop_id = row[1]
 
 
-    cur.execute(
+    assignment_columns = {
+        item[1] for item in cur.execute("PRAGMA table_info(stop_review_assignments)")
+    }
+    if "campaign" in assignment_columns:
+        cur.execute(
         """
         INSERT INTO stop_review_assignments
         (
             stop_id,
             reviewer_id,
             scenario,
+            campaign,
             status
         )
 
-        VALUES (?, ?, ?, 'assigned')
+        VALUES (?, ?, ?, ?, 'assigned')
         """,
         (
             assigned_stop_id,
             reviewer_id,
-            scenario
+            scenario,
+            campaign,
         )
-    )
+        )
+    else:
+        cur.execute(
+            "INSERT INTO stop_review_assignments(stop_id,reviewer_id,scenario,status) "
+            "VALUES (?,?,?,'assigned')",
+            (assigned_stop_id, reviewer_id, scenario),
+        )
 
 
     assignment_id = cur.lastrowid

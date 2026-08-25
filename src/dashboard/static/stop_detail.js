@@ -106,9 +106,9 @@ async function loadStopProfile() {
                 ? stop.opportunity.recommendations
                 : [];
 
-        const benchCandidate =
-            stop.bench_installation_candidate ||
-            review.bench_installation_candidate ||
+        const seatingOpportunity =
+            stop.seating_improvement_opportunity ||
+            review.seating_improvement_opportunity ||
             null;
 
 
@@ -493,25 +493,30 @@ const latestCommunity =
 
 
             ${
-                benchCandidate
+                seatingOpportunity
                     ? `
-                    <div class="card bench-installation-candidate-card">
-                        <strong>Bench installation candidate</strong>
+                    <div class="card seating-improvement-opportunity-card">
+                        <strong>Seating improvement priority</strong>
                         <p>
-                            Bench status: <strong>${recommendationPriority(benchCandidate.canonical_bench_status)}</strong><br>
-                            Evidence: <strong>${(benchCandidate.local_negative_sources || []).join(", ") || recommendationPriority(benchCandidate.evidence_strength)}</strong><br>
-                            Opportunity score: <strong>${benchCandidate.opportunity_score.toFixed(1)}</strong><br>
-                            Rider exposure: <strong>${benchCandidate.rider_exposure_percentile.toFixed(1)}th percentile</strong><br>
-                            Review priority: <strong>${benchCandidate.review_priority_score === null ? "Resolved or unavailable" : benchCandidate.review_priority_score.toFixed(1)}</strong><br>
-                            Preliminary clearance: <strong>${recommendationPriority(benchCandidate.clearance_status)}</strong><br>
-                            Next action: <strong>${recommendationPriority(benchCandidate.next_action)}</strong>
+                            Existing bench status: <strong>${recommendationPriority(seatingOpportunity.bench_status)}</strong><br>
+                            Evidence certainty: <strong>${recommendationPriority(seatingOpportunity.bench_evidence_strength)}</strong><br>
+                            Adequacy evidence: <strong>${recommendationPriority(seatingOpportunity.adequacy_status)}</strong><br>
+                            Documented need index: <strong>${seatingOpportunity.documented_need_index.toFixed(1)} / 100</strong><br>
+                            Strongest need: <strong>${recommendationPriority(seatingOpportunity.strongest_need_signal)}</strong><br>
+                            Rider exposure: <strong>${seatingOpportunity.rider_exposure_percentile.toFixed(1)}th percentile</strong><br>
+                            Provisional seating-improvement priority: <strong>${seatingOpportunity.priority_score.toFixed(1)}</strong><br>
+                            Preliminary clearance: <strong>${recommendationPriority(seatingOpportunity.clearance_status)}</strong><br>
+                            Next action: <strong>${recommendationPriority(seatingOpportunity.workflow_state)}</strong>
                         </p>
-                        <p>${benchCandidate.rationale.join(" ")}</p>
+                        <p>${seatingOpportunity.rationale.join(" ")}</p>
+                        <details><summary>Priority components and weights</summary><pre>${JSON.stringify(seatingOpportunity.priority_factors, null, 2)}</pre></details>
                         <p class="impact-note">
+                            Every active stop remains in the opportunity universe; this score ranks rather than gates.
+                            Amenity presence does not establish adequate rider comfort, and absence does not establish installation feasibility.
+                            Rider exposure is route-based and is not observed stop-level boardings.<br>
                             Preliminary clearance does not establish engineering feasibility,
                             ADA compliance, ownership, utilities, permits, or construction readiness.
                         </p>
-                        ${benchCandidate.verification_still_needed ? `<p><strong>Bench-presence verification remains useful in parallel.</strong></p>` : ""}
                     </div>`
                     : ""
             }

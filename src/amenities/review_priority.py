@@ -210,5 +210,9 @@ def refresh_after_community_mutation(conn, physical_stop_id):
 
     refresh_stop_amenity_status(conn, physical_stop_id)
     rebuild_review_priority(conn, physical_stop_id)
+    from src.assessment.generate_seating_improvement_opportunities import (
+        build_opportunities,
+    )
+    build_opportunities(conn, physical_stop_id, recompute_ranks=True)
     with conn:
         refresh_review_queue_stop(conn, physical_stop_id)

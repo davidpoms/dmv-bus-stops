@@ -96,6 +96,14 @@ CREATE TABLE IF NOT EXISTS stop_observations (
 
     review_mode TEXT,
 
+    assignment_id INTEGER,
+
+    streetview_imagery_month TEXT,
+
+    weather_exposure TEXT,
+
+    riders_avoid_facilities TEXT,
+
     rider_activity TEXT,
 
     usage_times TEXT,
@@ -107,7 +115,10 @@ CREATE TABLE IF NOT EXISTS stop_observations (
     steward_candidate BOOLEAN DEFAULT 0,
 
     FOREIGN KEY(physical_stop_id)
-        REFERENCES physical_stops(id)
+        REFERENCES physical_stops(id),
+
+    FOREIGN KEY(assignment_id)
+        REFERENCES stop_review_assignments(id)
 
 );
 
@@ -198,6 +209,42 @@ ON bench_installation_candidates(
     next_action, opportunity_score DESC,
     rider_exposure_percentile DESC, physical_stop_id
 );
+
+-- Canonical broad seating opportunity universe. Membership is active-stop
+-- based; the legacy opportunity score is context and never an eligibility gate.
+CREATE TABLE IF NOT EXISTS seating_improvement_opportunities (
+    physical_stop_id INTEGER PRIMARY KEY,
+    opportunity_rank INTEGER NOT NULL,
+    primary_name TEXT,
+    state TEXT,
+    county TEXT,
+    municipality TEXT,
+    bench_status TEXT NOT NULL,
+    shelter_status TEXT NOT NULL,
+    bench_evidence_strength TEXT NOT NULL,
+    bench_consensus_status TEXT NOT NULL,
+    adequacy_status TEXT NOT NULL,
+    adequacy_observation_count INTEGER NOT NULL,
+    adequacy_factors TEXT NOT NULL,
+    clearance_status TEXT NOT NULL,
+    clearance_yes_count INTEGER NOT NULL,
+    clearance_no_count INTEGER NOT NULL,
+    workflow_state TEXT NOT NULL,
+    rider_exposure_percentile REAL NOT NULL,
+    documented_need_index REAL NOT NULL,
+    strongest_need_signal TEXT NOT NULL,
+    need_signals TEXT NOT NULL,
+    rider_benefit_component REAL NOT NULL,
+    documented_need_component REAL NOT NULL,
+    priority_score REAL NOT NULL,
+    priority_factors TEXT NOT NULL,
+    rationale TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (physical_stop_id) REFERENCES physical_stops(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_seating_opportunity_order
+ON seating_improvement_opportunities(priority_score DESC, physical_stop_id);
 
 
 

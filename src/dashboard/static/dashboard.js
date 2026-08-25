@@ -1567,14 +1567,14 @@ function renderBenchCandidates(rows) {
     if (!body) return;
     body.innerHTML = rows.length ? rows.map(candidate => `
         <tr>
-            <td>${candidate.candidate_rank}</td>
-            <td><a href="/stop/${candidate.physical_stop_id}">${candidate.name || "Unnamed stop"}</a></td>
+            <td>${candidate.opportunity_rank}</td>
+            <td><a href="/stop/${candidate.physical_stop_id}">${candidate.primary_name || "Unnamed stop"}</a></td>
             <td>${[candidate.municipality, candidate.county, candidate.state].filter(Boolean).join(", ")}</td>
-            <td>${candidate.opportunity_score.toFixed(1)}</td>
+            <td>${candidate.priority_score.toFixed(1)}</td>
             <td>${candidate.rider_exposure_percentile.toFixed(1)}th percentile</td>
-            <td>${humanizeBenchCandidateValue(candidate.evidence_strength)}</td>
+            <td>${candidate.documented_need_index.toFixed(0)} — ${humanizeBenchCandidateValue(candidate.strongest_need_signal)}</td>
             <td>${humanizeBenchCandidateValue(candidate.clearance_status)}</td>
-            <td>${humanizeBenchCandidateValue(candidate.next_action)}</td>
+            <td>${humanizeBenchCandidateValue(candidate.workflow_state)}</td>
         </tr>`).join("") : `<tr><td colspan="8">No matching candidates.</td></tr>`;
 }
 
@@ -1588,19 +1588,19 @@ function filterBenchCandidates() {
 async function loadBenchCandidates() {
     if (!document.getElementById("benchCandidateBody")) return;
     try {
-        const response = await fetch("/bench-candidates");
+        const response = await fetch("/seating-opportunities");
         const data = await response.json();
-        benchCandidateRows = data.candidates || [];
+        benchCandidateRows = data.opportunities || [];
         const summary = data.summary || {};
         document.getElementById("benchCandidateMetrics").innerHTML = `
-            <strong>${summary.bench_candidates || 0}</strong> candidates &middot;
-            <strong>${summary.high_ridership_bench_candidates || 0}</strong> high-ridership &middot;
-            <strong>${summary.needing_clearance_observation || 0}</strong> need clearance observation &middot;
-            <strong>${summary.ready_for_planning_review || 0}</strong> ready for planning review`;
+            <strong>${summary.total_active_stops || 0}</strong> active stops &middot;
+            <strong>${summary.bench_absent || 0}</strong> likely/confirmed bench absent &middot;
+            <strong>${summary.bench_presence_unknown || 0}</strong> presence unknown &middot;
+            <strong>${summary.observed_seating_limitation || 0}</strong> observed limitation`;
         renderBenchCandidates(benchCandidateRows);
     } catch (error) {
         document.getElementById("benchCandidateBody").innerHTML =
-            `<tr><td colspan="8">Bench candidates are unavailable.</td></tr>`;
+            `<tr><td colspan="8">Seating opportunities are unavailable.</td></tr>`;
     }
 }
 

@@ -248,6 +248,39 @@ def get_bench_candidate(stop_id):
     return serialize_bench_candidate(rows[0]) if rows else None
 
 
+def serialize_seating_opportunity(row):
+    columns = (
+        "physical_stop_id", "opportunity_rank", "primary_name", "state", "county",
+        "municipality", "bench_status", "shelter_status", "bench_evidence_strength",
+        "bench_consensus_status", "adequacy_status", "adequacy_observation_count",
+        "adequacy_factors", "clearance_status", "clearance_yes_count",
+        "clearance_no_count", "workflow_state", "rider_exposure_percentile",
+        "documented_need_index", "strongest_need_signal", "need_signals",
+        "rider_benefit_component", "documented_need_component", "priority_score",
+        "priority_factors", "rationale", "updated_at",
+    )
+    item = dict(zip(columns, row))
+    for field in ("adequacy_factors", "need_signals", "priority_factors", "rationale"):
+        if field in item and isinstance(item[field], str):
+            item[field] = json.loads(item[field])
+    item["engineering_feasibility_established"] = False
+    item["clearance_is_preliminary_observation"] = True
+    return item
+
+
+def get_seating_opportunity(stop_id):
+    if not query_db(
+        "SELECT 1 FROM sqlite_master WHERE type='table' "
+        "AND name='seating_improvement_opportunities'"
+    ):
+        return None
+    rows = query_db(
+        "SELECT * FROM seating_improvement_opportunities WHERE physical_stop_id=?",
+        (stop_id,),
+    )
+    return serialize_seating_opportunity(rows[0]) if rows else None
+
+
 def stop_is_current(stop_id):
     rows = query_db(
         """
@@ -1546,6 +1579,7 @@ def review_start():
             "opportunity"
         )
     )
+    campaign = request.args.get("campaign")
 
     stop_id_requested = request.args.get("stop_id")
 
@@ -1584,7 +1618,8 @@ def review_start():
         result = assign_stop(
             reviewer_id,
             scenario,
-            stop_id=requested_stop_id
+            stop_id=requested_stop_id,
+            campaign=campaign,
         )
 
     else:
@@ -1593,7 +1628,8 @@ def review_start():
             reviewer_id,
             scenario,
             latitude=latitude,
-            longitude=longitude
+            longitude=longitude,
+            campaign=campaign,
         )
 
 
@@ -2201,6 +2237,7 @@ def review_stop_info(stop_id):
 
             "amenity_review_priority": amenity_review_priority_payload,
 
+            "seating_improvement_opportunity": get_seating_opportunity(stop_id),
             "bench_installation_candidate": bench_candidate,
 
 
@@ -2316,6 +2353,46 @@ def bench_candidates():
         ),
     }
     return jsonify({"summary": summary, "candidates": candidates})
+
+
+@app.route("/seating-opportunities")
+def seating_opportunities():
+    if not query_db(
+        "SELECT 1 FROM sqlite_master WHERE type='table' "
+        "AND name='seating_improvement_opportunities'"
+    ):
+        return jsonify({"summary": {}, "opportunities": []})
+    clauses, params = [], []
+    for column in ("state", "county", "municipality", "bench_status",
+                   "adequacy_status", "clearance_status", "workflow_state",
+                   "strongest_need_signal"):
+        value = request.args.get(column)
+        if value:
+            clauses.append(f"{column}=?")
+            params.append(value)
+    where = " WHERE " + " AND ".join(clauses) if clauses else ""
+    rows = query_db(
+        "SELECT * FROM seating_improvement_opportunities" + where
+        + " ORDER BY opportunity_rank", tuple(params)
+    )
+    opportunities = [serialize_seating_opportunity(row) for row in rows]
+    summary = {
+        "total_active_stops": len(opportunities),
+        "bench_absent": sum(x["bench_status"] in ("likely_no", "confirmed_no") for x in opportunities),
+        "bench_presence_unknown": sum(x["bench_status"] == "unknown" for x in opportunities),
+        "bench_evidence_conflicting": sum(x["bench_status"] == "conflicting" for x in opportunities),
+        "bench_present_adequacy_unknown": sum(x["bench_status"] in ("likely_yes", "confirmed_yes") and x["adequacy_status"] == "unknown" for x in opportunities),
+        "observed_seating_limitation": sum(x["adequacy_status"] == "limitation_observed" for x in opportunities),
+        "documented_need": {
+            signal: sum(x["strongest_need_signal"] == signal for x in opportunities)
+            for signal in sorted({x["strongest_need_signal"] for x in opportunities})
+        },
+        "workflow": {state: sum(x["workflow_state"] == state for x in opportunities)
+                     for state in ("verify_presence", "assess_adequacy",
+                                   "collect_clearance_observation", "planning_review",
+                                   "constrained_or_special_review", "no_current_action")},
+    }
+    return jsonify({"summary": summary, "opportunities": opportunities})
 
 
 
@@ -2775,19 +2852,26 @@ def submit_review():
         }, 409
 
 
+    observation_columns = {
+        row[1] for row in query_db("PRAGMA table_info(stop_observations)")
+    }
+    for column, declaration in (
+        ("assignment_id", "INTEGER"),
+        ("weather_exposure", "TEXT"),
+        ("riders_avoid_facilities", "TEXT"),
+    ):
+        if column not in observation_columns:
+            query_db(f"ALTER TABLE stop_observations ADD COLUMN {column} {declaration}")
+
     existing_review = query_db(
         """
         SELECT id
         FROM stop_observations
-        WHERE physical_stop_id=?
-        AND reviewer_id=?
+        WHERE assignment_id=?
         AND source='community_review'
         LIMIT 1
         """,
-        (
-            assignment_stop_id,
-            assignment_reviewer_id
-        )
+        (assignment_id,)
     )
 
 
@@ -2829,6 +2913,8 @@ def submit_review():
                 steward_email=?,
                 steward_candidate=?,
                 streetview_imagery_month=?,
+                weather_exposure=?,
+                riders_avoid_facilities=?,
                 observed_at=CURRENT_TIMESTAMP
             WHERE id=?
             """,
@@ -2856,6 +2942,8 @@ def submit_review():
                 data.get("steward_email"),
                 data.get("steward_candidate", 0),
                 data.get("streetview_imagery_month"),
+                data.get("weather_exposure"),
+                data.get("riders_avoid_facilities"),
                 existing_review[0][0]
             )
         )
@@ -2892,11 +2980,14 @@ def submit_review():
             steward_email,
             steward_candidate,
             concrete_pad_needed,
-            streetview_imagery_month
+            streetview_imagery_month,
+            assignment_id,
+            weather_exposure,
+            riders_avoid_facilities
         )
 
         VALUES
-        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 
         """,
         (
@@ -2925,7 +3016,10 @@ def submit_review():
             data.get("steward_email"),
             data.get("steward_candidate", 0),
             data.get("concrete_pad_needed"),
-            data.get("streetview_imagery_month")
+            data.get("streetview_imagery_month"),
+            assignment_id,
+            data.get("weather_exposure"),
+            data.get("riders_avoid_facilities")
         )
     )
 

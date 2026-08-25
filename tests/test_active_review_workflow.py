@@ -236,6 +236,58 @@ class ActiveReviewWorkflowTests(unittest.TestCase):
         self.assertEqual(200, history.status_code)
         self.assertEqual(1, len(history.get_json()["reviews"]))
 
+    def test_submission_persists_prospective_comfort_fields_and_assignment_history(self):
+        conn = sqlite3.connect(self.db)
+        for name, declaration in (
+            ("observer", "TEXT"), ("trash_present", "TEXT"),
+            ("bench_feasible", "TEXT"), ("concrete_pad_needed", "TEXT"),
+            ("ada_clearance_possible", "TEXT"), ("bench_type", "TEXT"),
+            ("bench_condition", "TEXT"), ("shelter_type", "TEXT"),
+            ("rider_comfort_category", "TEXT"), ("accessibility_status", "TEXT"),
+            ("hostile_design", "TEXT"), ("confidence", "TEXT"),
+            ("review_mode", "TEXT"), ("reviewer_relationship", "TEXT"),
+            ("rider_activity", "TEXT"), ("usage_times", "TEXT"),
+            ("property_owner_outreach", "TEXT"), ("steward_email", "TEXT"),
+            ("steward_candidate", "INTEGER"), ("streetview_imagery_month", "TEXT"),
+        ):
+            conn.execute(f"ALTER TABLE stop_observations ADD COLUMN {name} {declaration}")
+        conn.execute("""CREATE TABLE stop_improvement_impact(
+            physical_stop_id INTEGER,daily_route_exposure REAL,
+            average_weekday_boardings REAL)""")
+        conn.execute("CREATE TABLE community_stewardships("
+                     "stop_id INTEGER,reviewer_id INTEGER,created_at TEXT)")
+        conn.execute("INSERT INTO stop_improvement_impact VALUES (1,10,5)")
+        conn.execute("INSERT INTO stop_review_assignments VALUES "
+                     "(21,1,1,'opportunity','assigned',NULL)")
+        before = conn.execute("SELECT COUNT(*) FROM stop_observations").fetchone()[0]
+        conn.commit()
+        conn.close()
+        with self.client.session_transaction() as session:
+            session["reviewer_key"] = "reviewer"
+        with patch.object(review_api, "calculate_stop_consensus", return_value={}), \
+             patch.object(review_api, "refresh_after_community_mutation"):
+            response = self.client.post("/review/submit", json={
+                "stop_id": 1, "assignment_id": 21,
+                "review_mode": "street_view",
+                "streetview_imagery_month": "2025-05",
+                "weather_exposure": "exposed",
+                "riders_avoid_facilities": "yes",
+                "seating_type": ["full_bench"],
+                "seating_limitations": "dividers",
+                "waiting_environment_rating": "poor",
+            })
+        self.assertEqual(200, response.status_code, response.get_json())
+        conn = sqlite3.connect(self.db)
+        self.assertEqual(before + 1, conn.execute(
+            "SELECT COUNT(*) FROM stop_observations"
+        ).fetchone()[0])
+        row = conn.execute("""SELECT assignment_id,weather_exposure,
+          riders_avoid_facilities,review_mode,streetview_imagery_month,observed_at
+          FROM stop_observations WHERE assignment_id=21""").fetchone()
+        conn.close()
+        self.assertEqual((21, "exposed", "yes", "street_view", "2025-05"), row[:5])
+        self.assertNotEqual(row[4], row[5])
+
 
 if __name__ == "__main__":
     unittest.main()

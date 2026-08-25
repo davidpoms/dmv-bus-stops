@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS stop_review_assignments (
     stop_id INTEGER NOT NULL,
     reviewer_id INTEGER NOT NULL,
     scenario TEXT NOT NULL,
+    campaign TEXT,
     status TEXT DEFAULT 'assigned',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP

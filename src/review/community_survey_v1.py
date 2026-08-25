@@ -15,7 +15,9 @@ SURVEY = {
         "label": "How are you reviewing this stop?",
         "type": "radio",
         "options": [
-            ("remote", "Remote review (Street View / imagery / online data)"),
+            ("street_view", "Street View review"),
+            ("other_remote_visual", "Other remote visual review"),
+            ("remote", "Legacy remote review"),
             ("in_person", "In-person review (visited the stop)")
         ]
     },
