@@ -41,10 +41,11 @@ document.addEventListener(
 
         try {
 
-            const response =
-                await fetch(
-                    `/review/${stopId}/info`
-                );
+            const assignmentId = new URLSearchParams(window.location.search)
+                .get("assignment_id");
+            const infoUrl = `/review/${stopId}/info` +
+                (assignmentId ? `?assignment_id=${encodeURIComponent(assignmentId)}` : "");
+            const response = await fetch(infoUrl);
 
 
             const info =
@@ -85,6 +86,42 @@ document.addEventListener(
                     ${info.state || ""}
                     ${info.county ? " | " + info.county : ""}
                     ${info.municipality ? " | " + info.municipality : ""}
+
+                    ${
+                        info.review_context && info.review_context.scenario === "opportunity" &&
+                        info.seating_improvement_opportunity
+                        ? (() => {
+                            const opportunity = info.seating_improvement_opportunity;
+                            const labels = {
+                                presence_verification: "Verify Seating",
+                                seating_adequacy: "Assess Seating Comfort",
+                                bench_clearance: "Check Bench Clearance",
+                                planning_review: "Planning Review",
+                                constrained_review: "Constrained/Special Review"
+                            };
+                            const rationale = Array.isArray(opportunity.rationale)
+                                ? opportunity.rationale.join(" ") : "";
+                            return `
+                            <div class="evidence-card opportunity-review-context">
+                                <strong>${labels[info.review_context.campaign] || "All Seating Opportunities"}</strong><br><br>
+                                Bench: ${opportunity.bench_status}<br>
+                                Shelter: ${opportunity.shelter_status}<br>
+                                Seating adequacy: ${opportunity.adequacy_status}<br>
+                                Preliminary clearance: ${opportunity.clearance_status}<br>
+                                Documented need index: ${opportunity.documented_need_index}<br>
+                                Strongest documented need: ${opportunity.strongest_need_signal}<br>
+                                Rider exposure percentile: ${opportunity.rider_exposure_percentile}<br>
+                                Provisional seating-improvement priority: ${opportunity.priority_score}<br>
+                                Next evidence action: ${opportunity.workflow_state}<br><br>
+                                ${rationale}<br><br>
+                                <small>The score ranks opportunities; it does not gate eligibility.
+                                Rider exposure is route-based, not observed stop-level boardings.
+                                Preliminary clearance is not engineering feasibility, ADA compliance,
+                                ownership or permitting approval, utility clearance, or construction readiness.</small>
+                            </div><br>`;
+                        })()
+                        : ""
+                    }
 
                     <br><br>
 
@@ -321,6 +358,18 @@ document.addEventListener(
 
                                     Bench:
                                     ${displayAmenity(review.bench)}
+
+                                    <br>
+
+                                    Review method: ${review.review_mode || "Legacy/unspecified"}
+
+                                    <br>
+
+                                    Assignment: ${review.assignment_id || "Legacy observation"}
+
+                                    ${review.streetview_imagery_month ? `<br>Street View imagery month: ${review.streetview_imagery_month}` : ""}
+
+                                    ${review.preliminary_clearance ? `<br>Preliminary clearance observation: ${review.preliminary_clearance}` : ""}
 
                                     <br><br>
 

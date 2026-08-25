@@ -1,6 +1,8 @@
 import os
+import sqlite3
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -46,6 +48,47 @@ class ApiDatabasePathTests(unittest.TestCase):
             cwd=ROOT, env=env, text=True,
         ).splitlines()
         self.assertEqual([str(override), str(override)], output)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            migrated = Path(temp_dir) / "review.db"
+            conn = sqlite3.connect(migrated)
+            conn.executescript("""
+                CREATE TABLE community_reviewers (
+                    id INTEGER PRIMARY KEY, reviewer_key TEXT UNIQUE,
+                    created_at TEXT
+                );
+                CREATE TABLE stop_review_assignments (
+                    id INTEGER PRIMARY KEY, stop_id INTEGER NOT NULL,
+                    reviewer_id INTEGER NOT NULL, scenario TEXT NOT NULL,
+                    status TEXT, created_at TEXT, completed_at TEXT
+                );
+                INSERT INTO stop_review_assignments VALUES
+                    (41,7,3,'opportunity','completed','2025-01-01','2025-01-02');
+            """)
+            conn.commit()
+            conn.close()
+            migration_env = os.environ.copy()
+            migration_env["DMV_BUS_STOPS_DB"] = str(migrated)
+            command = [sys.executable, "scripts/active/create_review_tables.py"]
+            subprocess.check_call(command, cwd=ROOT, env=migration_env)
+            subprocess.check_call(command, cwd=ROOT, env=migration_env)
+            conn = sqlite3.connect(migrated)
+            self.assertIn("campaign", {
+                row[1] for row in conn.execute(
+                    "PRAGMA table_info(stop_review_assignments)"
+                )
+            })
+            self.assertEqual(
+                (41, 7, 3, "opportunity", None, "completed"),
+                conn.execute("""
+                    SELECT id,stop_id,reviewer_id,scenario,campaign,status
+                    FROM stop_review_assignments WHERE id=41
+                """).fetchone(),
+            )
+            self.assertEqual(1, conn.execute(
+                "SELECT COUNT(*) FROM stop_review_assignments"
+            ).fetchone()[0])
+            conn.close()
 
     def test_app_has_no_cwd_relative_production_database_literal(self):
         source = APP_PATH.read_text(encoding="utf-8")

@@ -1606,3 +1606,31 @@ async function loadBenchCandidates() {
 
 window.addEventListener("load", loadBenchCandidates);
 
+async function loadOpportunityCampaignCounts() {
+    const targets = {
+        campaignPresenceCount: "verify_presence",
+        campaignAdequacyCount: "assess_adequacy",
+        campaignClearanceCount: "collect_clearance_observation",
+        campaignPlanningCount: "planning_review"
+    };
+    if (!document.getElementById("campaignAllCount")) return;
+    try {
+        const response = await fetch("/seating-opportunities");
+        const payload = await response.json();
+        const workflow = (payload.summary && payload.summary.workflow) || {};
+        const assignable = Object.entries(workflow)
+            .filter(([state]) => state !== "no_current_action")
+            .reduce((sum, [, count]) => sum + count, 0);
+        document.getElementById("campaignAllCount").textContent =
+            `(${assignable.toLocaleString()})`;
+        Object.entries(targets).forEach(([id, state]) => {
+            document.getElementById(id).textContent =
+                `(${(workflow[state] || 0).toLocaleString()})`;
+        });
+    } catch (error) {
+        console.warn("Could not load seating opportunity campaign counts", error);
+    }
+}
+
+window.addEventListener("load", loadOpportunityCampaignCounts);
+

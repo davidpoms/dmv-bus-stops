@@ -7,6 +7,12 @@
 
 <link rel="stylesheet" href="/static/dashboard.css">
 
+<style>
+.survey-question.campaign-primary { border-left: 4px solid #1769aa; padding-left: 12px; }
+.survey-question.campaign-secondary { opacity: .72; }
+.opportunity-review-context { margin-top: 16px; }
+</style>
+
 </head>
 
 
@@ -279,6 +285,14 @@ document
 async e => {
 
 e.preventDefault();
+
+const selectedMode = document.querySelector('[name="review_mode"]:checked')?.value;
+const imageryMonth = document.querySelector('[name="streetview_imagery_month"]');
+const imageryUnknown = document.getElementById("streetviewImageryMonthUnknown");
+if (selectedMode === "street_view" && !imageryMonth?.value && !imageryUnknown?.checked) {
+    alert("Enter the Street View imagery capture month/year or acknowledge that it could not be determined.");
+    return;
+}
 
 
 let form =

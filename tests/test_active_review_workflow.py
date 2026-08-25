@@ -43,6 +43,14 @@ class ActiveReviewWorkflowTests(unittest.TestCase):
                 physical_stop_id INTEGER, combined_route_weekday_boardings REAL
             );
             INSERT INTO opportunity_assessments VALUES (1,10),(2,100),(3,90);
+            CREATE TABLE seating_improvement_opportunities (
+                physical_stop_id INTEGER PRIMARY KEY, opportunity_rank INTEGER,
+                priority_score REAL, workflow_state TEXT
+            );
+            INSERT INTO seating_improvement_opportunities VALUES
+                (1,1,0,'verify_presence'),
+                (2,2,100,'planning_review'),
+                (3,3,90,'assess_adequacy');
             CREATE TABLE stop_wmata_evidence (
                 id INTEGER PRIMARY KEY, physical_stop_id INTEGER,
                 wmata_status TEXT, wmata_shelter INTEGER, wmata_bench INTEGER
@@ -81,10 +89,10 @@ class ActiveReviewWorkflowTests(unittest.TestCase):
             INSERT INTO community_reviewer_routes VALUES (1,'C61');
             CREATE TABLE stop_review_assignments (
                 id INTEGER PRIMARY KEY, stop_id INTEGER, reviewer_id INTEGER,
-                scenario TEXT, status TEXT, completed_at TEXT
+                scenario TEXT, campaign TEXT, status TEXT, completed_at TEXT
             );
             INSERT INTO stop_review_assignments VALUES
-                (20,2,1,'opportunity','completed','2026-01-01');
+                (20,2,1,'opportunity',NULL,'completed','2026-01-01');
             CREATE TABLE stop_observations (
                 id INTEGER PRIMARY KEY, physical_stop_id INTEGER,
                 observed_at TEXT, shelter_present TEXT, bench_present TEXT,
@@ -175,6 +183,89 @@ class ActiveReviewWorkflowTests(unittest.TestCase):
                 self.assertIsNotNone(result)
                 self.assertEqual(1, result[1])
 
+    def test_opportunity_campaigns_use_seating_workflow_and_rank(self):
+        conn = sqlite3.connect(self.db)
+        conn.executescript("""
+            INSERT INTO physical_stops VALUES (4,'Same name',0.1,0.1,'MD'),
+                                              (5,'Same name',0.2,0.2,'VA'),
+                                              (6,'No action',0.3,0.3,'DC'),
+                                              (7,'Planning',0.4,0.4,'DC'),
+                                              (8,'Constrained',0.5,0.5,'DC');
+            INSERT INTO stop_gtfs_status VALUES (4,1),(5,1),(6,1),(7,1),(8,1);
+            INSERT INTO seating_improvement_opportunities VALUES
+                (4,2,1,'assess_adequacy'),
+                (5,3,99,'collect_clearance_observation'),
+                (6,4,100,'no_current_action'),
+                (7,5,2,'planning_review'),
+                (8,6,3,'constrained_or_special_review');
+        """)
+        conn.commit()
+        conn.close()
+
+        self.reset_assignments()
+        assignment_id, stop_id = assignment_router.assign_stop(
+            1, "opportunity", campaign="presence_verification")
+        self.assertEqual(1, stop_id)
+        conn = sqlite3.connect(self.db)
+        self.assertEqual("presence_verification", conn.execute(
+            "SELECT campaign FROM stop_review_assignments WHERE id=?", (assignment_id,)
+        ).fetchone()[0])
+        conn.execute("UPDATE stop_review_assignments SET status='completed' WHERE id=?",
+                     (assignment_id,))
+        conn.commit()
+        conn.close()
+
+        self.assertEqual(4, assignment_router.assign_stop(
+            2, "opportunity", campaign="seating_adequacy")[1])
+        self.assertEqual(5, assignment_router.assign_stop(
+            3, "opportunity", campaign="bench_clearance")[1])
+        self.assertEqual(7, assignment_router.assign_stop(
+            4, "opportunity", campaign="planning_review")[1])
+        self.assertEqual(8, assignment_router.assign_stop(
+            5, "opportunity", campaign="constrained_review")[1])
+        with self.assertRaises(ValueError):
+            assignment_router.assign_stop(6, "opportunity", campaign="bogus")
+
+    def test_opportunity_has_no_score_gate_and_no_action_is_excluded(self):
+        self.reset_assignments()
+        result = assignment_router.assign_stop(2, "opportunity")
+        self.assertEqual(1, result[1])
+        conn = sqlite3.connect(self.db)
+        self.assertEqual(0, conn.execute(
+            "SELECT COUNT(*) FROM stop_review_assignments WHERE stop_id=6"
+        ).fetchone()[0])
+        conn.close()
+
+    def test_opportunity_start_validates_and_preserves_campaign(self):
+        self.assertEqual(400, self.client.get(
+            "/review/start?mode=opportunity&campaign=unknown"
+        ).status_code)
+        response = self.client.get(
+            "/review/start?mode=opportunity&campaign=presence_verification",
+            follow_redirects=False,
+        )
+        self.assertEqual(302, response.status_code)
+        self.assertIn("campaign=presence_verification", response.location)
+        conn = sqlite3.connect(self.db)
+        self.assertEqual("presence_verification", conn.execute(
+            "SELECT campaign FROM stop_review_assignments WHERE status='assigned' "
+            "ORDER BY id DESC LIMIT 1"
+        ).fetchone()[0])
+        before = conn.execute(
+            "SELECT COUNT(*) FROM stop_review_assignments"
+        ).fetchone()[0]
+        conn.execute("ALTER TABLE stop_review_assignments DROP COLUMN campaign")
+        conn.commit()
+        conn.close()
+        response = self.client.get("/review/start?mode=opportunity")
+        self.assertEqual(503, response.status_code)
+        self.assertEqual("review_schema_migration_required", response.get_json()["code"])
+        conn = sqlite3.connect(self.db)
+        self.assertEqual(before, conn.execute(
+            "SELECT COUNT(*) FROM stop_review_assignments"
+        ).fetchone()[0])
+        conn.close()
+
     def test_bulk_assignment_and_export_exclude_inactive_rows(self):
         create_stop_review_assignments.create_assignments()
         conn = sqlite3.connect(self.db)
@@ -258,7 +349,7 @@ class ActiveReviewWorkflowTests(unittest.TestCase):
                      "stop_id INTEGER,reviewer_id INTEGER,created_at TEXT)")
         conn.execute("INSERT INTO stop_improvement_impact VALUES (1,10,5)")
         conn.execute("INSERT INTO stop_review_assignments VALUES "
-                     "(21,1,1,'opportunity','assigned',NULL)")
+                     "(21,1,1,'opportunity',NULL,'assigned',NULL)")
         before = conn.execute("SELECT COUNT(*) FROM stop_observations").fetchone()[0]
         conn.commit()
         conn.close()

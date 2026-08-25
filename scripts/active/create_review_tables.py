@@ -1,7 +1,12 @@
+import os
 import sqlite3
 from pathlib import Path
 
-DB = Path("src/database/dmv_bus_stops.db")
+BASE_DIR = Path(__file__).resolve().parents[2]
+DB = Path(os.environ.get(
+    "DMV_BUS_STOPS_DB",
+    BASE_DIR / "src" / "database" / "dmv_bus_stops.db",
+))
 
 conn = sqlite3.connect(DB)
 cur = conn.cursor()
@@ -28,6 +33,12 @@ CREATE TABLE IF NOT EXISTS stop_review_assignments (
     completed_at TIMESTAMP
 )
 """)
+
+assignment_columns = {
+    row[1] for row in cur.execute("PRAGMA table_info(stop_review_assignments)")
+}
+if "campaign" not in assignment_columns:
+    cur.execute("ALTER TABLE stop_review_assignments ADD COLUMN campaign TEXT")
 
 
 cur.execute("""

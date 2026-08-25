@@ -59,6 +59,32 @@ CREATE TABLE IF NOT EXISTS stop_routes (
 -- HUMAN VERIFIED STOP CONDITIONS
 -- =====================================================
 
+CREATE TABLE IF NOT EXISTS community_reviewers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reviewer_key TEXT UNIQUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+CREATE TABLE IF NOT EXISTS stop_review_assignments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    stop_id INTEGER NOT NULL,
+    reviewer_id INTEGER NOT NULL,
+    scenario TEXT NOT NULL,
+    campaign TEXT,
+    status TEXT DEFAULT 'assigned',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP
+);
+
+
+CREATE INDEX IF NOT EXISTS idx_review_assignments_stop
+ON stop_review_assignments(stop_id);
+
+
+CREATE INDEX IF NOT EXISTS idx_review_assignments_reviewer
+ON stop_review_assignments(reviewer_id);
+
 
 CREATE TABLE IF NOT EXISTS stop_observations (
 

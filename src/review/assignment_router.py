@@ -11,6 +11,29 @@ DB = Path(os.environ.get(
     BASE_DIR / "src" / "database" / "dmv_bus_stops.db",
 ))
 
+CAMPAIGN_WORKFLOW = {
+    "presence_verification": "verify_presence",
+    "seating_adequacy": "assess_adequacy",
+    "bench_clearance": "collect_clearance_observation",
+    "planning_review": "planning_review",
+    "constrained_review": "constrained_or_special_review",
+}
+
+CAMPAIGN_ALIASES = {
+    "verify_seating": "presence_verification",
+    "assess_seating_comfort": "seating_adequacy",
+    "check_bench_clearance": "bench_clearance",
+}
+
+
+def normalize_campaign(campaign):
+    if campaign in (None, "", "all", "all_seating_opportunities"):
+        return None
+    normalized = CAMPAIGN_ALIASES.get(campaign, campaign)
+    if normalized not in CAMPAIGN_WORKFLOW:
+        raise ValueError("Unknown opportunity campaign")
+    return normalized
+
 
 def get_or_create_reviewer(reviewer_key=None):
 
@@ -95,8 +118,21 @@ def assign_stop(
     campaign=None,
 ):
 
+    if scenario == "opportunity":
+        campaign = normalize_campaign(campaign)
+    elif campaign:
+        raise ValueError("Campaign is only supported for opportunity reviews")
+
     conn = sqlite3.connect(DB)
     cur = conn.cursor()
+    assignment_columns = {
+        item[1] for item in cur.execute("PRAGMA table_info(stop_review_assignments)")
+    }
+    if scenario == "opportunity" and "campaign" not in assignment_columns:
+        conn.close()
+        raise RuntimeError(
+            "stop_review_assignments campaign migration is required"
+        )
 
     # Previous assignments and proxy evidence never establish active status.
     if stop_id and not stop_is_active(stop_id):
@@ -140,8 +176,28 @@ def assign_stop(
 
     if stop_id:
 
-        row = cur.execute(
-            """
+        if scenario == "opportunity":
+            workflow_clause = "AND sio.workflow_state=?" if campaign else ""
+            params = [stop_id]
+            if campaign:
+                params.append(CAMPAIGN_WORKFLOW[campaign])
+            row = cur.execute(
+                f"""
+                SELECT sio.opportunity_rank, sio.physical_stop_id
+                FROM seating_improvement_opportunities sio
+                JOIN stop_gtfs_status sgs
+                  ON sgs.physical_stop_id=sio.physical_stop_id
+                 AND sgs.current_gtfs=1
+                WHERE sio.physical_stop_id=?
+                  AND sio.workflow_state!='no_current_action'
+                  {workflow_clause}
+                LIMIT 1
+                """,
+                tuple(params),
+            ).fetchone()
+        else:
+            row = cur.execute(
+                """
             SELECT
                 rq.id,
                 rq.physical_stop_id
@@ -159,7 +215,7 @@ def assign_stop(
             (
                 stop_id,
             )
-        ).fetchone()
+            ).fetchone()
 
 
 
@@ -306,30 +362,28 @@ def assign_stop(
     # Opportunity/default mode
     # -------------------------------------------------
 
-    elif campaign in ("presence_verification", "seating_adequacy", "bench_clearance"):
+    elif scenario == "opportunity":
 
-        desired_state = {
-            "presence_verification": "verify_presence",
-            "seating_adequacy": "assess_adequacy",
-            "bench_clearance": "collect_clearance_observation",
-        }[campaign]
+        workflow_clause = "AND sio.workflow_state=?" if campaign else ""
+        params = []
+        if campaign:
+            params.append(CAMPAIGN_WORKFLOW[campaign])
+        params.append(reviewer_id)
         row = cur.execute(
-            """
-            SELECT rq.id, rq.physical_stop_id
-            FROM review_queue rq
-            JOIN seating_improvement_opportunities sio
-              ON sio.physical_stop_id=rq.physical_stop_id
+            f"""
+            SELECT sio.opportunity_rank, sio.physical_stop_id
+            FROM seating_improvement_opportunities sio
             JOIN stop_gtfs_status sgs
-              ON sgs.physical_stop_id=rq.physical_stop_id AND sgs.current_gtfs=1
-            WHERE rq.review_status='pending' AND rq.community_review_available=1
-              AND sio.workflow_state=?
-              AND rq.physical_stop_id NOT IN
+              ON sgs.physical_stop_id=sio.physical_stop_id AND sgs.current_gtfs=1
+            WHERE sio.workflow_state!='no_current_action'
+              {workflow_clause}
+              AND sio.physical_stop_id NOT IN
                   (SELECT stop_id FROM stop_review_assignments WHERE reviewer_id=?)
-              AND rq.physical_stop_id NOT IN
+              AND sio.physical_stop_id NOT IN
                   (SELECT stop_id FROM stop_review_assignments WHERE status='assigned')
-            ORDER BY sio.priority_score DESC, sio.physical_stop_id
+            ORDER BY sio.opportunity_rank, sio.physical_stop_id
             LIMIT 1
-            """, (desired_state, reviewer_id)
+            """, tuple(params)
         ).fetchone()
 
     else:
@@ -407,9 +461,6 @@ def assign_stop(
     assigned_stop_id = row[1]
 
 
-    assignment_columns = {
-        item[1] for item in cur.execute("PRAGMA table_info(stop_review_assignments)")
-    }
     if "campaign" in assignment_columns:
         cur.execute(
         """

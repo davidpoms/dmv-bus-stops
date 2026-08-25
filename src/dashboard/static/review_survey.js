@@ -290,6 +290,41 @@ function updateQuestionVisibility(){
     }
 );
 
+document.addEventListener("DOMContentLoaded", () => {
+    const campaign = new URLSearchParams(window.location.search).get("campaign");
+    const emphasis = {
+        presence_verification: ["shelter_present", "seating_type", "streetview_imagery_month"],
+        seating_adequacy: ["seating_type", "seating_limitations", "waiting_environment_rating",
+            "riders_avoid_facilities", "weather_exposure", "accessibility_status"],
+        bench_clearance: ["bench_feasible", "concrete_pad_needed", "seating_type", "seating_limitations"],
+        planning_review: [],
+        constrained_review: ["bench_feasible", "accessibility_status", "notes"]
+    };
+    if (campaign && emphasis[campaign]) {
+        document.body.dataset.campaign = campaign;
+        document.querySelectorAll(".survey-question").forEach(question => {
+            const primary = emphasis[campaign].includes(question.dataset.field);
+            question.classList.toggle("campaign-primary", primary);
+            question.classList.toggle("campaign-secondary", !primary && emphasis[campaign].length > 0);
+        });
+    }
+
+    const monthQuestion = document.querySelector('[data-field="streetview_imagery_month"]');
+    if (monthQuestion) {
+        const acknowledgement = document.createElement("label");
+        acknowledgement.innerHTML =
+            '<input type="checkbox" id="streetviewImageryMonthUnknown"> ' +
+            'I could not determine the Street View imagery capture month/year.';
+        monthQuestion.appendChild(acknowledgement);
+        const checkbox = acknowledgement.querySelector("input");
+        const month = monthQuestion.querySelector('input[type="month"]');
+        checkbox.addEventListener("change", () => {
+            if (checkbox.checked) month.value = "";
+            month.disabled = checkbox.checked;
+        });
+    }
+});
+
 
 async function loadReviewStopInfo(){
 

@@ -15,6 +15,7 @@ from pathlib import Path
 from src.review.assignment_router import (
     get_or_create_reviewer,
     assign_stop,
+    normalize_campaign,
 )
 
 from src.spatial.nearest_road import RoadSpatialIndex
@@ -1581,6 +1582,18 @@ def review_start():
     )
     campaign = request.args.get("campaign")
 
+    try:
+        campaign = normalize_campaign(campaign) if scenario == "opportunity" else None
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+    if scenario == "opportunity" and "campaign" not in {
+        row[1] for row in query_db("PRAGMA table_info(stop_review_assignments)")
+    }:
+        return {
+            "error": "stop_review_assignments campaign migration is required",
+            "code": "review_schema_migration_required",
+        }, 503
+
     stop_id_requested = request.args.get("stop_id")
 
     requested_stop_id = None
@@ -1613,24 +1626,20 @@ def review_start():
     longitude = request.args.get("lon")
 
 
-    if stop_id_requested:
-
-        result = assign_stop(
-            reviewer_id,
-            scenario,
-            stop_id=requested_stop_id,
-            campaign=campaign,
-        )
-
-    else:
-
-        result = assign_stop(
-            reviewer_id,
-            scenario,
-            latitude=latitude,
-            longitude=longitude,
-            campaign=campaign,
-        )
+    try:
+        if stop_id_requested:
+            result = assign_stop(reviewer_id, scenario, stop_id=requested_stop_id,
+                                 campaign=campaign)
+        else:
+            result = assign_stop(
+                reviewer_id,
+                scenario,
+                latitude=latitude,
+                longitude=longitude,
+                campaign=campaign,
+            )
+    except RuntimeError as exc:
+        return {"error": str(exc), "code": "review_schema_migration_required"}, 503
 
 
     if not result:
@@ -1642,8 +1651,10 @@ def review_start():
     assignment_id, stop_id = result
 
 
+    campaign_query = f"&campaign={campaign}" if campaign else ""
     return redirect(
         f"/review/{stop_id}?assignment_id={assignment_id}&mode={scenario}"
+        f"{campaign_query}"
     )
 
 
@@ -2005,7 +2016,17 @@ def review_stop_info(stop_id):
             observed_at,
             shelter_present,
             bench_present,
-            notes
+            notes,
+            assignment_id,
+            review_mode,
+            streetview_imagery_month,
+            bench_feasible,
+            concrete_pad_needed,
+            bench_condition,
+            rider_comfort_category,
+            accessibility_status,
+            weather_exposure,
+            riders_avoid_facilities
         FROM stop_observations
         WHERE physical_stop_id=?
         AND source='community_review'
@@ -2094,6 +2115,22 @@ def review_stop_info(stop_id):
     amenity_status = get_current_amenity_status(stop_id)
     amenity_review_priority = get_amenity_review_priority(stop_id)
     bench_candidate = get_bench_candidate(stop_id)
+    seating_opportunity = get_seating_opportunity(stop_id)
+    assignment_context = None
+    assignment_id_arg = request.args.get("assignment_id")
+    if assignment_id_arg:
+        assignment_rows = query_db(
+            "SELECT id, scenario, campaign, status FROM stop_review_assignments "
+            "WHERE id=? AND stop_id=?",
+            (assignment_id_arg, stop_id),
+        )
+        if assignment_rows:
+            assignment_context = {
+                "assignment_id": assignment_rows[0][0],
+                "scenario": assignment_rows[0][1],
+                "campaign": assignment_rows[0][2],
+                "assignment_status": assignment_rows[0][3],
+            }
 
 
     improvement_recommendations = query_db(
@@ -2237,7 +2274,8 @@ def review_stop_info(stop_id):
 
             "amenity_review_priority": amenity_review_priority_payload,
 
-            "seating_improvement_opportunity": get_seating_opportunity(stop_id),
+            "seating_improvement_opportunity": seating_opportunity,
+            "review_context": assignment_context,
             "bench_installation_candidate": bench_candidate,
 
 
@@ -2254,7 +2292,17 @@ def review_stop_info(stop_id):
                         "date": review[1],
                         "shelter": review[2],
                         "bench": review[3],
-                        "notes": review[4].strip() if review[4] else ""
+                        "notes": review[4].strip() if review[4] else "",
+                        "assignment_id": review[5],
+                        "review_mode": review[6],
+                        "streetview_imagery_month": review[7],
+                        "preliminary_clearance": review[8],
+                        "concrete_pad_context": review[9],
+                        "seating_limitation": review[10],
+                        "waiting_environment": review[11],
+                        "accessibility_observation": review[12],
+                        "weather_exposure": review[13],
+                        "riders_avoid_facilities": review[14],
                     }
                     for review in community_reviews
                 ]
@@ -2424,10 +2472,7 @@ def review_assignment(stop_id):
 
         assignment = query_db(
             """
-            SELECT
-                id,
-                reviewer_id,
-                stop_id
+            SELECT id, reviewer_id, stop_id, scenario, campaign, status
 
             FROM stop_review_assignments
 
@@ -2461,10 +2506,7 @@ def review_assignment(stop_id):
 
         assignment = query_db(
             """
-            SELECT
-                id,
-                reviewer_id,
-                stop_id
+            SELECT id, reviewer_id, stop_id, scenario, campaign, status
 
             FROM stop_review_assignments
 
@@ -2489,6 +2531,13 @@ def review_assignment(stop_id):
             "mode",
             "opportunity"
         )
+        try:
+            requested_campaign = (
+                normalize_campaign(request.args.get("campaign"))
+                if scenario == "opportunity" else None
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
 
         query_db(
             """
@@ -2497,25 +2546,24 @@ def review_assignment(stop_id):
                 stop_id,
                 reviewer_id,
                 scenario,
+                campaign,
                 status
             )
 
-            VALUES (?, ?, ?, 'assigned')
+            VALUES (?, ?, ?, ?, 'assigned')
             """,
             (
                 stop_id,
                 reviewer_id,
-                scenario
+                scenario,
+                requested_campaign,
             )
         )
 
 
         assignment = query_db(
             """
-            SELECT
-                id,
-                reviewer_id,
-                stop_id
+            SELECT id, reviewer_id, stop_id, scenario, campaign, status
 
             FROM stop_review_assignments
 
@@ -2550,14 +2598,12 @@ def review_assignment(stop_id):
         """
         SELECT id
         FROM stop_observations
-        WHERE physical_stop_id=?
-        AND reviewer_id=?
+        WHERE assignment_id=?
         AND source='community_review'
         LIMIT 1
         """,
         (
-            assignment[0][2],
-            assignment_reviewer_id
+            assignment[0][0],
         )
     )
 
@@ -2585,10 +2631,14 @@ def review_assignment(stop_id):
             "stop_id":
                 assignment[0][2],
 
+            "scenario": assignment[0][3],
+
+            "campaign": assignment[0][4],
+
+            "status": assignment[0][5],
+
             "review_action":
-                "update"
-                if existing_review
-                else "new"
+                "update" if existing_review else "new"
         }
     )
 
