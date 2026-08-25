@@ -155,6 +155,13 @@ Stewarding a stop means helping maintain a current community record of its
 waiting conditions over time. It is ongoing civic observation, not ownership of
 the stop and not authority to act on public or private property.
 
+You may review anonymously. Optional **Sign in with email** uses a short-lived,
+one-time link to preserve the same profile, display name, review history, and
+stewarded stops across browsers or devices. Email is private account information
+and is not shown with public observations. Signing out removes the authenticated
+browser session; it does not delete review history. Site operators must configure
+email delivery before cross-device sign-in is available in production.
+
 The current system can record a reviewer’s stewardship relationship or interest
 and associate reviews with a reviewer profile. It does not yet provide automated
 recurring reminders, photo hosting, formal agency escalation, or ownership and

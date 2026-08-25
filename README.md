@@ -89,6 +89,10 @@ The review page keeps two questions separate:
 All paths use one shared survey. Internal workflow state changes emphasis, not
 the set of ordinary observations a reviewer is allowed to record.
 
+Reviewing may remain anonymous. Optional passwordless email sign-in preserves
+the same private reviewer profile, display name, history, and stewarded stops
+across browsers or devices when production mail delivery is configured.
+
 See the [Volunteer Review Handbook](docs/Volunteer_Review_Handbook.md) before
 reviewing a stop.
 

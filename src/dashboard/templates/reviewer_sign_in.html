@@ -1,0 +1,13 @@
+<!doctype html>
+<html><head><title>Reviewer sign in</title>
+<link rel="stylesheet" href="/static/dashboard.css"></head>
+<body><main class="panel">
+<h1>Save your reviewer profile</h1>
+<p>Sign in by email to keep the same display name, review history, and stewarded stops across devices. Anonymous reviewing remains available.</p>
+<form method="post">
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+<label>Email <input type="email" name="email" required autocomplete="email"></label>
+<button type="submit">Email me a sign-in link</button>
+</form>
+<p><small>Your email is private account information and is not shown with public observations.</small></p>
+</main></body></html>

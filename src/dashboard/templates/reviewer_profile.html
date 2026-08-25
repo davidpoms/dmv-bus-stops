@@ -12,6 +12,10 @@
 
 <body>
 
+<div class="panel" id="accountStatus">
+<a href="/reviewer/sign-in">Sign in with email to save this profile across devices</a>
+</div>
+
 <h1>
 Community Profile
 </h1>
@@ -55,6 +59,21 @@ async function loadProfile(){
 
     const data =
         await response.json();
+
+    document.getElementById("accountStatus").innerHTML = data.signed_in
+        ? `<strong>Signed in as ${data.display_name || "Community Volunteer"}</strong><br>
+           <span>${data.email}</span> <small>(private account email)</small><br>
+           <button type="button" id="signOutButton">Sign out</button>`
+        : `<p>Save your profile and review history across devices.</p>
+           <a href="/reviewer/sign-in">Sign in with email</a>`;
+    document.getElementById("signOutButton")?.addEventListener("click", async () => {
+        await fetch("/reviewer/sign-out", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({csrf_token: data.csrf_token})
+        });
+        window.location.reload();
+    });
 
 
     document

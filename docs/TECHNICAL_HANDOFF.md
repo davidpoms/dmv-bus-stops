@@ -314,6 +314,31 @@ assignment ID.
 
 Assignment-backed submissions insert a new observation and never overwrite a
 prior reviewer/stop row. Relevant prospective fields include `review_mode`,
+
+### Reviewer identity and passwordless login
+
+`community_reviewers.id` is the durable identity referenced by assignments,
+observations, and stewardship rows. `reviewer_key` remains an anonymous browser
+handle in Flask's signed session; it is not an account credential. Claimed
+profiles add normalized private `email`, `email_verified_at`, and `claimed_at`.
+
+`reviewer_login_tokens` stores only SHA-256 token hashes. Links expire after 20
+minutes and are invalid after one use. Claiming an unused email updates the same
+anonymous reviewer row. A new browser using an existing verified email attaches
+to that ID. An anonymous profile with history is never automatically merged into
+a different claimed account.
+
+Authenticated Flask sessions last 30 days, use `HttpOnly` and deliberate
+`SameSite=Lax` cookies, and are rotated by clearing the anonymous session during
+verification. Sign-out requires the session CSRF token and deletes no durable
+records. `REVIEWER_AUTH_DEV_MODE` defaults off and is never inferred from Flask
+debug mode.
+
+Run `python scripts/active/create_review_tables.py` before deployment. Set a
+strong `FLASK_SECRET_KEY`, use `SESSION_COOKIE_SECURE=1` under HTTPS, and provide
+`REVIEWER_EMAIL_SENDER`. Without a mail sender, links are available only in tests
+or explicit `REVIEWER_AUTH_DEV_MODE=1`. Public APIs do not expose email or auth
+metadata. Legacy text reviewer identifiers are not migrated by this feature.
 `assignment_id`, `streetview_imagery_month`, `weather_exposure`, and
 `riders_avoid_facilities` alongside presence, type, condition, comfort,
 accessibility, clearance, notes, and stewardship-interest fields.

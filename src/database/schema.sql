@@ -62,8 +62,32 @@ CREATE TABLE IF NOT EXISTS stop_routes (
 CREATE TABLE IF NOT EXISTS community_reviewers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     reviewer_key TEXT UNIQUE,
+    display_name TEXT,
+    profile_token TEXT,
+    email TEXT,
+    profile_created_at TIMESTAMP,
+    email_verified_at TIMESTAMP,
+    claimed_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_community_reviewers_verified_email
+ON community_reviewers(email) WHERE email_verified_at IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS reviewer_login_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reviewer_id INTEGER NOT NULL,
+    normalized_email TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    action TEXT NOT NULL CHECK (action IN ('claim','login','conflict')),
+    expires_at TIMESTAMP NOT NULL,
+    used_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(reviewer_id) REFERENCES community_reviewers(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_reviewer_login_tokens_hash
+ON reviewer_login_tokens(token_hash);
 
 
 CREATE TABLE IF NOT EXISTS stop_review_assignments (

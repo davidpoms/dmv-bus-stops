@@ -74,7 +74,11 @@ inventory fields are not authoritative current shelter/bench evidence.
 
 ### `community_reviewers`
 
-Anonymous reviewer identity keyed by `reviewer_key`.
+Durable reviewer identity is the numeric `id`. `reviewer_key` is an anonymous
+browser handle. Nullable `email`, `email_verified_at`, and `claimed_at` represent
+an optional claimed account; email is private and uniquely indexed only after
+verification. `reviewer_login_tokens` stores expiring, one-use SHA-256 token
+hashes and never raw magic-link tokens.
 
 ### `stop_review_assignments`
 

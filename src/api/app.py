@@ -1,14 +1,15 @@
 import json
 import os
+import sqlite3
+import secrets
 
 """
 DMV Bus Stops Improvement API
 """
 
-from flask import Flask, jsonify, send_from_directory, request, render_template, redirect, session
-import sqlite3
+from flask import Flask, jsonify, send_from_directory, request, render_template, redirect, session, url_for
 import calendar
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 
@@ -30,6 +31,7 @@ from src.assessment.interpretation import (
 
 from src.review.consensus import calculate_stop_consensus
 from src.review.context import build_review_context
+from src.review.auth import issue_login_token, consume_login_token, normalize_email
 from src.amenities.status_synthesis import geography_status_rows
 from src.amenities.review_priority import refresh_after_community_mutation
 
@@ -40,7 +42,22 @@ app = Flask(
     template_folder="../dashboard/templates"
 )
 
-app.secret_key = "dmv-bus-stops-review-secret"
+app.secret_key = os.environ.get("FLASK_SECRET_KEY")
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "0") == "1",
+    PERMANENT_SESSION_LIFETIME=timedelta(days=30),
+)
+
+
+@app.before_request
+def require_deployment_secret():
+    if not app.secret_key and not app.testing:
+        return {
+            "error": "FLASK_SECRET_KEY must be configured before serving requests",
+            "code": "server_configuration_required",
+        }, 503
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 
@@ -4675,6 +4692,96 @@ def dashboard_static(filename):
     )
 
 
+def _auth_db():
+    conn = sqlite3.connect(DATABASE_PATH)
+    conn.execute("PRAGMA foreign_keys=ON")
+    return conn
+
+
+def _send_reviewer_magic_link(email, link):
+    sender = app.config.get("REVIEWER_EMAIL_SENDER")
+    if sender:
+        sender(email, link)
+        return
+    if app.testing or os.environ.get("REVIEWER_AUTH_DEV_MODE") == "1":
+        app.extensions.setdefault("reviewer_auth_outbox", []).append((email, link))
+        return
+    raise RuntimeError("Reviewer email delivery is not configured")
+
+
+@app.route("/reviewer/sign-in", methods=["GET", "POST"])
+def reviewer_sign_in():
+    reviewer_key = session.get("reviewer_key")
+    if request.method == "GET":
+        csrf = secrets.token_urlsafe(24)
+        session["auth_csrf"] = csrf
+        return render_template("reviewer_sign_in.html", csrf_token=csrf)
+    data = request.get_json(silent=True) or request.form
+    if not app.testing and data.get("csrf_token") != session.get("auth_csrf"):
+        return {"error": "Invalid request token"}, 400
+    try:
+        email = normalize_email(data.get("email"))
+        conn = _auth_db()
+        owner = conn.execute(
+            "SELECT id FROM community_reviewers WHERE email=? "
+            "AND email_verified_at IS NOT NULL", (email,)
+        ).fetchone()
+        if reviewer_key:
+            reviewer_id, reviewer_key = get_or_create_reviewer(reviewer_key)
+            session["reviewer_key"] = reviewer_key
+        elif owner:
+            reviewer_id = owner[0]
+        else:
+            reviewer_id, reviewer_key = get_or_create_reviewer()
+            session["reviewer_key"] = reviewer_key
+        raw = issue_login_token(conn, reviewer_id, email)
+        conn.close()
+        link = url_for("reviewer_verify", token=raw, _external=True)
+        _send_reviewer_magic_link(email, link)
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+    except RuntimeError:
+        return {"error": "Email sign-in is not configured"}, 503
+    response = {"message": "If the address can be used, a sign-in link has been sent."}
+    if app.testing or os.environ.get("REVIEWER_AUTH_DEV_MODE") == "1":
+        response["magic_link"] = link
+    return response
+
+
+@app.route("/reviewer/verify")
+def reviewer_verify():
+    token = request.args.get("token", "")
+    conn = None
+    try:
+        conn = _auth_db()
+        reviewer_id = consume_login_token(conn, token)
+        reviewer = conn.execute(
+            "SELECT reviewer_key FROM community_reviewers WHERE id=?", (reviewer_id,)
+        ).fetchone()
+    except PermissionError as exc:
+        return {"error": str(exc), "code": "account_conflict"}, 409
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+    finally:
+        if conn is not None:
+            conn.close()
+    session.clear()
+    session["reviewer_key"] = reviewer[0]
+    session["authenticated_reviewer_id"] = reviewer_id
+    session["auth_csrf"] = secrets.token_urlsafe(24)
+    session.permanent = True
+    return redirect("/reviewer/profile")
+
+
+@app.route("/reviewer/sign-out", methods=["POST"])
+def reviewer_sign_out():
+    data = request.get_json(silent=True) or request.form
+    if data.get("csrf_token") != session.get("auth_csrf"):
+        return {"error": "Invalid request token"}, 400
+    session.clear()
+    return {"success": True}
+
+
 @app.route("/api/reviewer/status")
 def reviewer_status():
 
@@ -4695,7 +4802,7 @@ def reviewer_status():
     reviewer = query_db(
         """
         SELECT
-            display_name
+            id, display_name, email, email_verified_at
         FROM community_reviewers
         WHERE reviewer_key=?
         """,
@@ -4716,9 +4823,11 @@ def reviewer_status():
         {
             "has_profile": True,
             "display_name":
-                reviewer[0][0]
-                if reviewer[0][0]
-                else "Community Volunteer"
+                reviewer[0][1] if reviewer[0][1] else "Community Volunteer",
+            "signed_in": session.get("authenticated_reviewer_id") == reviewer[0][0],
+            "email": reviewer[0][2]
+                if session.get("authenticated_reviewer_id") == reviewer[0][0]
+                and reviewer[0][3] else None,
         }
     )
 
@@ -4750,7 +4859,7 @@ def reviewer_profile_api():
 
     reviewer = query_db(
         """
-        SELECT display_name
+        SELECT id, display_name, email, email_verified_at
         FROM community_reviewers
         WHERE id=?
         """,
@@ -4934,8 +5043,18 @@ def reviewer_profile_api():
     return jsonify(
         {
             "display_name":
-                reviewer[0][0]
-                if reviewer and reviewer[0][0]
+                reviewer[0][1]
+                if reviewer and reviewer[0][1]
+                else None,
+            "signed_in": bool(
+                reviewer and session.get("authenticated_reviewer_id") == reviewer[0][0]
+            ),
+            "email": reviewer[0][2]
+                if reviewer and reviewer[0][3]
+                and session.get("authenticated_reviewer_id") == reviewer[0][0]
+                else None,
+            "csrf_token": session.get("auth_csrf")
+                if reviewer and session.get("authenticated_reviewer_id") == reviewer[0][0]
                 else None,
 
 
