@@ -31,17 +31,6 @@ document.addEventListener("DOMContentLoaded", async () => {
         return "Lower";
     };
 
-    const headingLabel = value => {
-        const degrees = Number(value);
-        if (!Number.isFinite(degrees)) return String(value);
-        const directions = [
-            "Northbound", "Northeast", "Eastbound", "Southeast",
-            "Southbound", "Southwest", "Westbound", "Northwest"
-        ];
-        const normalized = ((degrees % 360) + 360) % 360;
-        return `${directions[Math.round(normalized / 45) % 8]} (${value}°)`;
-    };
-
     try {
         const sourceParams = new URLSearchParams(window.location.search);
         const infoParams = new URLSearchParams();
@@ -57,12 +46,15 @@ document.addEventListener("DOMContentLoaded", async () => {
         );
         const reviews = info.community_reviews?.reviews || [];
         const percentile = info.impact_summary?.rider_exposure_percentile;
-        const headings = info.serving_headings || [];
+        const directions = info.serving_directions || [];
+        const headingLabels = [...new Set(directions.map(direction =>
+            `${direction.compass_label} (${direction.heading_degrees}°)`
+        ))];
 
         container.innerHTML = `
             <div class="panel review-stop-summary">
                 <h2>${info.name || "Bus stop"}</h2>
-                <p class="serving-heading"><strong>Serving direction:</strong> ${headings.length ? headings.map(headingLabel).join(" · ") : "Not available"}</p>
+                <p class="serving-heading"><strong>${headingLabels.length > 1 ? "Serving directions" : "Serving direction"}:</strong> ${headingLabels.length ? headingLabels.join(" · ") : "Not available"}</p>
                 <p>${[info.state, info.county, info.municipality].filter(Boolean).join(" · ")}</p>
 
                 ${percentile !== null && percentile !== undefined ? `

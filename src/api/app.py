@@ -9,6 +9,7 @@ DMV Bus Stops Improvement API
 
 from flask import Flask, jsonify, send_from_directory, request, render_template, redirect, session, url_for
 import calendar
+import math
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -235,35 +236,92 @@ def get_current_amenity_status(stop_id):
     )
 
 
-def get_serving_headings(stop_id):
-    """Return latest authoritative WMATA heading values without inference."""
-    tables = query_db(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='stop_wmata_evidence'"
+def compass_heading_label(value):
+    """Translate a numeric stop heading to the same eight-point UI label."""
+    try:
+        degrees = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(degrees):
+        return None
+    degrees %= 360
+    labels = (
+        "Northbound", "Northeast", "Eastbound", "Southeast",
+        "Southbound", "Southwest", "Westbound", "Northwest",
     )
-    if not tables:
+    return labels[round(degrees / 45) % 8]
+
+
+def get_serving_directions(stop_id):
+    """Return headings explicitly linked to source members of a physical stop.
+
+    ``stop_wmata_evidence.physical_stop_id`` was populated by an unbounded
+    nearest-neighbor import, so it is not sufficient proof that a heading
+    describes this boarding location.  The GTFS/member identity chain is the
+    eligibility rule; unexplained WMATA status codes are provenance only.
+    """
+    tables = query_db(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
+        "('stop_wmata_evidence','physical_stop_members','gtfs_stop_map','bus_stops')"
+    )
+    if len(tables) != 4:
         return []
-    columns = {row[1] for row in query_db("PRAGMA table_info(stop_wmata_evidence)")}
-    if not {"id", "physical_stop_id", "wmata_stop_id", "wmata_heading", "created_at"} <= columns:
+    evidence_columns = {
+        row[1] for row in query_db("PRAGMA table_info(stop_wmata_evidence)")
+    }
+    if not {
+        "id", "wmata_stop_id", "wmata_heading", "wmata_status",
+        "match_distance_m", "match_confidence", "created_at",
+    } <= evidence_columns:
         return []
     rows = query_db(
         """
         WITH latest AS (
-            SELECT wmata_stop_id,wmata_heading,
+            SELECT wmata_stop_id,wmata_heading,wmata_status,
+                   match_distance_m,match_confidence,
                    ROW_NUMBER() OVER (
                        PARTITION BY wmata_stop_id
                        ORDER BY datetime(created_at) DESC,id DESC
                    ) sequence
             FROM stop_wmata_evidence
-            WHERE physical_stop_id=?
-              AND wmata_heading IS NOT NULL
+            WHERE wmata_heading IS NOT NULL
               AND TRIM(wmata_heading)!=''
         )
-        SELECT DISTINCT wmata_heading FROM latest
-        WHERE sequence=1 ORDER BY CAST(wmata_heading AS REAL),wmata_heading
+        SELECT l.wmata_heading,l.wmata_stop_id,pm.bus_stop_id,
+               b.external_stop_id,g.match_method,l.wmata_status,
+               l.match_distance_m,l.match_confidence
+        FROM physical_stop_members pm
+        JOIN bus_stops b ON b.id=pm.bus_stop_id
+        JOIN gtfs_stop_map g ON g.bus_stop_id=pm.bus_stop_id
+        JOIN latest l ON CAST(l.wmata_stop_id AS TEXT)=CAST(g.gtfs_stop_id AS TEXT)
+                     AND l.sequence=1
+        WHERE pm.physical_stop_id=?
+        ORDER BY CAST(l.wmata_heading AS REAL),l.wmata_heading,l.wmata_stop_id
         """,
         (stop_id,),
     )
-    return [row[0] for row in rows]
+    directions = []
+    for row in rows:
+        compass_label = compass_heading_label(row[0])
+        if compass_label is None:
+            continue
+        directions.append({
+            "heading_degrees": row[0],
+            "compass_label": compass_label,
+            "wmata_stop_id": row[1],
+            "member_stop_id": row[2],
+            "source_stop_id": row[3],
+            "linkage_method": row[4],
+            "evidence_status": row[5],
+            "match_distance_m": row[6],
+            "confidence": row[7],
+        })
+    return directions
+
+
+def get_serving_headings(stop_id):
+    """Compatibility projection of the validated serving-direction records."""
+    return [item["heading_degrees"] for item in get_serving_directions(stop_id)]
 
 
 def build_amenity_status_payload(status_rows, evidence_rows):
@@ -2271,7 +2329,8 @@ def review_stop_info(stop_id):
 
     amenity_evidence = get_current_amenity_evidence(stop_id)
     amenity_status = get_current_amenity_status(stop_id)
-    serving_headings = get_serving_headings(stop_id)
+    serving_directions = get_serving_directions(stop_id)
+    serving_headings = [item["heading_degrees"] for item in serving_directions]
     amenity_review_priority = get_amenity_review_priority(stop_id)
     bench_candidate = get_bench_candidate(stop_id)
     seating_opportunity = get_seating_opportunity(stop_id)
@@ -2416,6 +2475,8 @@ def review_stop_info(stop_id):
                 row[11],
 
             "serving_headings": serving_headings,
+
+            "serving_directions": serving_directions,
 
             "streetview_url": streetview_url,
 

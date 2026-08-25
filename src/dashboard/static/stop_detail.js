@@ -111,6 +111,12 @@ async function loadStopProfile() {
             review.seating_improvement_opportunity ||
             null;
 
+        const servingDirectionLabels = [...new Set(
+            (review.serving_directions || []).map(direction =>
+                `${direction.compass_label} (${direction.heading_degrees}°)`
+            )
+        )];
+
 
         function recommendationLabel(type) {
 
@@ -492,6 +498,11 @@ const latestCommunity =
 
                 Routes:
                 ${routeText}
+
+                <br><br>
+
+                <strong>${servingDirectionLabels.length > 1 ? "Serving directions" : "Serving direction"}:</strong>
+                ${servingDirectionLabels.length ? servingDirectionLabels.join(" &middot; ") : "Not available"}
 
                 <details>
                     <summary>Stop reference details</summary>
