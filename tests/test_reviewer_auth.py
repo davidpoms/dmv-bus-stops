@@ -1,5 +1,7 @@
 import os
 import sqlite3
+import smtplib
+import socket
 import subprocess
 import sys
 import tempfile
@@ -11,7 +13,13 @@ from urllib.parse import parse_qs, urlparse
 
 from src.api import app as review_api
 from src.review import assignment_router
-from src.review.auth import issue_login_token, consume_login_token, token_hash
+from src.review.auth import (
+    RateLimitError, consume_login_token, enforce_login_rate_limits,
+    issue_login_token, token_hash,
+)
+from src.review.email_delivery import (
+    EmailConfigurationError, magic_link_message, smtp_sender_from_env,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,6 +40,8 @@ class ReviewerAuthTests(unittest.TestCase):
         CREATE TABLE reviewer_login_tokens(id INTEGER PRIMARY KEY,reviewer_id INTEGER,
           normalized_email TEXT,token_hash TEXT UNIQUE,action TEXT,expires_at TEXT,
           used_at TEXT,created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+        CREATE TABLE reviewer_auth_attempts(id INTEGER PRIMARY KEY,email_key TEXT,
+          source_key TEXT,outcome TEXT,created_at TEXT);
         CREATE TABLE stop_review_assignments(id INTEGER PRIMARY KEY,stop_id INTEGER,
           reviewer_id INTEGER,scenario TEXT,status TEXT);
         CREATE TABLE stop_observations(id INTEGER PRIMARY KEY,physical_stop_id INTEGER,
@@ -117,7 +127,7 @@ class ReviewerAuthTests(unittest.TestCase):
             session["reviewer_key"] = "empty"
             session["auth_csrf"] = "csrf"
         with patch.dict(review_api.app.config, {
-            "TESTING": False, "REVIEWER_EMAIL_SENDER": lambda email, link: sent.append((email, link))
+            "TESTING": False, "REVIEWER_EMAIL_SENDER": lambda email, link, minutes: sent.append((email, link, minutes))
         }):
             response = client.post("/reviewer/sign-in", json={
                 "email": " USED@EXAMPLE.COM ", "csrf_token": "csrf"
@@ -127,6 +137,7 @@ class ReviewerAuthTests(unittest.TestCase):
         self.assertNotIn("used@example.com", response.get_data(as_text=True))
         self.assertEqual(1, len(sent))
         raw = parse_qs(urlparse(sent[0][1]).query)["token"][0]
+        self.assertEqual(20, sent[0][2])
         self.assertEqual(302, client.get("/reviewer/verify?token=" + raw).status_code)
         self.assertEqual(50, self._session_id(client))
         conn = sqlite3.connect(self.db)
@@ -152,7 +163,158 @@ class ReviewerAuthTests(unittest.TestCase):
                 "email": "new@example.com", "csrf_token": "csrf"
             })
         self.assertEqual(503, response.status_code)
-        self.assertEqual({"error": "Email sign-in is not configured"}, response.get_json())
+        self.assertEqual({"error": "Email sign-in is temporarily unavailable. You can still review anonymously."}, response.get_json())
+        conn = sqlite3.connect(self.db)
+        self.assertIsNotNone(conn.execute(
+            "SELECT used_at FROM reviewer_login_tokens ORDER BY id DESC LIMIT 1"
+        ).fetchone()[0])
+        conn.close()
+
+    def test_email_and_source_rate_limits_are_persistent_and_private(self):
+        sender = lambda email, link, minutes: None
+        client = review_api.app.test_client()
+        with patch.dict(review_api.app.config, {"REVIEWER_EMAIL_SENDER": sender}):
+            for _ in range(3):
+                self.assertEqual(200, client.post(
+                    "/reviewer/sign-in", json={"email": "limit@example.com"}
+                ).status_code)
+            limited = review_api.app.test_client().post(
+                "/reviewer/sign-in", json={"email": "limit@example.com"}
+            )
+            self.assertEqual(429, limited.status_code)
+            self.assertNotIn("account", limited.get_data(as_text=True).lower())
+            self.assertEqual(200, client.post(
+                "/reviewer/sign-in", json={"email": "other@example.com"}
+            ).status_code)
+        conn = sqlite3.connect(self.db)
+        self.assertEqual(4, conn.execute("SELECT COUNT(*) FROM reviewer_login_tokens").fetchone()[0])
+        self.assertEqual(4, conn.execute("SELECT COUNT(*) FROM reviewer_auth_attempts").fetchone()[0])
+        conn.close()
+
+        conn = sqlite3.connect(self.db)
+        now = datetime.now(timezone.utc)
+        for number in range(20):
+            enforce_login_rate_limits(
+                conn, f"source{number}@example.com", "198.51.100.1", "secret", now
+            )
+        with self.assertRaises(RateLimitError):
+            enforce_login_rate_limits(
+                conn, "new@example.com", "198.51.100.1", "secret", now
+            )
+        enforce_login_rate_limits(
+            conn, "new@example.com", "198.51.100.2", "secret", now
+        )
+        old = now - timedelta(hours=49)
+        for number in range(20):
+            enforce_login_rate_limits(
+                conn, f"old{number}@example.com", "203.0.113.10", "secret", old
+            )
+        enforce_login_rate_limits(
+            conn, "current@example.com", "203.0.113.10", "secret", now
+        )
+        self.assertEqual(0, conn.execute(
+            "SELECT COUNT(*) FROM reviewer_auth_attempts WHERE created_at<?",
+            ((now - timedelta(hours=48)).isoformat(),)
+        ).fetchone()[0])
+        conn.close()
+
+    def test_new_link_supersedes_old_and_forwarded_header_is_not_trusted(self):
+        client = review_api.app.test_client()
+        first = client.post("/reviewer/sign-in", json={"email": "links@example.com"})
+        second = client.post(
+            "/reviewer/sign-in", json={"email": "links@example.com"},
+            headers={"X-Forwarded-For": "203.0.113.99"},
+        )
+        first_token = parse_qs(urlparse(first.get_json()["magic_link"]).query)["token"][0]
+        second_token = parse_qs(urlparse(second.get_json()["magic_link"]).query)["token"][0]
+        self.assertEqual(400, client.get("/reviewer/verify?token=" + first_token).status_code)
+        self.assertEqual(302, client.get("/reviewer/verify?token=" + second_token).status_code)
+
+    def test_plain_text_mail_and_smtp_configuration_validation(self):
+        message = magic_link_message(
+            "sender@example.org", "review@example.org",
+            "https://example.org/reviewer/verify?token=secret", 20
+        )
+        self.assertEqual("Sign in to DMV Bus Stops", message["Subject"])
+        self.assertIn("expires in 20 minutes", message.get_content())
+        self.assertNotIn("reviewer ID", message.get_content())
+        with self.assertRaises(EmailConfigurationError):
+            smtp_sender_from_env({})
+        with self.assertRaises(EmailConfigurationError):
+            smtp_sender_from_env({"REVIEWER_EMAIL_BACKEND":"smtp", "SMTP_PORT":"bad"})
+        valid = {"REVIEWER_EMAIL_BACKEND":"smtp", "REVIEWER_EMAIL_FROM":"a@example.org",
+                 "SMTP_HOST":"smtp.example.org", "SMTP_PORT":"587"}
+        with self.assertRaises(EmailConfigurationError):
+            smtp_sender_from_env({**valid, "SMTP_USE_TLS":"yes"})
+        with self.assertRaises(EmailConfigurationError):
+            smtp_sender_from_env({**valid, "SMTP_USERNAME":"user"})
+        with self.assertRaises(EmailConfigurationError):
+            magic_link_message("good@example.org\r\nBcc: bad@example.org",
+                               "review@example.org", "https://example.org", 20)
+
+    def test_delivery_exceptions_invalidate_new_token_and_preserve_prior_link(self):
+        client = review_api.app.test_client()
+        first = client.post("/reviewer/sign-in", json={"email":"failure@example.com"})
+        first_token = parse_qs(urlparse(first.get_json()["magic_link"]).query)["token"][0]
+        failures = [
+            socket.gaierror("dns"), smtplib.SMTPNotSupportedError("tls"),
+            smtplib.SMTPAuthenticationError(535, b"auth"),
+            smtplib.SMTPSenderRefused(550, b"sender", "sender@example.org"),
+            smtplib.SMTPRecipientsRefused({"failure@example.com": (550, b"recipient")}),
+        ]
+        for number, failure in enumerate(failures):
+            with self.subTest(failure=type(failure).__name__), patch.dict(
+                review_api.app.config,
+                {"REVIEWER_EMAIL_SENDER": lambda *_args, error=failure: (_ for _ in ()).throw(error)},
+            ):
+                response = client.post(
+                    "/reviewer/sign-in", json={"email": f"failure{number}@example.com"}
+                )
+                self.assertEqual(503, response.status_code)
+                self.assertNotIn("token", response.get_data(as_text=True).lower())
+        conn = sqlite3.connect(self.db)
+        failed_rows = conn.execute(
+            "SELECT used_at FROM reviewer_login_tokens WHERE normalized_email LIKE 'failure%@example.com' "
+            "AND normalized_email!='failure@example.com'"
+        ).fetchall()
+        self.assertTrue(all(row[0] is not None for row in failed_rows))
+        original = conn.execute(
+            "SELECT used_at FROM reviewer_login_tokens WHERE normalized_email='failure@example.com'"
+        ).fetchone()[0]
+        self.assertIsNone(original)
+        conn.close()
+        self.assertEqual(302, client.get("/reviewer/verify?token=" + first_token).status_code)
+
+    def test_rate_table_failure_does_not_create_or_corrupt_identity(self):
+        conn = sqlite3.connect(self.db)
+        before = conn.execute("SELECT COUNT(*) FROM community_reviewers").fetchone()[0]
+        conn.execute("DROP TABLE reviewer_auth_attempts")
+        conn.commit(); conn.close()
+        response = review_api.app.test_client().post(
+            "/reviewer/sign-in", json={"email":"db-failure@example.com"}
+        )
+        self.assertEqual(503, response.status_code)
+        conn = sqlite3.connect(self.db)
+        self.assertEqual(before, conn.execute("SELECT COUNT(*) FROM community_reviewers").fetchone()[0])
+        conn.close()
+
+    def test_health_endpoint_contains_no_credentials(self):
+        response = review_api.app.test_client().get("/api/reviewer/email-auth-health")
+        payload = response.get_json()
+        self.assertNotIn("SMTP_PASSWORD", payload["required_configuration"])
+        self.assertNotIn("password", response.get_data(as_text=True).lower())
+
+    def test_unconfigured_login_ui_keeps_anonymous_review_available(self):
+        client = review_api.app.test_client()
+        with patch.dict(os.environ, {
+            "REVIEWER_AUTH_DEV_MODE": "", "REVIEWER_EMAIL_BACKEND": ""
+        }), patch.dict(
+            review_api.app.config, {"TESTING": False, "REVIEWER_EMAIL_SENDER": None}
+        ):
+            page = client.get("/reviewer/sign-in")
+        self.assertEqual(200, page.status_code)
+        self.assertIn("temporarily unavailable", page.get_data(as_text=True))
+        self.assertIn("still review anonymously", page.get_data(as_text=True))
 
     def test_active_migration_upgrades_legacy_schema_idempotently(self):
         legacy = Path(self.temp.name) / "legacy.db"
@@ -171,6 +333,7 @@ class ReviewerAuthTests(unittest.TestCase):
         self.assertEqual([(7,"keep",None,None),(8,"keep2",None,None)], conn.execute(
             "SELECT id,reviewer_key,email_verified_at,claimed_at FROM community_reviewers ORDER BY id").fetchall())
         self.assertTrue(conn.execute("SELECT 1 FROM sqlite_master WHERE name='reviewer_login_tokens'").fetchone())
+        self.assertTrue(conn.execute("SELECT 1 FROM sqlite_master WHERE name='reviewer_auth_attempts'").fetchone())
         conn.close()
 
 

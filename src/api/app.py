@@ -31,7 +31,14 @@ from src.assessment.interpretation import (
 
 from src.review.consensus import calculate_stop_consensus
 from src.review.context import build_review_context
-from src.review.auth import issue_login_token, consume_login_token, normalize_email
+from src.review.auth import (
+    TOKEN_LIFETIME_MINUTES, RateLimitError, consume_login_token,
+    enforce_login_rate_limits, invalidate_login_token, issue_login_token,
+    normalize_email, supersede_login_tokens,
+)
+from src.review.email_delivery import (
+    EmailConfigurationError, email_delivery_status, smtp_sender_from_env,
+)
 from src.amenities.status_synthesis import geography_status_rows
 from src.amenities.review_priority import refresh_after_community_mutation
 
@@ -4698,15 +4705,38 @@ def _auth_db():
     return conn
 
 
-def _send_reviewer_magic_link(email, link):
+def _reviewer_email_status():
+    if app.testing or os.environ.get("REVIEWER_AUTH_DEV_MODE") == "1":
+        return {"available": True, "backend": "development"}
+    return email_delivery_status(app.config.get("REVIEWER_EMAIL_SENDER"))
+
+
+@app.route("/api/reviewer/email-auth-health")
+def reviewer_email_auth_health():
+    status = _reviewer_email_status()
+    return {
+        "available": status["available"],
+        "backend": status.get("backend"),
+        "secure_cookie": bool(app.config.get("SESSION_COOKIE_SECURE")),
+        "required_configuration": [
+            "FLASK_SECRET_KEY", "DMV_BUS_STOPS_DB", "SESSION_COOKIE_SECURE",
+            "REVIEWER_EMAIL_BACKEND", "REVIEWER_EMAIL_FROM", "SMTP_HOST",
+            "SMTP_PORT", "SMTP_USE_TLS",
+        ],
+    }
+
+
+def _send_reviewer_magic_link(email, link, expires_minutes):
     sender = app.config.get("REVIEWER_EMAIL_SENDER")
     if sender:
-        sender(email, link)
+        sender(email, link, expires_minutes)
         return
     if app.testing or os.environ.get("REVIEWER_AUTH_DEV_MODE") == "1":
-        app.extensions.setdefault("reviewer_auth_outbox", []).append((email, link))
+        app.extensions.setdefault("reviewer_auth_outbox", []).append(
+            (email, link, expires_minutes)
+        )
         return
-    raise RuntimeError("Reviewer email delivery is not configured")
+    smtp_sender_from_env()(email, link, expires_minutes)
 
 
 @app.route("/reviewer/sign-in", methods=["GET", "POST"])
@@ -4715,13 +4745,20 @@ def reviewer_sign_in():
     if request.method == "GET":
         csrf = secrets.token_urlsafe(24)
         session["auth_csrf"] = csrf
-        return render_template("reviewer_sign_in.html", csrf_token=csrf)
+        return render_template(
+            "reviewer_sign_in.html", csrf_token=csrf,
+            email_auth_available=_reviewer_email_status()["available"],
+        )
     data = request.get_json(silent=True) or request.form
     if not app.testing and data.get("csrf_token") != session.get("auth_csrf"):
         return {"error": "Invalid request token"}, 400
+    conn = None
     try:
         email = normalize_email(data.get("email"))
         conn = _auth_db()
+        enforce_login_rate_limits(
+            conn, email, request.remote_addr, app.secret_key
+        )
         owner = conn.execute(
             "SELECT id FROM community_reviewers WHERE email=? "
             "AND email_verified_at IS NOT NULL", (email,)
@@ -4735,14 +4772,36 @@ def reviewer_sign_in():
             reviewer_id, reviewer_key = get_or_create_reviewer()
             session["reviewer_key"] = reviewer_key
         raw = issue_login_token(conn, reviewer_id, email)
-        conn.close()
         link = url_for("reviewer_verify", token=raw, _external=True)
-        _send_reviewer_magic_link(email, link)
+        try:
+            _send_reviewer_magic_link(email, link, TOKEN_LIFETIME_MINUTES)
+        except Exception as exc:
+            invalidate_login_token(conn, raw)
+            raise RuntimeError("email delivery failed") from exc
+        supersede_login_tokens(conn, raw, email)
+        conn.close()
+    except RateLimitError as exc:
+        if conn is not None:
+            conn.close()
+        response = jsonify({
+            "message": "If that address can receive sign-in links, check your email."
+        })
+        response.status_code = 429
+        response.headers["Retry-After"] = str(exc.retry_after)
+        return response
     except ValueError as exc:
+        if conn is not None:
+            conn.close()
         return {"error": str(exc)}, 400
-    except RuntimeError:
-        return {"error": "Email sign-in is not configured"}, 503
-    response = {"message": "If the address can be used, a sign-in link has been sent."}
+    except (EmailConfigurationError, OSError, RuntimeError):
+        if conn is not None:
+            conn.close()
+        return {"error": "Email sign-in is temporarily unavailable. You can still review anonymously."}, 503
+    except sqlite3.DatabaseError:
+        if conn is not None:
+            conn.close()
+        return {"error": "Email sign-in is temporarily unavailable. You can still review anonymously."}, 503
+    response = {"message": "If that address can receive sign-in links, check your email."}
     if app.testing or os.environ.get("REVIEWER_AUTH_DEV_MODE") == "1":
         response["magic_link"] = link
     return response

@@ -335,10 +335,41 @@ records. `REVIEWER_AUTH_DEV_MODE` defaults off and is never inferred from Flask
 debug mode.
 
 Run `python scripts/active/create_review_tables.py` before deployment. Set a
-strong `FLASK_SECRET_KEY`, use `SESSION_COOKIE_SECURE=1` under HTTPS, and provide
-`REVIEWER_EMAIL_SENDER`. Without a mail sender, links are available only in tests
-or explicit `REVIEWER_AUTH_DEV_MODE=1`. Public APIs do not expose email or auth
-metadata. Legacy text reviewer identifiers are not migrated by this feature.
+strong `FLASK_SECRET_KEY`, `DMV_BUS_STOPS_DB`, and `SESSION_COOKIE_SECURE=1`
+under HTTPS. Email delivery uses the provider-neutral callable
+`(recipient, verification_url, expires_minutes)`. Tests may inject
+`REVIEWER_EMAIL_SENDER`; production can select the standard-library SMTP adapter
+with `REVIEWER_EMAIL_BACKEND=smtp`, `REVIEWER_EMAIL_FROM`, `SMTP_HOST`,
+`SMTP_PORT`, `SMTP_USE_TLS`, and optional paired `SMTP_USERNAME` / `SMTP_PASSWORD`.
+No provider is mandatory and no credentials belong in the repository.
+`SMTP_USE_TLS=1` means STARTTLS on the configured connection; TLS negotiation
+completes before optional authentication, and failure does not downgrade.
+`SMTP_USE_TLS=0` is intended only when transport security is supplied by the
+deployment/provider. SMTP-over-SSL is not implemented. Sender, host, and port
+are mandatory, TLS accepts only `0` or `1`, and credentials must be supplied as
+a pair.
+
+Magic-link requests are persistently limited to 3/15 minutes and 10/day per
+normalized email, plus 20/15 minutes and 100/day per direct source address.
+Rate-limit keys are HMAC-SHA-256 values; raw email and IP are not duplicated in
+`reviewer_auth_attempts`, and records older than 48 hours are cleaned during
+enforcement. `request.remote_addr` is used directly and arbitrary
+`X-Forwarded-For` is ignored. A trusted-proxy deployment must configure address
+translation at the WSGI layer rather than trusting public forwarded headers.
+
+Successful delivery invalidates older unused links for the same email. Definite
+delivery failure invalidates the new link immediately; there is no request-loop
+retry or background queue. Without valid mail configuration, the login UI says
+email sign-in is temporarily unavailable while anonymous review remains usable.
+Links are captured only in tests or explicit `REVIEWER_AUTH_DEV_MODE=1`, which
+defaults off. Public APIs do not expose email or auth metadata. Legacy text
+reviewer identifiers are not migrated by this feature.
+
+`GET /api/reviewer/email-auth-health` reports only availability, backend name,
+secure-cookie status, and required configuration names. It never returns SMTP
+credentials or secrets. Rotating `FLASK_SECRET_KEY` invalidates sessions and
+makes earlier HMAC rate-limit buckets unreachable; durable reviewer history is
+unchanged.
 `assignment_id`, `streetview_imagery_month`, `weather_exposure`, and
 `riders_avoid_facilities` alongside presence, type, condition, comfort,
 accessibility, clearance, notes, and stewardship-interest fields.

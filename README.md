@@ -92,6 +92,8 @@ the set of ordinary observations a reviewer is allowed to record.
 Reviewing may remain anonymous. Optional passwordless email sign-in preserves
 the same private reviewer profile, display name, history, and stewarded stops
 across browsers or devices when production mail delivery is configured.
+The deployment-neutral implementation supports injected transports or explicitly
+configured SMTP; it never sends or reveals links through a production fallback.
 
 See the [Volunteer Review Handbook](docs/Volunteer_Review_Handbook.md) before
 reviewing a stop.

@@ -46,6 +46,17 @@ cur.execute("""CREATE TABLE IF NOT EXISTS reviewer_login_tokens (
 )""")
 cur.execute("""CREATE INDEX IF NOT EXISTS idx_reviewer_login_tokens_hash
 ON reviewer_login_tokens(token_hash)""")
+cur.execute("""CREATE TABLE IF NOT EXISTS reviewer_auth_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email_key TEXT NOT NULL,
+    source_key TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL
+)""")
+cur.execute("""CREATE INDEX IF NOT EXISTS idx_reviewer_auth_attempts_email_time
+ON reviewer_auth_attempts(email_key, created_at)""")
+cur.execute("""CREATE INDEX IF NOT EXISTS idx_reviewer_auth_attempts_source_time
+ON reviewer_auth_attempts(source_key, created_at)""")
 
 
 cur.execute("""

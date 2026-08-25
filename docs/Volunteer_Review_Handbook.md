@@ -159,7 +159,8 @@ You may review anonymously. Optional **Sign in with email** uses a short-lived,
 one-time link to preserve the same profile, display name, review history, and
 stewarded stops across browsers or devices. Email is private account information
 and is not shown with public observations. Signing out removes the authenticated
-browser session; it does not delete review history. Site operators must configure
+browser session; it does not delete review history. The link expires after 20
+minutes and works once. Site operators must configure
 email delivery before cross-device sign-in is available in production.
 
 The current system can record a reviewer’s stewardship relationship or interest

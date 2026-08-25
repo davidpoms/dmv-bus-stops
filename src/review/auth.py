@@ -1,11 +1,20 @@
 """Small passwordless reviewer authentication primitives."""
 
 import hashlib
+import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
 
 
 TOKEN_LIFETIME_MINUTES = 20
+EMAIL_LIMITS = ((15, 3), (24 * 60, 10))
+SOURCE_LIMITS = ((15, 20), (24 * 60, 100))
+
+
+class RateLimitError(RuntimeError):
+    def __init__(self, retry_after=900):
+        super().__init__("Too many sign-in requests")
+        self.retry_after = retry_after
 
 
 def normalize_email(value):
@@ -17,6 +26,54 @@ def normalize_email(value):
 
 def token_hash(token):
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _private_key(secret, value):
+    return hmac.new(secret.encode("utf-8"), value.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def enforce_login_rate_limits(conn, email, source, secret, now=None):
+    now = now or datetime.now(timezone.utc)
+    email_key = _private_key(secret, normalize_email(email))
+    source_key = _private_key(secret, str(source or "unknown"))
+    conn.execute("BEGIN IMMEDIATE")
+    conn.execute("DELETE FROM reviewer_auth_attempts WHERE created_at<?",
+                 ((now - timedelta(hours=48)).isoformat(),))
+    for key_column, key, limits in (
+        ("email_key", email_key, EMAIL_LIMITS),
+        ("source_key", source_key, SOURCE_LIMITS),
+    ):
+        for minutes, maximum in limits:
+            count = conn.execute(
+                f"SELECT COUNT(*) FROM reviewer_auth_attempts WHERE {key_column}=? AND created_at>=?",
+                (key, (now - timedelta(minutes=minutes)).isoformat()),
+            ).fetchone()[0]
+            if count >= maximum:
+                conn.rollback()
+                raise RateLimitError(minutes * 60)
+    conn.execute(
+        "INSERT INTO reviewer_auth_attempts(email_key,source_key,outcome,created_at) "
+        "VALUES (?,?,?,?)", (email_key, source_key, "accepted", now.isoformat())
+    )
+    conn.commit()
+
+
+def invalidate_login_token(conn, raw_token, now=None):
+    now = now or datetime.now(timezone.utc)
+    conn.execute("UPDATE reviewer_login_tokens SET used_at=? WHERE token_hash=? AND used_at IS NULL",
+                 (now.isoformat(), token_hash(raw_token)))
+    conn.commit()
+
+
+def supersede_login_tokens(conn, raw_token, email, now=None):
+    now = now or datetime.now(timezone.utc)
+    conn.execute("BEGIN IMMEDIATE")
+    conn.execute(
+        "UPDATE reviewer_login_tokens SET used_at=? WHERE normalized_email=? "
+        "AND token_hash!=? AND used_at IS NULL",
+        (now.isoformat(), normalize_email(email), token_hash(raw_token)),
+    )
+    conn.commit()
 
 
 def reviewer_has_identity_data(conn, reviewer_id):
