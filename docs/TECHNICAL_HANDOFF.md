@@ -1,639 +1,481 @@
-# DMV Bus Stops Project — Technical Handoff Document
+# DMV Bus Stop Intelligence — Technical Handoff
 
-**Repository:** `davidpoms/dmv-bus-stops`
-**Current branch:** `main`
-**Current checkpoint:** Dashboard refactor + script archive consolidation
-**Last major commit:** `7c88be1`
-**Status:** Active development, stable refactor checkpoint
+This document is the implementation-oriented reference for the current system.
+When prose conflicts with code, inspect the named producer and its tests before
+changing data. The SQLite schema has evolved incrementally. `schema.sql` describes
+an important baseline but is not a complete production bootstrap; several evolved
+observation fields and tables are created by separate producers or migrations.
+Active migrations upgrade existing databases.
 
----
+## 1. Runtime and safety
 
-# 1. Project Overview
+The Flask application is `src/api/app.py`. Its default database is
+`src/database/dmv_bus_stops.db`, resolved from the repository root. Set
+`DMV_BUS_STOPS_DB` to an explicit path when using a linked worktree, test copy,
+or deployment database. `src/review/assignment_router.py` uses the same override,
+so API and assignment operations cannot diverge when it is set.
 
-The DMV Bus Stops project is a data-driven platform for identifying, reviewing, and prioritizing bus stop improvement opportunities across the Washington DC metropolitan region.
+Operational rules:
 
-The system combines:
+1. Never test a rebuild or migration first against production.
+2. Record a SHA-256 hash and make a recoverable backup.
+3. Run against a temporary copy and validate row-count/identity invariants.
+4. Apply only the required migration/rebuild to production.
+5. Recompute the production hash and validate again.
 
-* Transit stop inventory data
-* WMATA stop information
-* Ridership and transit exposure metrics
-* Geographic context
-* OpenStreetMap amenity evidence
-* Community review surveys
-* Consensus review workflows
-* Dashboard visualization and prioritization
+Some older producers still accept their database as a positional argument or
+Python parameter instead of reading `DMV_BUS_STOPS_DB`. Check each entry point;
+do not assume the override is universal outside the application, assignment
+router, and active review-table migration.
 
-The goal is to move from a static inventory of bus stops toward a community-validated improvement pipeline.
+## 2. Canonical identity and active stops
 
----
+`bus_stops` contains source/GTFS stop records. `physical_stops` is the canonical
+place identity, with `physical_stop_members` connecting source records to it.
+Public review, amenity, and opportunity logic uses `physical_stop_id`.
 
-# 2. High-Level Architecture
+An active stop means exactly:
 
-```
-Data Sources
-    |
-    |
-    +-- WMATA data
-    +-- DC / MD / VA geographic data
-    +-- OpenStreetMap amenities
-    +-- Road centerlines
-    |
-    v
-
-Database / Evidence Layer
-    |
-    |
-    +-- Stop records
-    +-- Evidence records
-    +-- Review observations
-    +-- Consensus results
-    +-- Improvement recommendations
-    |
-    v
-
-Application Layer
-    |
-    |
-    +-- Dashboard generator
-    +-- Review workflow
-    +-- Survey renderer
-    +-- Recommendation engine
-    |
-    v
-
-User Interface
-    |
-    |
-    +-- Public dashboard
-    +-- Stop detail popups
-    +-- Community survey workflow
-    +-- Review validation process
+```sql
+stop_gtfs_status.current_gtfs = 1
 ```
 
----
+`stop_gtfs_status` is produced by `scripts/active/build_gtfs_stop_status.py`.
+Non-current physical stops can remain for history but must not enter current
+amenity synthesis, review priority, seating opportunity, or assignment pools.
 
-# 3. Repository Structure
+## 3. Evidence layers and authority
 
-## Active application code
+Keep three layers distinct:
 
-```
-src/
-├── assessment/
-│   └── generate_improvement_recommendations.py
-│
-├── dashboard/
-│   ├── data.py
-│   ├── generate_dashboard.py
-│   ├── render_docs.py
-│   ├── static/
-│   │   ├── dashboard.js
-│   │   └── survey.js
-│   └── templates/
-│       └── dashboard.html
-│
-├── review/
-│   ├── community_survey_v1.py
-│   ├── create_review_queue.py
-│   └── render_survey.py
-│
-└── spatial/
-    └── nearest_road.py
-```
+1. **Evidence** is a source-specific record or dated observation.
+2. **Canonical synthesis** summarizes the usable evidence without erasing its
+   provenance or disagreement.
+3. **Community consensus** is a derived result from multiple community reviews;
+   it is neither an imported record nor a manual truth flag.
 
----
+### Local-jurisdiction evidence
 
-# 4. Script Organization
+`stop_amenity_evidence` stores source-centric amenity records with stable source
+identity and match provenance. The current database contains supported local
+evidence for:
 
-The repository previously accumulated hundreds of iterative patch scripts.
+- District of Columbia (`DDOT_ARCGIS` clean replacement path)
+- Montgomery County (`MONTGOMERY_COUNTY_WMATA`; public wording is “Montgomery
+  County inventory,” not WMATA amenity authority)
+- Prince George's County TheBus (currently shelter/trash fields)
+- City of Alexandria (including shelter/bench and other infrastructure fields)
+- Arlington County (currently accessibility pad/path fields, not shelter/bench)
+- City of Falls Church
+- Fairfax County (currently shelter evidence)
 
-These have now been reorganized.
+Coverage and supported fields vary. An importer’s existence does not imply full
+jurisdiction or amenity coverage. `source='DDOT'` is quarantined legacy evidence and is
+explicitly excluded from canonical synthesis. Clean `DDOT_ARCGIS` evidence is a
+different source.
 
-## Current operational scripts
+WMATA remains useful for service, stops, and route association, but its historical
+shelter/bench inventory fields are not authoritative current-condition evidence.
 
-```
-scripts/
-```
+### OSM evidence
 
-Contains active utilities for:
+`stop_osm_evidence` is usable for canonical shelter/bench synthesis only when an
+explicit `yes` or `no` tag is present and an OSM `ref`/`ref:wmata` matches a full
+external stop ID belonging to the physical stop. Proximity-only, missing, bare
+zero, and suffix matches fail closed.
 
-* data imports
-* evidence generation
-* debugging
-* rebuilding outputs
-* validation
-* workflow maintenance
+### Community observations and consensus
 
-Examples:
+`stop_observations` is append-only review evidence. Only rows with
+`source='community_review'` feed `src/review/consensus.py` and canonical amenity
+synthesis. Unknown/blank values do not count as votes.
 
-```
-import_wmata_evidence.py
-rebuild_stop_consensus.py
-generate_improvement_recommendations.py
-wire_map_filters.py
-validate_geography.py
-```
+`stop_consensus` is recalculated from observation history. For shelter/bench to
+be authoritative in amenity synthesis, there must be at least three community
+observations, confidence at least `0.75`, and a usable boolean consensus value.
+Pre-consensus community observations still contribute likely/conflicting evidence.
 
----
+## 4. Canonical amenity status
 
-## Archived scripts
+Producer: `src/amenities/status_synthesis.py`
 
-```
-scripts/archive/
-```
+Table: `stop_amenity_status`
 
-Contains:
+The rebuild produces exactly two rows—`shelter` and `bench`—for every active
+physical stop. Identity is unique on `(physical_stop_id, amenity_type)`.
 
-* historical patches
-* migrations
-* experiments
-* one-off fixes
-* deprecated workflow scripts
+Statuses are:
 
-Current archive size:
+- `confirmed_yes`: full community consensus confirms presence
+- `confirmed_no`: full community consensus confirms absence
+- `likely_yes`: usable non-consensus evidence indicates presence only
+- `likely_no`: usable non-consensus evidence indicates absence only
+- `conflicting`: usable positive and negative non-consensus evidence coexist
+- `unknown`: no usable semantic evidence
 
-```
-524 scripts
-```
+Full consensus determines the confirmed status. Conflicts with other evidence
+remain visible in `consensus_conflicts_with_other_evidence`; they are not deleted.
+Counts, source lists, OSM flags, community counts, rationale, and timestamp make
+the synthesis auditable.
 
-These are preserved for historical reference but should not be used in normal development.
-
----
-
-# 5. Dashboard System
-
-## Entry point
-
-Generate dashboard:
+Rebuild commands:
 
 ```bash
-python -m src.dashboard.generate_dashboard
+python scripts/active/rebuild_stop_amenity_status.py --db <database>
+python scripts/active/rebuild_amenity_review_priority.py <database>
 ```
 
-Primary components:
+The second command rebuilds canonical status and then amenity review priority.
 
-### Dashboard data layer
+## 5. Amenity verification priority
 
-File:
+Producer: `src/amenities/review_priority.py`
 
-```
-src/dashboard/data.py
-```
+Table: `stop_amenity_review_priority`
 
-Responsibilities:
+This table prioritizes evidence collection for each active stop/amenity pair; it
+is not an amenity truth source. Current workflow states are:
 
-* load stop data
-* prepare geographic summaries
-* prepare evidence bundles
-* supply dashboard metrics
+- `consensus_reached`
+- `conflicting`
+- `one_observation_short`
+- `likely_without_consensus`
+- `unknown_with_evidence`
+- `no_evidence`
 
----
+The score combines fixed conflict/consensus-progress components with one-tenth
+of `rider_exposure_percentile` for unresolved rows. This review-priority score is
+separate from the seating-opportunity score described below.
 
-### Dashboard renderer
+## 6. Rider exposure
 
-File:
+Current producer flow:
 
-```
-src/dashboard/generate_dashboard.py
-```
-
-Responsibilities:
-
-* assemble dashboard output
-* render templates
-* write final HTML
-
----
-
-### Frontend
-
-Main JavaScript:
-
-```
-src/dashboard/static/dashboard.js
+```text
+ridership_snapshots
+  -> opportunity_assessments.combined_route_weekday_boardings
+  -> opportunity_assessments.rider_exposure_percentile
+  -> amenity review priority and seating opportunities
 ```
 
-Handles:
+`src/assessment/create_opportunity_assessments.py` finds distinct routes serving
+each active physical stop. For the globally latest `ridership_snapshots.period`,
+it takes `MAX(weekday_boardings)` per route, sums those route values into
+`combined_route_weekday_boardings`, and also stores the highest route value.
+This deduplicates repeated snapshot rows and repeated route membership.
 
-* map rendering
-* filters
-* stop popup interactions
-* review actions
-* evidence display
-* geography filtering
+`src/scoring/rider_exposure.py` computes an empirical, CUME_DIST-style percentile
+over the active opportunity-assessment population:
 
----
-
-# 6. Review Workflow
-
-The review system allows community reviewers to evaluate bus stops.
-
-Workflow:
-
-```
-Stop Candidate
-      |
-      v
-Review Queue
-      |
-      v
-Community Survey
-      |
-      v
-Observation Record
-      |
-      v
-Consensus Processing
-      |
-      v
-Recommendation
+```text
+100 * count(exposure values <= this value) / active population size
 ```
 
----
+Values are normalized to numeric zero when missing; ties receive the same
+percentile. The percentile is persisted both in the
+`opportunity_assessments.rider_exposure_percentile` column and in
+`assessment_json`, then copied to current derived consumers.
 
-## Review queue generation
+This is route-based exposure: the sum of latest-period weekday boardings for
+routes serving the stop. It is **not** observed boarding activity at that physical
+stop. `route_exposure_score` in `stop_priority_snapshots.factors` is retained
+legacy scoring context and must not be presented as a percentile or substituted
+for the canonical rider percentile.
 
-File:
+## 7. Broad seating-improvement opportunities
 
-```
-src/review/create_review_queue.py
-```
+Producer: `src/assessment/generate_seating_improvement_opportunities.py`
 
-Responsible for:
-
-* selecting candidate stops
-* assigning review status
-* preparing review workflow
-
----
-
-## Survey rendering
-
-Files:
-
-```
-src/review/render_survey.py
-src/review/community_survey_v1.py
-```
-
-Responsibilities:
-
-* generate survey questions
-* handle conditional questions
-* format reviewer experience
-
-## Seating opportunity review model
-
-`seating_improvement_opportunities` has one derived row per current GTFS stop.
-Membership is broad: the priority score ranks rows and never gates inclusion.
-The score is `documented_need_index * 0.60 + rider_exposure_percentile * 0.40`.
-The need index is the maximum applicable documented-need signal, not a sum.
-Rider exposure is route-based exposure associated with the stop; it is not
-observed stop-level boarding.
-
-Canonical amenity status, seating adequacy, preliminary clearance, and rider
-benefit remain separate concepts. Workflow state describes the next useful
-evidence task. Campaign is assignment context derived from that workflow for an
-opportunity review; it is not another scoring system.
-
-Public review context also keeps two concepts distinct:
-
-* entry path explains why the reviewer reached the stop (opportunity, route,
-  nearby, map, or direct link)
-* review focus explains what evidence would be useful to collect
-
-Assignment-backed submissions append `stop_observations` history and retain the
-assignment ID. `review_mode` records in-person, Street View, or other remote
-visual review; `streetview_imagery_month` is distinct from `observed_at`.
-Preliminary visual clearance never represents engineering, ADA, ownership,
-utility, permitting, or construction approval.
-
-The targeted post-submission refresh is:
-
-```
-consensus -> amenity status -> amenity review priority
-          -> affected seating opportunity -> review queue -> rank refresh
-```
-
-Run `scripts/active/create_review_tables.py` when deploying schema additions,
-then use the active rebuild scripts when a full derived-data rebuild is
-actually required. Do not restore archived patch scripts as migrations.
-
----
-
-# 7. Evidence Pipeline
-
-Evidence is used to support improvement recommendations.
-
-Evidence sources:
-
-## Transit evidence
-
-Includes:
-
-* ridership exposure
-* route information
-* stop activity
-
-Relevant scripts:
-
-```
-scripts/import_wmata_evidence.py
-scripts/rebuild_wmata_evidence.py
-```
-
----
-
-## OSM evidence
-
-Includes:
-
-* nearby benches
-* shelters
-* amenities
-
-Relevant scripts:
-
-```
-scripts/build_stop_osm_evidence.py
-scripts/import_local_osm_export.py
-```
-
----
-
-## Road geometry
-
-Used for:
-
-* Street View orientation
-* nearest roadway matching
-
-Relevant files:
-
-```
-src/spatial/nearest_road.py
-```
-
----
-
-# 8. Consensus System
-
-Consensus transforms individual reviews into validated recommendations.
-
-Important files:
-
-```
-scripts/rebuild_stop_consensus.py
-
-src/assessment/generate_improvement_recommendations.py
-```
-
-Flow:
-
-```
-Reviewer observations
-        |
-        v
-Consensus aggregation
-        |
-        v
-Confidence assessment
-        |
-        v
-Improvement recommendation
-```
-
----
-
-# 9. Recent Major Changes
-
-## Script archive consolidation
-
-Completed:
-
-* moved historical scripts into:
-
-```
-scripts/archive/
-```
-
-* preserved git history through renames where possible
-* reduced active script clutter
-
----
-
-## Dashboard refactor
-
-Completed:
-
-* dashboard JS cleanup
-* review workflow simplification
-* survey rendering improvements
-* popup improvements
-* geography/filter improvements
-
----
-
-## WMATA evidence improvements
-
-Completed:
-
-* improved WMATA evidence importing
-* added matching tools
-* improved confidence display
-* improved retired stop handling
-
----
-
-# 10. Known Technical Risks
-
-## 1. Large script history
-
-The archive contains many experimental paths.
-
-Before modifying workflow logic:
-
-Search current code first:
+Wrapper:
 
 ```bash
-grep -R "function_name" src scripts
+python scripts/active/generate_seating_improvement_opportunities.py <database>
 ```
 
-Do not resurrect archived scripts without review.
+Table: `seating_improvement_opportunities`
 
----
+There is one row per active stop. Membership has no minimum score and is not
+gated by bench or shelter presence. Presence, adequacy, preliminary clearance,
+and rider benefit remain separate.
 
-## 2. Dashboard JavaScript complexity
+### Adequacy
 
-Primary frontend file:
+`limitation_observed` wins when any observation reports a seating limitation,
+fair/poor comfort, possible/blocked accessibility, partial/exposed weather, or
+riders avoiding facilities. `no_limitation_observed` requires affirmative
+observed seating plus explicit `bench_condition='none'`, good comfort, good
+accessibility, and no adverse weather/avoidance signal. Otherwise adequacy is
+`unknown`.
 
+### Preliminary clearance
+
+`bench_feasible` observations aggregate as:
+
+- any `no` -> `observed_constrained`
+- otherwise any `yes` -> `observed_clear`
+- otherwise -> `unknown`
+
+These are visual observations only—not engineering feasibility, ADA compliance,
+ownership/right-of-way authority, permitting, utility clearance, or construction
+readiness.
+
+### Workflow
+
+- unknown/conflicting bench status -> `verify_presence`
+- present plus affirmative no-limitation evidence -> `no_current_action`
+- observed constraint -> `constrained_or_special_review`
+- limitation or bench absence with observed clear space -> `planning_review`
+- limitation or absence without observed clear space ->
+  `collect_clearance_observation`
+- otherwise -> `assess_adequacy`
+
+### Provisional ranking
+
+`documented_need_index` is the maximum applicable signal, never a sum:
+
+| Signal | Value |
+|---|---:|
+| observed seating limitation | 90 |
+| poor comfort | 75 |
+| confirmed bench absence | 55 |
+| likely bench absence | 45 |
+| fair comfort | 40 |
+| shelter absence context | 20 |
+| otherwise | 0 |
+
+```text
+priority_score = documented_need_index * 0.60
+               + rider_exposure_percentile * 0.40
 ```
-src/dashboard/static/dashboard.js
+
+Rider exposure appears once. There is no uncertainty bonus, workflow/readiness
+component, `review_priority_score`, or legacy opportunity score in this formula.
+Rows rank by score descending, rider percentile descending, then physical stop
+ID. The model is provisional and calibratable; it ranks investigation, not the
+objective worth of a stop or construction feasibility.
+
+## 8. Narrow bench candidates and generic recommendations
+
+`bench_installation_candidates` remains the authoritative narrow derived
+representation for physical bench-installation candidacy. It is a separate,
+evidence-qualified planning funnel and is not the main seating-opportunity
+universe. Generic `improvement_recommendations` no longer independently creates
+`bench_installation_candidate`; generic presence/verification recommendations
+remain for compatibility and other amenity actions.
+
+Older `improvement_opportunities`, `opportunity_score`, recommendation, impact,
+project, and priority tables remain because APIs and compatibility workflows
+still consume portions of them. Do not mistake them for the canonical broad
+seating ranking or delete them without a consumer migration.
+
+## 9. Review routing and context
+
+Key files:
+
+- `src/review/assignment_router.py`
+- `src/review/context.py`
+- `src/api/app.py`
+- `src/review/community_survey_v1.py`
+
+Assignment scenarios preserve how a reviewer reached a stop:
+
+- `opportunity`: highest-ranked eligible seating opportunity; all workflow
+  states except `no_current_action`
+- `route`: pending available queue stop on a reviewer-selected route
+- `nearby`: pending available queue stop nearest supplied coordinates
+- `map` / `direct`: reviewer-selected current stop
+
+Route, nearby, and direct selection do not borrow Opportunity Review ranking.
+Unknown opportunity campaigns fail closed. Historical `campaign=NULL` rows
+remain readable.
+
+For a generic opportunity assignment, workflow maps to campaign:
+
+| Seating workflow | Assignment campaign |
+|---|---|
+| `verify_presence` | `presence_verification` |
+| `assess_adequacy` | `seating_adequacy` |
+| `collect_clearance_observation` | `bench_clearance` |
+| `planning_review` | `planning_review` |
+| `constrained_or_special_review` | `constrained_review` |
+
+Campaign/review focus controls emphasized survey fields. Public context keeps
+entry explanation (“Why you're reviewing this stop”) separate from evidence need
+(“What would be useful to check”). One survey is shared across paths.
+
+## 10. Assignments, observations, and temporal provenance
+
+`stop_review_assignments` records stop, reviewer, scenario, nullable campaign,
+status, and timestamps. `stop_observations.assignment_id` is a nullable indexed
+foreign key linking a new observation to the assignment that produced it. It is
+not unique because the append-only design and compatibility model do not use it
+as observation identity. Historical observations can legitimately have a null
+assignment ID.
+
+Assignment-backed submissions insert a new observation and never overwrite a
+prior reviewer/stop row. Relevant prospective fields include `review_mode`,
+`assignment_id`, `streetview_imagery_month`, `weather_exposure`, and
+`riders_avoid_facilities` alongside presence, type, condition, comfort,
+accessibility, clearance, notes, and stewardship-interest fields.
+
+`observed_at` records observation/submission time.
+`streetview_imagery_month` records the imagery capture month. They must not be
+conflated. Unknown imagery date can be acknowledged explicitly. No photo/blob
+storage exists.
+
+## 11. Targeted post-review refresh
+
+After a valid submission, `src/api/app.py` recalculates consensus and calls
+`refresh_after_community_mutation` for the affected physical stop:
+
+```text
+community observations
+  -> stop consensus
+  -> two canonical amenity-status rows
+  -> two amenity review-priority rows
+  -> affected seating opportunity
+  -> affected review-queue rollup
+  -> deterministic seating rank refresh
 ```
 
-This remains the largest frontend dependency.
+This is targeted; it does not perform a global evidence or 6,723-row opportunity
+rebuild per submission.
 
-Before editing:
+## 12. Geography and dashboard APIs
 
-* identify event handlers
-* check DOM assumptions
-* test dashboard generation afterward
+`stop_jurisdiction` and DC boundary associations support overlapping dimensions.
+Dashboard reporting intentionally exposes state, county, municipality, ward,
+ANC, and other available jurisdictions as separate searchable rows rather than
+forcing one hierarchy. A stop may contribute to several useful geographic views.
 
----
+Important routes include:
 
-## 3. Data dependencies
+- `/`, `/dashboard` — dashboard
+- `/stop/<physical_stop_id>` — stop detail
+- `/review/start` — routed assignment entry
+- `/review/<physical_stop_id>` — shared survey
+- `/review/<physical_stop_id>/info` — evidence and plain review context
+- `/review/<physical_stop_id>/assignment` — assignment API
+- `/review/submit` — append observation and targeted refresh
+- `/seating-opportunities` — broad seating universe and summary
+- `/bench-candidates` — narrow physical bench candidates
+- `/api/review-queue` — review queue
+- `/geography/states`, `/geography/counties`, `/geography/municipalities`
+- `/geography/dc-wards`, `/geography/dc-ancs`
 
-The project depends on:
+## 13. Migrations and rebuild order
 
-* WMATA datasets
-* geographic files
-* OSM exports
-* database state
-
-A clean clone may require rebuilding data artifacts.
-
----
-
-# 11. Development Workflow
-
-Recommended sequence:
-
-## Before changes
+For an existing database, the active review migration is idempotent:
 
 ```bash
-git status
-git pull
+python scripts/active/create_review_tables.py
 ```
 
----
+It creates review tables when absent, adds nullable
+`stop_review_assignments.campaign`, adds nullable observation fields
+`assignment_id`, `weather_exposure`, and `riders_avoid_facilities`, and creates
+the assignment index. Set `DMV_BUS_STOPS_DB` for a non-default database.
 
-## After code changes
+A full derived refresh, when evidence or upstream ridership actually changed,
+should respect dependencies:
+
+```text
+active GTFS status and physical-stop membership
+  -> source evidence / community observations
+  -> opportunity assessments and rider percentile
+  -> canonical amenity status
+  -> amenity review priority
+  -> broad seating opportunities
+  -> review queue and downstream compatibility summaries as required
+```
+
+Verified entry points include:
+
+```bash
+python -c "from src.assessment.create_opportunity_assessments import create_assessments; create_assessments('/path/to/copy.db')"
+python scripts/active/rebuild_stop_amenity_status.py --db <database>
+python scripts/active/rebuild_amenity_review_priority.py <database>
+python scripts/active/generate_seating_improvement_opportunities.py <database>
+python -c "from src.review.create_review_queue import create_review_queue; create_review_queue('/path/to/copy.db')"
+```
+
+Several module producers default to the repository database and do not accept
+`DMV_BUS_STOPS_DB`; invoke their Python function with an explicit database path
+or use a copied database in a controlled process. Never run a copied command
+against production without inspecting its current argument behavior.
+
+## 14. Tests and invariants
 
 Run:
 
 ```bash
-python -m src.dashboard.generate_dashboard
+python -m unittest discover -s tests -p "test_*.py" -v
+python -m compileall -q src scripts/active tests
+git diff --check
 ```
 
-Check:
+High-value invariants include:
 
-* dashboard builds
-* HTML renders
-* map loads
+- active scope always equals `current_gtfs=1`
+- exactly two canonical amenity rows per active stop
+- one seating opportunity per active stop
+- no score threshold controls seating membership
+- canonical identities are unique and inactive rows are excluded
+- rider percentile column and assessment JSON agree
+- assignment-backed reviews append and retain assignment linkage
+- Street View imagery month remains separate from observation time
+- unknown campaigns and incomplete migrations fail closed
+- WMATA amenity fields and quarantined legacy DDOT rows do not become current
+  shelter/bench authority
 
----
+## 15. Current, compatibility, and future boundaries
 
-## Before commit
+### Current and authoritative for their purpose
 
-```bash
-git status
-git diff
-```
+- `stop_gtfs_status` for current-stop scope
+- source evidence plus `stop_consensus` as inputs
+- `stop_amenity_status` for canonical current shelter/bench synthesis
+- `stop_amenity_review_priority` for amenity verification ordering
+- `opportunity_assessments.rider_exposure_percentile` for rider exposure
+- `seating_improvement_opportunities` for broad seating review/ranking
+- `bench_installation_candidates` for narrow physical bench candidacy
+- assignment-linked append-only `stop_observations` for review history
 
-Commit:
+### Retained compatibility or legacy context
 
-```bash
-git add .
-git commit -m "Describe change"
-```
+- `route_exposure_score` in older priority factors
+- `improvement_opportunities.opportunity_score`
+- generic recommendation/impact/project/priority tables and APIs
+- historical assignments with `campaign=NULL`
+- historical observations with `assignment_id=NULL` or legacy remote modes
+- quarantined legacy DDOT records and archived patch scripts
 
-Push:
+These may still have consumers. “Legacy” does not mean safe to delete.
 
-```bash
-git push
-```
+### Not implemented
 
----
+- observed stop-level boarding counts as the rider-exposure metric
+- automatic evidence freshness weighting or change detection
+- reviewer photo upload/storage
+- automated stewardship reminders
+- formal agency escalation or ownership/permit workflows
+- engineering, ADA, utility, right-of-way, or construction approval
 
-# 12. Current Known Good State
+## 16. Known technical debt
 
-The repository currently represents:
+- The schema is larger than the canonical product surface and contains multiple
+  generations of opportunity/recommendation data.
+- `schema.sql` does not yet bootstrap every production table/column; the review
+  migration covers the prospective campaign/observation additions, while older
+  mature fields still depend on existing database history and other producers.
+- Some active and root-level operational scripts have inconsistent database-path
+  interfaces.
+- Route assignments persist the route scenario but not the exact selected route
+  ID in the assignment row.
+- Historical observation and assignment rows have nullable prospective fields.
+- Local evidence coverage and community consensus are uneven.
+- Archived scripts include obsolete one-off patches and may not compile; they are
+  historical evidence, not an executable migration set.
 
-✅ Archived historical scripts
-✅ Cleaner active development structure
-✅ Dashboard workflow consolidated
-✅ Review workflow rebuilt
-✅ WMATA evidence improvements integrated
-✅ Geography/filter improvements integrated
-✅ GitHub synchronized
-
-Current baseline commit:
-
-```
-7c88be1
-```
-
----
-
-# 13. Suggested Next Development Priorities
-
-## Priority 1 — End-to-end validation
-
-Confirm:
-
-* dashboard generation
-* map rendering
-* popup behavior
-* survey submission
-* consensus rebuild
-* recommendation generation
-
----
-
-## Priority 2 — Database/documentation cleanup
-
-Document:
-
-* schema
-* evidence tables
-* review lifecycle
-* recommendation lifecycle
-
----
-
-## Priority 3 — Production readiness
-
-Consider:
-
-* automated tests
-* deployment instructions
-* environment variable documentation
-* data refresh procedures
-
----
-
-# 14. Quick Start Checklist
-
-A new developer should:
-
-1. Clone repository
-
-```bash
-git clone https://github.com/davidpoms/dmv-bus-stops
-```
-
-2. Install dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-3. Generate dashboard
-
-```bash
-python -m src.dashboard.generate_dashboard
-```
-
-4. Verify:
-
-* dashboard loads
-* stops appear
-* filters work
-* review workflow opens
-
----
-
-# End State
-
-The DMV Bus Stops repository has transitioned from an experimental patch-driven workflow into a more maintainable application structure.
-
-The main development focus should now shift from repair/refactoring toward feature completion, validation, and deployment.
+Prefer small, idempotent active migrations; explicit source authority; temporary-
+copy preflights; and consumer audits before retiring compatibility fields.

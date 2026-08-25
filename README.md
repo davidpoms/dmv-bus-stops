@@ -1,163 +1,143 @@
 # DMV Bus Stop Intelligence
 
-## Community-powered analysis of bus stop experiences across the Washington DC region
+DMV Bus Stop Intelligence is an open civic-data project for understanding the
+places where people wait for buses across Washington, DC, Maryland, and
+Virginia. It brings fragmented evidence together around a canonical physical
+stop so communities can see what is known, what is uncertain, and where a
+current observation would help.
 
-DMV Bus Stop Intelligence is a civic data project focused on understanding whether bus stops provide riders with the safe, comfortable, and accessible waiting environments they deserve.
+Transit agencies are strong sources for routes and service. Stop-level physical
+conditions are harder: responsibility is divided among agencies and local
+governments, inventories cover different features, open data can be incomplete,
+and street imagery can lag reality. A shelter record also cannot tell us whether
+its seating is comfortable or whether riders can use the waiting area well.
 
-The project analyzes Metrobus stops across Washington DC, Maryland, and Virginia by combining transit data, public datasets, imagery review, and community observations.
+This project does not turn those imperfect sources into false certainty. It
+preserves their provenance, shows disagreement, and invites dated community
+observations to improve the record.
 
----
+## What the project brings together
 
-# Why this project exists
+- GTFS stops and routes, clustered into canonical physical stops
+- the current/non-current status of each physical stop
+- validated local-jurisdiction shelter and bench evidence
+- explicit, identity-matched OpenStreetMap amenity tags
+- append-only community observations and derived community consensus
+- seating condition, comfort, accessibility, weather, and rider-use observations
+- preliminary visual observations of waiting and pass-through space
+- Street View review method and imagery month
+- route-based rider exposure
+- overlapping state, county, municipality, ward, and ANC geography
 
-Public transportation does not begin when a bus arrives.
+Evidence has different strengths. “Likely,” “confirmed,” “observed,”
+“conflicting,” and “unknown” are deliberately not interchangeable. WMATA
+shelter/bench inventory fields are not treated as authoritative current amenity
+evidence; current shelter and bench synthesis relies on supported local sources,
+community evidence, and safely identity-matched OSM evidence.
 
-For many riders, the bus stop itself is part of the transit experience:
+## What the system can do now
 
-- Is there somewhere safe to wait?
-- Is there protection from weather?
-- Is there a place to sit during a long wait?
-- Can older adults, disabled riders, and people carrying groceries or children comfortably use the stop?
-- Does the physical environment match the number of people relying on the service?
+For every active stop, the current application can organize evidence about
+bench and shelter presence, preserve conflicts, show whether community consensus
+has been reached, and identify the next useful review question. It can distinguish
+amenity presence from seating comfort and from preliminary visual clearance.
 
-DMV Bus Stop Intelligence exists to help communities identify places where the waiting environment may not meet rider needs.
+Every active stop also belongs to the broad seating-improvement opportunity
+universe. A provisional score ranks that universe; it does not decide membership
+and does not prove that construction should occur. A stop with seating can still
+have a comfort problem, while apparent absence does not establish that a new
+bench is feasible.
 
----
+Current analysis can support work such as:
 
-# Primary project focus
+- finding stops with missing or conflicting amenity evidence
+- comparing evidence coverage among jurisdictions and overlapping geographies
+- identifying high-route-exposure stops where seating conditions merit attention
+- separating likely amenity absence from observed comfort limitations
+- building evidence-aware volunteer review queues
+- retaining dated observations so conditions can be compared over time
+- identifying stops that may deserve further planning review
 
-The initial volunteer effort focuses on identifying high-priority opportunities for improved seating at bus stops.
+These outputs support investigation and prioritization. They are not engineering,
+ADA, ownership, right-of-way, permitting, utility, or construction decisions.
 
-This includes understanding:
+## Why a volunteer observation matters
 
-- where riders are likely waiting frequently
-- where seating may be insufficient
-- where a bench installation may be feasible
-- where accessibility considerations require attention
+A current observation can resolve disagreement, challenge an old or likely
+status, fill a gap left by structured datasets, and describe qualities those
+datasets rarely contain. New assignment-backed reviews append to history rather
+than replacing earlier observations.
 
-The project does not assume that every stop without a standalone bench needs one.
+One observation creates a dated piece of evidence. Repeated observations add
+temporal context. Stewardship can build a more durable community record of a
+stop as amenities, construction, maintenance, and waiting conditions change.
+The project does not yet provide automated change detection, recurring reminders,
+or community photo hosting.
 
-For example:
+## Ways to review
 
-- a shelter may already provide seating
-- a bench may not fit without a concrete pad or other site improvement
-- accessibility space may require thoughtful placement
-- some locations may need further review before recommending improvements
+The dashboard offers one primary **Review a seating opportunity** action. It
+automatically selects a ranked stop and emphasizes the evidence currently most
+useful there. Reviewers may instead choose **My Route**, **Near Me**, or a stop
+from the map or stop page.
 
----
+The review page keeps two questions separate:
 
-# Data philosophy
+- **Why you're reviewing this stop** explains how you arrived there.
+- **What would be useful to check** is derived from the stop's current evidence.
 
-The project separates:
+All paths use one shared survey. Internal workflow state changes emphasis, not
+the set of ordinary observations a reviewer is allowed to record.
 
-## Evidence
+See the [Volunteer Review Handbook](docs/Volunteer_Review_Handbook.md) before
+reviewing a stop.
 
-What we know:
+## Important limitations
 
-- transit service
-- ridership context
-- existing infrastructure
-- imagery observations
-- volunteer reviews
-- public datasets
+- Rider exposure is based on the routes serving a stop, not observed boardings
+  at that physical stop.
+- Local-government evidence coverage is uneven and source records can be stale.
+- Street View observations describe the imagery capture period, which may be
+  older than the review submission.
+- Community observation and consensus coverage is currently sparse.
+- Visual clearance is preliminary and cannot establish feasibility or approval.
+- Canonical “likely” states remain evidence-based estimates, not confirmations.
+- The ranking model is provisional and calibratable.
+- The project does not store reviewer photos.
 
-## Interpretation
+## Running the project
 
-What we think the evidence may mean:
+The application is a Flask service backed by SQLite. From the repository root:
 
-- possible seating need
-- accessibility concern
-- opportunity for further review
-- advocacy opportunity
+```bash
+python -m src.api.app
+```
 
-Recommendations should always remain connected to the underlying evidence.
+By default it uses `src/database/dmv_bus_stops.db`. To run against a copy or a
+separate deployment database, set `DMV_BUS_STOPS_DB` to that path before starting
+the application or an active migration that supports the override.
 
----
+Run the test suite with:
 
-# Current system
+```bash
+python -m unittest discover -s tests -p "test_*.py" -v
+git diff --check
+```
 
-DMV Bus Stop Intelligence combines:
+Do not experiment against the production database. Make a backup, use a
+temporary copy, run required migrations, and validate derived-table invariants
+before any production operation.
 
-- transit and stop data
-- ridership information
-- geographic analysis
-- open data sources
-- imagery review
-- volunteer observations
-- community feedback
+## Documentation
 
-The system is designed to help communities surface important questions and priorities. It is not intended to replace agency planning processes.
+- [Volunteer Review Handbook](docs/Volunteer_Review_Handbook.md) — how to review
+  and steward stops
+- [Technical Handoff](docs/TECHNICAL_HANDOFF.md) — authoritative implementation
+  semantics and operations
+- [Database Schema Guide](docs/DATABASE_SCHEMA.md) — current table roles and
+  authority boundaries
+- [Documentation index](docs/README.md)
 
----
-
-# Volunteer review
-
-Volunteers help answer questions that public datasets cannot answer alone.
-
-The dashboard offers one primary **Review a seating opportunity** entry point. It
-includes every active stop; the priority score ranks the review order and does
-not decide whether a stop is included. Reviewers can instead choose a stop from
-My Route, Near Me, or the map when that better matches how they want to help.
-
-The review page explains these two ideas separately:
-
-- why that stop was selected (the entry path)
-- what evidence would be most useful to check at that stop
-
-The same survey is used for every path. Its emphasis adapts to the evidence
-already available without hiding the other observation fields.
-
-Examples:
-
-- What seating exists today?
-- How comfortable does the waiting environment appear?
-- Could a bench fit safely?
-- Would additional site improvements likely be needed?
-- Are there accessibility concerns?
-
-Volunteer observations help create a clearer picture of rider experience.
-
----
-
-# Project principles
-
-## Riders deserve quality transit environments
-
-A bus stop is not just a sign on a sidewalk.
-
-It is a place where people:
-
-- wait
-- rest
-- transfer
-- begin and end trips
-- depend on public transportation
-
-The goal of this project is to help communities advocate for bus stops that reflect the importance of the riders who use them.
-
----
-
-# Development
-
-Current components:
-
-- Flask application
-- SQLite database
-- dashboard
-- volunteer review tools
-- recommendation pipeline
-- geographic analysis tools
-
-The project is actively evolving through community feedback.
-
----
-
-# Documentation
-
-Additional documentation:
-
-- `docs/DMV_Bus_Stop_Intelligence_Handbook.md`
-- `docs/Volunteer_Review_Handbook.md`
-- `docs/DATABASE_SCHEMA.md`
-- `docs/ROADMAP.md`
-
+Contributions are welcome in data validation, source research, reviewer UX,
+testing, documentation, and careful analysis. Keep evidence provenance visible,
+preserve uncertainty, and distinguish implemented behavior from future ideas.

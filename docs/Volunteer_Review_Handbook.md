@@ -1,285 +1,182 @@
-# DMV Bus Stop Intelligence Volunteer Review Handbook
+# Volunteer Review Handbook
 
-## Welcome Volunteers
+Thank you for helping build a trustworthy community record of bus-stop waiting
+conditions across the DMV. You are not being asked to make a construction or
+agency decision. You are adding a dated observation that can fill a gap, test an
+older record, or describe something a conventional dataset does not capture.
 
-Thank you for helping improve bus stops across the DMV region.
+## Why your observation matters
 
-This project begins with a simple belief:
+Bus-stop amenities change. A bench can be installed, removed, damaged, or made
+harder to use. Construction can change the waiting area. Street View can remain
+unchanged for years. Local inventories can omit a feature or disagree with one
+another.
 
-**People deserve high-quality public transit, including a comfortable place to wait.**
+A careful review can:
 
-Your role is not to make final decisions about construction or agency policy.
+- confirm or challenge evidence that only suggests a bench or shelter is present
+- resolve disagreement among sources
+- provide evidence where public datasets are silent
+- distinguish “seating exists” from “the seating is comfortable and usable”
+- document accessibility, weather exposure, and how riders use the waiting area
+- add context newer than available Street View imagery
+- contribute toward community consensus
+- help decide what kind of follow-up review would be useful
 
-Your role is to help create reliable information about existing conditions so communities can identify where improvements may matter most.
+Each assignment-backed review appends a new observation. It does not erase an
+older observation from the same reviewer or stop. One review is a dated piece of
+evidence; repeated reviews can show whether reported conditions persist or
+change. The system preserves that history, but it does not yet perform automatic
+change detection.
 
----
+## Choose how you want to review
 
-# What Question Are We Trying to Answer?
+### Review a seating opportunity
 
-Our first volunteer question is:
+The system chooses a current stop where an observation would be useful, ordered
+by the broad seating-opportunity ranking. Every active stop is represented in
+that opportunity universe; the score orders stops and is not a pass/fail gate.
 
-**Where are riders waiting for buses without comfortable seating, and where could seating improvements realistically help?**
+### My Route
 
-To answer that question, we need to understand:
+Choose routes you know or ride. The selected stop comes from those routes, not
+from the Opportunity Review ranking.
 
-• what seating exists today
+### Near Me
 
-• what kind of seating it is
+Choose a stop near your supplied location. Location is used for selection; it
+does not turn the review into an Opportunity Review assignment.
 
-• how comfortable it appears
+### Map or direct stop page
 
-• whether a bench could reasonably fit
+Choose a particular stop yourself.
 
-• whether additional review is needed
+On the review page, two short explanations keep these ideas separate:
 
----
+- **Why you're reviewing this stop** describes the path that brought you there.
+- **What would be useful to check** describes the evidence gap at that stop.
 
-# Seating Categories
+All paths use the same survey. Some questions are emphasized because they are
+especially useful, but other ordinary observation questions remain available.
 
-Not all seating should be treated the same.
+## Start with what you can actually observe
 
-## No Seating
+Use **Unsure** when the image or field conditions do not support a reliable
+answer. A cautious unknown is more valuable than a confident guess. In notes,
+describe the visible fact before offering an interpretation.
 
-Examples:
+For example, “three divided seats inside the shelter” is more useful than “bad
+bench.” “Grass strip next to a narrow sidewalk; utility pole beside boarding
+area” is more useful than “bench impossible.”
 
-• no bench
+## Presence and comfort are different questions
 
-• no shelter bench
+A shelter may contain seating, and a standalone bench may exist without a
+shelter. Record what is actually visible.
 
-• no obvious place designed for sitting
+Then consider whether seating has observable limitations:
 
-These stops are generally the highest priority for identifying possible bench opportunities.
+- narrow, small, or leaning/perch seating
+- seat dividers that limit shared use
+- damaged or visibly poor condition
+- a waiting environment that appears uncomfortable or inadequate
+- riders visibly avoiding the available shelter or seating
 
----
+Presence does not prove comfort. A comfort problem does not mean seating is
+absent. The project keeps these concepts separate.
 
-## Basic Seating
+## What to look for
 
-Examples:
+### Shelter and seating
 
-• traditional shelter bench
+- Is a shelter visible?
+- What kinds of seating are available?
+- Are there apparent seating limitations?
+- How well does the shelter appear to protect riders from weather?
 
-• backless bench
+### Waiting environment
 
-• angled shelter seat
+- Does the area appear protected, partly exposed, or exposed?
+- Does the overall waiting environment appear good, fair, poor, or unclear?
+- In person, do riders appear to avoid existing facilities?
 
-• seating with separators
+### Accessibility and space
 
-This counts as seating.
+- Is there an apparent clear path for people using mobility devices?
+- Are fixed objects, slopes, or narrow space visible?
+- If seating were added, does pass-through space appear to remain?
+- Does an unpaved location appear likely to need a pad?
 
-However, basic seating may not provide a high level of rider comfort.
+These are preliminary visual observations. They identify questions for later
+review; they do not answer them conclusively.
 
-A rider who can technically sit may still have a poor waiting experience.
+## Street View and in-person reviews
 
----
+Choose the review method that accurately describes your evidence:
 
-## More Comfortable Seating
+- **Street View** for Google Street View imagery
+- **Other remote visual** for another visual source
+- **In person** when you visited the stop
+- **Legacy remote** only for compatibility with older reviews
 
-Examples:
+For Street View, record the imagery month and year separately. `observed_at` is
+when your review was submitted; the imagery month is when the pictured condition
+was captured. A review submitted today from 2023 imagery is evidence about what
+was visible in 2023. If the imagery date cannot be determined, explicitly mark
+it unknown.
 
-• bench with a back
+The project does not currently accept or host reviewer photo uploads.
 
-• seating that allows normal resting posture
+## What preliminary clearance means
 
-• seating with fewer restrictive design features
+You may record whether pass-through space appears clear or constrained and
+whether a pad may be needed. You are **not** determining:
 
-Comfort improvements may vary by location and rider needs.
+- engineering or construction feasibility
+- ADA compliance
+- property ownership or right-of-way authority
+- permitting approval
+- underground or overhead utility clearance
+- whether an agency should install an improvement
 
----
+If conditions are ambiguous, record the visible constraint and choose Unsure.
 
-# Shelters and Seating
+## Notes and uncertainty
 
-A shelter does not mean "no seating."
+Notes are most useful when they add observable details not captured by the
+structured choices. Helpful notes can identify image obstruction, construction,
+damage, a feature outside the normal camera view, or why an answer is uncertain.
 
-Many shelters provide the only seating available at a stop.
+Avoid identifying individual riders or adding sensitive personal information.
 
-However, shelters should not automatically be considered equivalent to comfortable seating.
+## Stewarding a stop
 
-When reviewing a shelter, consider:
+Stewarding a stop means helping maintain a current community record of its
+waiting conditions over time. It is ongoing civic observation, not ownership of
+the stop and not authority to act on public or private property.
 
-• Does the bench have a back?
+The current system can record a reviewer’s stewardship relationship or interest
+and associate reviews with a reviewer profile. It does not yet provide automated
+recurring reminders, photo hosting, formal agency escalation, or ownership and
+permission workflows.
 
-• Is it angled?
+Stewardship is useful because conditions can change through maintenance,
+construction, damage, new amenities, or removal. A later observation can add
+temporal context without deleting the earlier record.
 
-• Are there seat separators?
+## What happens after submission
 
-• Does it appear designed mainly for short-term waiting?
+The observation is appended to history and linked to its assignment. The system
+recalculates consensus and refreshes the affected stop’s canonical amenity
+status, amenity review priority, seating opportunity, review queue entry, and
+deterministic rank. It does not rebuild all stops for each submission.
 
-• Would another seating option improve rider experience?
+Community consensus requires multiple usable observations with sufficient
+agreement. Your individual review contributes evidence; it does not automatically
+turn a likely result into a confirmed result.
 
-The project recognizes that shelters provide important weather protection while also recognizing that seating quality matters.
+## The standard for a good review
 
----
-
-# Evaluating Bench Fit
-
-One of the most important volunteer questions is whether a bench could reasonably be installed.
-
-This does **not** mean asking:
-
-"Is there already a perfect concrete pad?"
-
-Many good bench opportunities will require some site improvement.
-
-A stop may still be a possible bench location if it currently has:
-
-• grass beside the sidewalk
-
-• dirt or an informal waiting area
-
-• a narrow sidewalk with additional adjacent space
-
-• an area where a concrete pad could potentially be placed
-
-A concrete pad or similar improvement may allow a bench to be installed while maintaining:
-
-• accessible paths
-
-• pedestrian movement
-
-• mobility device clearance
-
-• safe boarding areas
-
-When reviewing bench fit, look for:
-
-## Positive signs
-
-• Riders already wait in a recognizable area
-
-• There appears to be unused space nearby
-
-• Grass or dirt provides room for a possible pad
-
-• A bench could be placed without blocking the sidewalk
-
-## Potential barriers
-
-• steep slopes
-
-• utilities or fixed objects
-
-• very narrow pedestrian space
-
-• blocked accessibility paths
-
-• unsafe placement near boarding areas
-
-Do not mark a stop as impossible simply because there is no existing pavement.
-
-The goal is to identify promising opportunities for further evaluation.
-
----
-
-# What Volunteers Should Record
-
-Focus on observable facts.
-
-## Choosing a review path
-
-Use **Review a seating opportunity** when you want the system to choose a stop
-where a current observation would be useful. You can also review stops on your
-route, near you, or directly from the map. The page will say why the stop was
-selected and, separately, what would be most useful to check. A stop can need a
-presence check, a comfort assessment, or a preliminary look at available space;
-these are different questions.
-
-All paths use the same form. Highlighted questions are a guide, not a limit on
-what you may record.
-
-## Seating
-
-Record:
-
-• whether seating exists
-
-• seating type
-
-• seating condition
-
-• comfort characteristics
-
-• hostile design features
-
-## Space
-
-Record:
-
-• where riders currently wait
-
-• whether space appears available
-
-• whether a bench might fit
-
-• whether a pad may be needed
-
-## Accessibility
-
-Consider:
-
-• pedestrian paths
-
-• mobility device access
-
-• boarding areas
-
-• potential conflicts
-
----
-
-# What Volunteers Should Not Decide
-
-Volunteers should not determine:
-
-• whether an agency must install a bench
-
-• final engineering feasibility
-
-• construction costs
-
-• ownership responsibility
-
-• legal approvals
-
-Those decisions require additional review.
-
-Volunteer observations help identify where those conversations should happen.
-
-A visual space or clearance observation is preliminary. It is not engineering
-review, an ADA-compliance determination, ownership or utility clearance,
-permitting approval, or construction readiness.
-
-When using Street View, record the imagery month separately from the date you
-performed the review. If the imagery date cannot be determined, explicitly mark
-it unknown rather than treating today's date as the imagery date.
-
----
-
-# Why We Collect Additional Information
-
-The project collects more than just bench information.
-
-Some observations may support future work around:
-
-• accessibility
-
-• shelter quality
-
-• weather protection
-
-• hostile design
-
-• rider comfort
-
-• community advocacy
-
-However, the immediate goal is to identify seating opportunities.
-
-Additional data is valuable because it helps the community ask better questions over time.
-
----
-
-# The Goal
-
-A successful review is one where we create trustworthy information.
-
-By documenting conditions carefully, volunteers help build a clearer picture of where riders experience barriers—and where practical improvements can make transit better.
+A good review is specific, cautious, and honest about what cannot be seen. The
+goal is not to produce a particular recommendation. It is to leave the next
+reviewer, analyst, or community partner with better evidence than they had before.

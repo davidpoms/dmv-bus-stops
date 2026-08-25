@@ -1,196 +1,185 @@
-# DMV Bus Stops Database Schema
+# Database Schema Guide
 
-## Design Principles
+This guide describes the current conceptual schema. The executable baseline is
+`src/database/schema.sql`; existing databases may require active idempotent
+migrations because SQLite does not retroactively apply new column definitions.
 
-The database separates:
+Important: `schema.sql` is not yet a complete bootstrap of every evolved table.
+For example, several mature observation fields and tables such as
+`community_stewardships`, `physical_stops`, source evidence, consensus, and
+opportunity assessments originated in separate producers or migrations. Inspect
+`PRAGMA table_info` on the target database and run active migrations; do not
+assume executing `schema.sql` alone recreates production.
 
-1. Observed facts
-2. Evidence sources
-3. Human observations
-4. Analytical interpretation
-5. Recommended actions
+## Design boundaries
 
----
+The database deliberately separates:
 
-# Core Entities
+1. source stop and route records
+2. canonical physical-stop identity and current status
+3. source evidence and human observations
+4. derived consensus and canonical synthesis
+5. prioritization, opportunities, and recommendations
+6. review assignments and historical workflow state
 
-## physical_stops
+Do not use a downstream score as evidence or a source field as canonical truth.
 
-Represents a bus stop location.
+## Stop and service identity
 
-Fields:
+### `bus_stops`, `routes`, `stop_routes`
 
-| Field | Description |
-|-|-|
-| id | Internal stop ID |
-| stop_id | Agency stop identifier |
-| stop_name | Stop name |
-| latitude | Latitude |
-| longitude | Longitude |
-| jurisdiction | DC/MD/VA |
-| municipality | City/county |
-| created_at | Record creation |
+Agency/GTFS stop records, route identities, and their many-to-many relationship.
 
----
+### `physical_stops`, `physical_stop_members`
 
-# stop_amenities
+Canonical physical locations and the source stop records clustered into each
+location. `physical_stop_id` is the public and analytical stop identity.
 
-Represents physical infrastructure.
+### `stop_gtfs_status`
 
-| Field | Description |
-|-|-|
-| stop_id | Related stop |
-| shelter_present | Whether shelter exists |
-| shelter_type | WMATA/custom/unknown |
-| built_in_seating | Built-in shelter seating |
-| seating_capacity | Estimated seats |
-| additional_seating | Other seating |
-| lighting_present | Lighting availability |
-| ada_features | Accessibility features |
-| sidewalk_access | Pedestrian access |
+Current service scope. The only active-stop predicate is:
 
----
+```sql
+current_gtfs = 1
+```
 
-# seating_assessments
+Historical physical stops may remain even when they are not current.
 
-Represents quality of seating.
+### `stop_jurisdiction` and boundary tables
 
-Important because presence does not equal usability.
+State, county, municipality, ward, ANC, and other geographic associations.
+These dimensions overlap intentionally.
 
-| Field | Description |
-|-|-|
-| stop_id | Related stop |
-| seating_available | Yes/no |
-| comfort_rating | Volunteer rating |
-| duration_suitable | Short wait vs long wait |
-| accessibility_rating | Accessibility |
-| notes | Comments |
+## Source evidence
 
----
+### `stop_amenity_evidence`
 
-# ridership_context
+Validated local-jurisdiction amenity records. Identity is source-centric and
+includes source, source record ID, and amenity type. Rows retain matching and
+provenance metadata. Quarantined `source='DDOT'` rows are not canonical inputs;
+clean `DDOT_ARCGIS` is distinct.
 
-Represents demand.
+### `stop_osm_evidence`
 
-| Field | Description |
-|-|-|
-| stop_id | Related stop |
-| daily_boardings | Boarding count |
-| daily_alightings | Alighting count |
-| route_count | Number of routes |
-| transfer_activity | Transfer importance |
+OSM tags and feature metadata. Canonical synthesis accepts only explicit yes/no
+amenity tags with a full identity match to a member stop—not proximity alone.
 
----
+### Transit and ridership tables
 
-# improvement_program_status
+`ridership_snapshots` stores period/route ridership source values.
+`stop_transit_evidence` and related tables retain service context. WMATA amenity
+inventory fields are not authoritative current shelter/bench evidence.
 
-Tracks existing agency plans.
+## Community review
 
-| Field | Description |
-|-|-|
-| stop_id | Related stop |
-| program | WMATA improvement program |
-| status | planned/in progress/completed |
-| phase | Project phase |
-| date_updated | Last update |
+### `community_reviewers`
 
----
+Anonymous reviewer identity keyed by `reviewer_key`.
 
-# evidence_sources
+### `stop_review_assignments`
 
-Tracks where information comes from.
+| Field | Meaning |
+|---|---|
+| `id` | assignment identity |
+| `stop_id` | canonical physical stop |
+| `reviewer_id` | assigned reviewer |
+| `scenario` | opportunity, route, nearby, map, or direct context |
+| `campaign` | nullable internal evidence focus |
+| `status` | assigned/completed workflow status |
+| timestamps | creation and completion history |
 
-Examples:
+Indexes support stop and reviewer lookup. Historical `campaign=NULL` is valid.
 
-- WMATA
-- OSM
-- Street View
-- volunteer review
+### `stop_observations`
 
-Fields:
+Append-only dated observations keyed by `id`. Important fields include:
 
-| Field | Description |
-|-|-|
-| id | Evidence ID |
-| stop_id | Related stop |
-| source_type | Dataset/source |
-| source_date | Snapshot date |
-| confidence | Reliability |
+- `physical_stop_id`, `reviewer_id`, `source`, `observed_at`
+- shelter/bench presence, seating type/condition, comfort and limitations
+- accessibility and preliminary `bench_feasible`/pad observations
+- `weather_exposure`, `riders_avoid_facilities`, rider activity, and notes
+- `review_mode` and `streetview_imagery_month`
+- nullable indexed `assignment_id` foreign key to `stop_review_assignments`
+- stewardship interest/contact fields
 
----
+Historical rows can have null prospective fields. `assignment_id` is not unique;
+observation `id` remains identity. `streetview_imagery_month` is not the same as
+`observed_at`. There is no photo/blob column or photo storage subsystem.
 
-# stop_observations
+### `stop_consensus`
 
-Volunteer review data.
+Derived majority values and confidence from usable community observations.
+Unknown responses do not vote. It is recalculated, not manually asserted.
 
-| Field | Description |
-|-|-|
-| id | Observation ID |
-| stop_id | Related stop |
-| reviewer | Reviewer |
-| method | remote/field |
-| shelter_visible | Yes/no |
-| seating_visible | Yes/no |
-| seating_condition | Rating |
-| accessibility_issue | Yes/no |
-| weather_issue | Yes/no |
-| notes | Comments |
-| confidence | Reviewer confidence |
+## Canonical and derived layers
 
----
+### `stop_amenity_status`
 
-# stop_assessments
+Exactly one `bench` and one `shelter` row per active stop. Unique identity:
+`(physical_stop_id, amenity_type)`. Status is one of `confirmed_yes`,
+`confirmed_no`, `likely_yes`, `likely_no`, `conflicting`, or `unknown`.
+Source counts, source lists, community counts, conflict flags, rationale, and
+timestamp preserve auditability.
 
-Interpretation layer.
+### `stop_amenity_review_priority`
 
-This is not raw data.
+Exactly one row per active stop/amenity pair. It orders unresolved evidence work
+using canonical status, consensus progress, conflict, and rider percentile. It
+does not determine amenity truth.
 
-Example:
+### `opportunity_assessments`
 
-Evidence:
+One current assessment per active physical stop. Stores distinct-route exposure:
+`combined_route_weekday_boardings`, `highest_route_weekday_boardings`, route
+counts, assessment JSON, and canonical `rider_exposure_percentile`.
 
-- shelter exists
-- 700 daily riders
-- one curved seat
+### `seating_improvement_opportunities`
 
-Assessment:
+One row per active stop. Stores canonical bench/shelter status, evidence strength,
+adequacy, preliminary clearance, workflow, rider percentile, documented need,
+transparent components, rank, rationale, and update time. Membership is not
+score-gated.
 
-- possible waiting capacity gap
+### `bench_installation_candidates`
 
-Fields:
+Narrow, evidence-qualified physical bench-candidacy table. It is not the broad
+seating-opportunity universe.
 
-| Field | Description |
-|-|-|
-| stop_id | Related stop |
-| condition | Assessment category |
-| explanation | Human-readable explanation |
-| recommended_action | Next step |
-| confidence | Confidence level |
+### `review_queue`
 
----
+Compatibility/assignment queue with current-stop filtering, pending/availability
+state, legacy opportunity context, amenity review-priority rollups, rider
+percentile, and review questions. Opportunity mode selects directly from
+`seating_improvement_opportunities`; route and nearby modes retain queue behavior.
 
-# recommended_actions
+## Compatibility tables
 
-Possible interventions.
+The database still includes earlier analytical layers such as
+`stop_priority_snapshots`, `improvement_opportunities`,
+`improvement_recommendations`, impact summaries, project tables, validation
+tables, and reporting snapshots. Some APIs still consume them. They are not the
+canonical broad seating model and must not be removed without tracing consumers.
 
-Examples:
+`route_exposure_score` is legacy priority-factor context. The current percentile
+is `opportunity_assessments.rider_exposure_percentile`.
 
-- field review
-- community observation
-- agency inquiry
-- accessibility review
+## Active review migration
 
----
+Run from the repository root with a deliberate database target:
 
-# Current Prototype Mapping
+```bash
+# Set this in the shell to a temporary/deployment database first.
+DMV_BUS_STOPS_DB=/path/to/copy.db python scripts/active/create_review_tables.py
+```
 
-Existing tables:
+On PowerShell:
 
-- physical_stops
-- stop_osm_evidence
-- stop_observations
-- stop_consensus
-- stop_validation
-- stop_review_assignments
+```powershell
+$env:DMV_BUS_STOPS_DB = "C:\path\to\copy.db"
+python scripts/active/create_review_tables.py
+```
 
-Future refactor may separate these concepts more clearly.
+The migration is idempotent. It creates review tables if absent; adds nullable
+`campaign`, `assignment_id`, `weather_exposure`, and
+`riders_avoid_facilities` when missing; preserves existing IDs/rows; and creates
+the assignment lookup index. Always back up and preflight a copy first.
