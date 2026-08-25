@@ -41,10 +41,14 @@ document.addEventListener(
 
         try {
 
-            const assignmentId = new URLSearchParams(window.location.search)
-                .get("assignment_id");
+            const sourceParams = new URLSearchParams(window.location.search);
+            const assignmentId = sourceParams.get("assignment_id");
+            const infoParams = new URLSearchParams();
+            if (assignmentId) infoParams.set("assignment_id", assignmentId);
+            if (sourceParams.get("mode")) infoParams.set("mode", sourceParams.get("mode"));
+            if (sourceParams.get("campaign")) infoParams.set("campaign", sourceParams.get("campaign"));
             const infoUrl = `/review/${stopId}/info` +
-                (assignmentId ? `?assignment_id=${encodeURIComponent(assignmentId)}` : "");
+                (infoParams.toString() ? `?${infoParams}` : "");
             const response = await fetch(infoUrl);
 
 
@@ -88,38 +92,17 @@ document.addEventListener(
                     ${info.municipality ? " | " + info.municipality : ""}
 
                     ${
-                        info.review_context && info.review_context.scenario === "opportunity" &&
-                        info.seating_improvement_opportunity
-                        ? (() => {
-                            const opportunity = info.seating_improvement_opportunity;
-                            const labels = {
-                                presence_verification: "Verify Seating",
-                                seating_adequacy: "Assess Seating Comfort",
-                                bench_clearance: "Check Bench Clearance",
-                                planning_review: "Planning Review",
-                                constrained_review: "Constrained/Special Review"
-                            };
-                            const rationale = Array.isArray(opportunity.rationale)
-                                ? opportunity.rationale.join(" ") : "";
-                            return `
+                        info.review_context
+                        ? `
                             <div class="evidence-card opportunity-review-context">
-                                <strong>${labels[info.review_context.campaign] || "All Seating Opportunities"}</strong><br><br>
-                                Bench: ${opportunity.bench_status}<br>
-                                Shelter: ${opportunity.shelter_status}<br>
-                                Seating adequacy: ${opportunity.adequacy_status}<br>
-                                Preliminary clearance: ${opportunity.clearance_status}<br>
-                                Documented need index: ${opportunity.documented_need_index}<br>
-                                Strongest documented need: ${opportunity.strongest_need_signal}<br>
-                                Rider exposure percentile: ${opportunity.rider_exposure_percentile}<br>
-                                Provisional seating-improvement priority: ${opportunity.priority_score}<br>
-                                Next evidence action: ${opportunity.workflow_state}<br><br>
-                                ${rationale}<br><br>
-                                <small>The score ranks opportunities; it does not gate eligibility.
-                                Rider exposure is route-based, not observed stop-level boardings.
-                                Preliminary clearance is not engineering feasibility, ADA compliance,
-                                ownership or permitting approval, utility clearance, or construction readiness.</small>
-                            </div><br>`;
-                        })()
+                                ${info.review_context.entry_explanation ? `
+                                <strong>Why you're reviewing this stop</strong>
+                                <p>${info.review_context.entry_explanation}</p>` : ""}
+                                <strong>What would be useful to check</strong>
+                                <p>${info.review_context.evidence_explanation}</p>
+                                <small>A preliminary visual space check is not an engineering,
+                                accessibility, ownership, utility, permitting, or construction approval.</small>
+                            </div><br>`
                         : ""
                     }
 
@@ -441,6 +424,10 @@ document.addEventListener(
 
                 </div>
             `;
+
+            document.dispatchEvent(new CustomEvent("review-context-loaded", {
+                detail: info.review_context || {}
+            }));
 
 
         } catch(error){

@@ -94,6 +94,19 @@ The system is designed to help communities surface important questions and prior
 
 Volunteers help answer questions that public datasets cannot answer alone.
 
+The dashboard offers one primary **Review a seating opportunity** entry point. It
+includes every active stop; the priority score ranks the review order and does
+not decide whether a stop is included. Reviewers can instead choose a stop from
+My Route, Near Me, or the map when that better matches how they want to help.
+
+The review page explains these two ideas separately:
+
+- why that stop was selected (the entry path)
+- what evidence would be most useful to check at that stop
+
+The same survey is used for every path. Its emphasis adapts to the evidence
+already available without hiding the other observation fields.
+
 Examples:
 
 - What seating exists today?

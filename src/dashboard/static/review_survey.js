@@ -291,23 +291,17 @@ function updateQuestionVisibility(){
 );
 
 document.addEventListener("DOMContentLoaded", () => {
-    const campaign = new URLSearchParams(window.location.search).get("campaign");
-    const emphasis = {
-        presence_verification: ["shelter_present", "seating_type", "streetview_imagery_month"],
-        seating_adequacy: ["seating_type", "seating_limitations", "waiting_environment_rating",
-            "riders_avoid_facilities", "weather_exposure", "accessibility_status"],
-        bench_clearance: ["bench_feasible", "concrete_pad_needed", "seating_type", "seating_limitations"],
-        planning_review: [],
-        constrained_review: ["bench_feasible", "accessibility_status", "notes"]
-    };
-    if (campaign && emphasis[campaign]) {
-        document.body.dataset.campaign = campaign;
+    function emphasize(fields) {
+        const emphasized = fields || [];
         document.querySelectorAll(".survey-question").forEach(question => {
-            const primary = emphasis[campaign].includes(question.dataset.field);
+            const primary = emphasized.includes(question.dataset.field);
             question.classList.toggle("campaign-primary", primary);
-            question.classList.toggle("campaign-secondary", !primary && emphasis[campaign].length > 0);
+            question.classList.toggle("campaign-secondary", !primary && emphasized.length > 0);
         });
     }
+    document.addEventListener("review-context-loaded", event => {
+        emphasize(event.detail.emphasized_fields);
+    });
 
     const monthQuestion = document.querySelector('[data-field="streetview_imagery_month"]');
     if (monthQuestion) {

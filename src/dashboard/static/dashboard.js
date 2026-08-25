@@ -577,7 +577,7 @@ function loadStops() {
                                 <br><br>
 
                                 <a
-                                href="/review/${props.stop_id}?mode=opportunity"
+                                href="/review/${props.stop_id}?mode=map"
                                 class="stop-review-button">
                                 Review this stop
                                 </a>
@@ -1567,15 +1567,23 @@ function renderBenchCandidates(rows) {
     if (!body) return;
     body.innerHTML = rows.length ? rows.map(candidate => `
         <tr>
-            <td>${candidate.opportunity_rank}</td>
             <td><a href="/stop/${candidate.physical_stop_id}">${candidate.primary_name || "Unnamed stop"}</a></td>
             <td>${[candidate.municipality, candidate.county, candidate.state].filter(Boolean).join(", ")}</td>
-            <td>${candidate.priority_score.toFixed(1)}</td>
-            <td>${candidate.rider_exposure_percentile.toFixed(1)}th percentile</td>
-            <td>${candidate.documented_need_index.toFixed(0)} — ${humanizeBenchCandidateValue(candidate.strongest_need_signal)}</td>
-            <td>${humanizeBenchCandidateValue(candidate.clearance_status)}</td>
-            <td>${humanizeBenchCandidateValue(candidate.workflow_state)}</td>
-        </tr>`).join("") : `<tr><td colspan="8">No matching candidates.</td></tr>`;
+            <td>${({confirmed_yes: "Bench confirmed", likely_yes: "Bench likely present",
+                confirmed_no: "Bench confirmed absent", likely_no: "Bench likely absent",
+                conflicting: "Sources disagree", unknown: "Needs verification"})
+                [candidate.bench_status] || "Needs verification"}</td>
+            <td>${({verify_presence: "Verify current seating",
+                assess_adequacy: "Check seating comfort",
+                collect_clearance_observation: "Check available waiting space",
+                planning_review: "Review improvement opportunity",
+                constrained_or_special_review: "Review possible constraints",
+                no_current_action: "No current review needed"})
+                [candidate.workflow_state] || "Review current conditions"}</td>
+            <td>${candidate.rider_exposure_percentile >= 90 ? "Very high" :
+                candidate.rider_exposure_percentile >= 75 ? "High" :
+                candidate.rider_exposure_percentile >= 40 ? "Moderate" : "Lower"}</td>
+        </tr>`).join("") : `<tr><td colspan="5">No matching opportunities.</td></tr>`;
 }
 
 function filterBenchCandidates() {
@@ -1594,43 +1602,15 @@ async function loadBenchCandidates() {
         const summary = data.summary || {};
         document.getElementById("benchCandidateMetrics").innerHTML = `
             <strong>${summary.total_active_stops || 0}</strong> active stops &middot;
-            <strong>${summary.bench_absent || 0}</strong> likely/confirmed bench absent &middot;
-            <strong>${summary.bench_presence_unknown || 0}</strong> presence unknown &middot;
-            <strong>${summary.observed_seating_limitation || 0}</strong> observed limitation`;
+            <strong>${summary.bench_absent || 0}</strong> bench likely or confirmed absent &middot;
+            <strong>${summary.bench_likely_present || 0}</strong> bench likely present &middot;
+            <strong>${summary.bench_presence_unknown || 0}</strong> presence needs verification`;
         renderBenchCandidates(benchCandidateRows);
     } catch (error) {
         document.getElementById("benchCandidateBody").innerHTML =
-            `<tr><td colspan="8">Seating opportunities are unavailable.</td></tr>`;
+            `<tr><td colspan="5">Seating opportunities are unavailable.</td></tr>`;
     }
 }
 
 window.addEventListener("load", loadBenchCandidates);
-
-async function loadOpportunityCampaignCounts() {
-    const targets = {
-        campaignPresenceCount: "verify_presence",
-        campaignAdequacyCount: "assess_adequacy",
-        campaignClearanceCount: "collect_clearance_observation",
-        campaignPlanningCount: "planning_review"
-    };
-    if (!document.getElementById("campaignAllCount")) return;
-    try {
-        const response = await fetch("/seating-opportunities");
-        const payload = await response.json();
-        const workflow = (payload.summary && payload.summary.workflow) || {};
-        const assignable = Object.entries(workflow)
-            .filter(([state]) => state !== "no_current_action")
-            .reduce((sum, [, count]) => sum + count, 0);
-        document.getElementById("campaignAllCount").textContent =
-            `(${assignable.toLocaleString()})`;
-        Object.entries(targets).forEach(([id, state]) => {
-            document.getElementById(id).textContent =
-                `(${(workflow[state] || 0).toLocaleString()})`;
-        });
-    } catch (error) {
-        console.warn("Could not load seating opportunity campaign counts", error);
-    }
-}
-
-window.addEventListener("load", loadOpportunityCampaignCounts);
 

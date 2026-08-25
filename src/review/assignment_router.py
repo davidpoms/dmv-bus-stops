@@ -3,6 +3,8 @@ import sqlite3
 import uuid
 from pathlib import Path
 
+from src.review.context import WORKFLOW_CAMPAIGN
+
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 
@@ -459,6 +461,14 @@ def assign_stop(
 
 
     assigned_stop_id = row[1]
+
+    if scenario == "opportunity" and campaign is None:
+        workflow_row = cur.execute(
+            "SELECT workflow_state FROM seating_improvement_opportunities "
+            "WHERE physical_stop_id=?",
+            (assigned_stop_id,),
+        ).fetchone()
+        campaign = WORKFLOW_CAMPAIGN.get(workflow_row[0]) if workflow_row else None
 
 
     if "campaign" in assignment_columns:

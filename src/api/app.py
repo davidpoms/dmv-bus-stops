@@ -29,6 +29,7 @@ from src.assessment.interpretation import (
 )
 
 from src.review.consensus import calculate_stop_consensus
+from src.review.context import build_review_context
 from src.amenities.status_synthesis import geography_status_rows
 from src.amenities.review_priority import refresh_after_community_mutation
 
@@ -2117,6 +2118,8 @@ def review_stop_info(stop_id):
     bench_candidate = get_bench_candidate(stop_id)
     seating_opportunity = get_seating_opportunity(stop_id)
     assignment_context = None
+    context_scenario = request.args.get("mode")
+    context_campaign = request.args.get("campaign")
     assignment_id_arg = request.args.get("assignment_id")
     if assignment_id_arg:
         assignment_rows = query_db(
@@ -2125,12 +2128,19 @@ def review_stop_info(stop_id):
             (assignment_id_arg, stop_id),
         )
         if assignment_rows:
+            context_scenario = assignment_rows[0][1]
+            context_campaign = assignment_rows[0][2]
             assignment_context = {
                 "assignment_id": assignment_rows[0][0],
-                "scenario": assignment_rows[0][1],
-                "campaign": assignment_rows[0][2],
                 "assignment_status": assignment_rows[0][3],
             }
+    if context_scenario:
+        assignment_context = {
+            **(assignment_context or {}),
+            **build_review_context(
+                context_scenario, seating_opportunity, context_campaign
+            ),
+        }
 
 
     improvement_recommendations = query_db(
@@ -2427,6 +2437,7 @@ def seating_opportunities():
     summary = {
         "total_active_stops": len(opportunities),
         "bench_absent": sum(x["bench_status"] in ("likely_no", "confirmed_no") for x in opportunities),
+        "bench_likely_present": sum(x["bench_status"] == "likely_yes" for x in opportunities),
         "bench_presence_unknown": sum(x["bench_status"] == "unknown" for x in opportunities),
         "bench_evidence_conflicting": sum(x["bench_status"] == "conflicting" for x in opportunities),
         "bench_present_adequacy_unknown": sum(x["bench_status"] in ("likely_yes", "confirmed_yes") and x["adequacy_status"] == "unknown" for x in opportunities),

@@ -281,6 +281,43 @@ Responsibilities:
 * handle conditional questions
 * format reviewer experience
 
+## Seating opportunity review model
+
+`seating_improvement_opportunities` has one derived row per current GTFS stop.
+Membership is broad: the priority score ranks rows and never gates inclusion.
+The score is `documented_need_index * 0.60 + rider_exposure_percentile * 0.40`.
+The need index is the maximum applicable documented-need signal, not a sum.
+Rider exposure is route-based exposure associated with the stop; it is not
+observed stop-level boarding.
+
+Canonical amenity status, seating adequacy, preliminary clearance, and rider
+benefit remain separate concepts. Workflow state describes the next useful
+evidence task. Campaign is assignment context derived from that workflow for an
+opportunity review; it is not another scoring system.
+
+Public review context also keeps two concepts distinct:
+
+* entry path explains why the reviewer reached the stop (opportunity, route,
+  nearby, map, or direct link)
+* review focus explains what evidence would be useful to collect
+
+Assignment-backed submissions append `stop_observations` history and retain the
+assignment ID. `review_mode` records in-person, Street View, or other remote
+visual review; `streetview_imagery_month` is distinct from `observed_at`.
+Preliminary visual clearance never represents engineering, ADA, ownership,
+utility, permitting, or construction approval.
+
+The targeted post-submission refresh is:
+
+```
+consensus -> amenity status -> amenity review priority
+          -> affected seating opportunity -> review queue -> rank refresh
+```
+
+Run `scripts/active/create_review_tables.py` when deploying schema additions,
+then use the active rebuild scripts when a full derived-data rebuild is
+actually required. Do not restore archived patch scripts as migrations.
+
 ---
 
 # 7. Evidence Pipeline

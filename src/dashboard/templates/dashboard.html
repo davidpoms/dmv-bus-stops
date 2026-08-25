@@ -96,20 +96,12 @@ Review stops along your selected routes.
 <div class="review-option">
 
 <a href="/review/start?mode=opportunity">
-⭐ Priority Verification Stops
+Review a seating opportunity
 </a>
 
 <p>
-Opportunity Review ranks all active-stop seating opportunities and routes you to the next evidence task.
+Review a stop where a current seating observation would be especially useful.
 </p>
-
-<div class="opportunity-campaign-links">
-<a href="/review/start?mode=opportunity">All Seating Opportunities <span id="campaignAllCount"></span></a><br>
-<a href="/review/start?mode=opportunity&amp;campaign=presence_verification">Verify Seating <span id="campaignPresenceCount"></span></a><br>
-<a href="/review/start?mode=opportunity&amp;campaign=seating_adequacy">Assess Seating Comfort <span id="campaignAdequacyCount"></span></a><br>
-<a href="/review/start?mode=opportunity&amp;campaign=bench_clearance">Check Bench Clearance <span id="campaignClearanceCount"></span></a><br>
-<a href="/review/start?mode=opportunity&amp;campaign=planning_review">Planning Review <span id="campaignPlanningCount"></span></a>
-</div>
 
 </div>
 
@@ -252,19 +244,17 @@ Apply Filters
 
 
 <div class="card bench-candidate-card">
-<h2>Seating improvement opportunities</h2>
+<h2>Seating improvements</h2>
 <p>
-Every active stop is included. The provisional score ranks documented seating
-need and route-based rider exposure; it is not an eligibility or feasibility gate.
-Amenity presence does not establish adequate comfort, and preliminary visual
-clearance is not engineering feasibility.
+Every active stop is evaluated. Explore what current evidence suggests and what
+kind of observation would be useful next.
 </p>
 <div id="benchCandidateMetrics">Loading seating opportunities...</div>
 <input id="benchCandidateSearch" placeholder="Search seating opportunities..." onkeyup="filterBenchCandidates()" />
 <div class="pipeline-table-container">
 <table id="benchCandidateTable">
-<thead><tr><th>Rank</th><th>Stop</th><th>Jurisdiction</th><th>Provisional priority</th><th>Rider exposure</th><th>Documented need</th><th>Preliminary clearance</th><th>Next evidence action</th></tr></thead>
-<tbody id="benchCandidateBody"><tr><td colspan="8">Loading candidates...</td></tr></tbody>
+<thead><tr><th>Stop</th><th>Jurisdiction</th><th>What we know</th><th>What would help next</th><th>Rider exposure</th></tr></thead>
+<tbody id="benchCandidateBody"><tr><td colspan="5">Loading opportunities...</td></tr></tbody>
 </table>
 </div>
 </div>

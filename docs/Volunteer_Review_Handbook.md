@@ -174,6 +174,18 @@ The goal is to identify promising opportunities for further evaluation.
 
 Focus on observable facts.
 
+## Choosing a review path
+
+Use **Review a seating opportunity** when you want the system to choose a stop
+where a current observation would be useful. You can also review stops on your
+route, near you, or directly from the map. The page will say why the stop was
+selected and, separately, what would be most useful to check. A stop can need a
+presence check, a comfort assessment, or a preliminary look at available space;
+these are different questions.
+
+All paths use the same form. Highlighted questions are a guide, not a limit on
+what you may record.
+
 ## Seating
 
 Record:
@@ -231,6 +243,14 @@ Volunteers should not determine:
 Those decisions require additional review.
 
 Volunteer observations help identify where those conversations should happen.
+
+A visual space or clearance observation is preliminary. It is not engineering
+review, an ADA-compliance determination, ownership or utility clearance,
+permitting approval, or construction readiness.
+
+When using Street View, record the imagery month separately from the date you
+performed the review. If the imagery date cannot be determined, explicitly mark
+it unknown rather than treating today's date as the imagery date.
 
 ---
 

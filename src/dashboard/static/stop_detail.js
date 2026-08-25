@@ -306,7 +306,7 @@ async function loadStopProfile() {
                         <div class="recommendation-action">
 
                             <a
-                                href="/review/${stopId}?mode=opportunity"
+                                href="/review/${stopId}?mode=direct"
                                 class="recommendation-review-button"
                             >
                                 Review this stop
@@ -496,27 +496,29 @@ const latestCommunity =
                 seatingOpportunity
                     ? `
                     <div class="card seating-improvement-opportunity-card">
-                        <strong>Seating improvement priority</strong>
+                        <strong>Seating at this stop</strong>
                         <p>
-                            Existing bench status: <strong>${recommendationPriority(seatingOpportunity.bench_status)}</strong><br>
-                            Evidence certainty: <strong>${recommendationPriority(seatingOpportunity.bench_evidence_strength)}</strong><br>
-                            Adequacy evidence: <strong>${recommendationPriority(seatingOpportunity.adequacy_status)}</strong><br>
-                            Documented need index: <strong>${seatingOpportunity.documented_need_index.toFixed(1)} / 100</strong><br>
-                            Strongest need: <strong>${recommendationPriority(seatingOpportunity.strongest_need_signal)}</strong><br>
-                            Rider exposure: <strong>${seatingOpportunity.rider_exposure_percentile.toFixed(1)}th percentile</strong><br>
-                            Provisional seating-improvement priority: <strong>${seatingOpportunity.priority_score.toFixed(1)}</strong><br>
-                            Preliminary clearance: <strong>${recommendationPriority(seatingOpportunity.clearance_status)}</strong><br>
-                            Next action: <strong>${recommendationPriority(seatingOpportunity.workflow_state)}</strong>
+                            What appears to be here: <strong>${({confirmed_yes: "Bench confirmed",
+                                likely_yes: "Bench likely present", confirmed_no: "Bench confirmed absent",
+                                likely_no: "Bench likely absent", conflicting: "Sources disagree",
+                                unknown: "Needs verification"})[seatingOpportunity.bench_status]}</strong><br>
+                            Comfort or limitations: <strong>${seatingOpportunity.adequacy_status === "limitation_observed"
+                                ? "A limitation has been observed" : seatingOpportunity.adequacy_status === "no_limitation_observed"
+                                ? "No limitation observed" : "Not enough information yet"}</strong><br>
+                            What would help next: <strong>${({verify_presence: "Verify current seating",
+                                assess_adequacy: "Check seating comfort",
+                                collect_clearance_observation: "Check available waiting space",
+                                planning_review: "Review the improvement opportunity",
+                                constrained_or_special_review: "Review possible constraints",
+                                no_current_action: "No current review needed"})[seatingOpportunity.workflow_state]}</strong>
                         </p>
-                        <p>${seatingOpportunity.rationale.join(" ")}</p>
-                        <details><summary>Priority components and weights</summary><pre>${JSON.stringify(seatingOpportunity.priority_factors, null, 2)}</pre></details>
-                        <p class="impact-note">
-                            Every active stop remains in the opportunity universe; this score ranks rather than gates.
-                            Amenity presence does not establish adequate rider comfort, and absence does not establish installation feasibility.
-                            Rider exposure is route-based and is not observed stop-level boardings.<br>
-                            Preliminary clearance does not establish engineering feasibility,
-                            ADA compliance, ownership, utilities, permits, or construction readiness.
-                        </p>
+                        <details><summary>How this opportunity was assessed</summary>
+                            <p>All active stops remain represented. The provisional score ranks rather than gates opportunities.</p>
+                            <p>Rider exposure: ${seatingOpportunity.rider_exposure_percentile.toFixed(1)}th percentile
+                            (route-based, not observed stop-level boardings).</p>
+                            <p>Preliminary visual clearance does not establish engineering feasibility,
+                            accessibility compliance, ownership, utilities, permits, or construction readiness.</p>
+                        </details>
                     </div>`
                     : ""
             }
@@ -755,7 +757,7 @@ const latestCommunity =
 
                                 <a
                     class="stop-review-button"
-                    href="/review/${stopId}?mode=opportunity">
+                    href="/review/${stopId}?mode=direct">
 
                     Review this stop
 

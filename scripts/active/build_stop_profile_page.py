@@ -191,7 +191,7 @@ async function loadStopProfile(){
 
         <a
         class="stop-review-button"
-        href="/review/${stopId}?mode=opportunity">
+        href="/review/${stopId}?mode=direct">
 
         Review this stop
 

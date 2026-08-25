@@ -234,6 +234,9 @@ class ActiveReviewWorkflowTests(unittest.TestCase):
         result = assignment_router.assign_stop(2, "opportunity")
         self.assertEqual(1, result[1])
         conn = sqlite3.connect(self.db)
+        self.assertEqual("presence_verification", conn.execute(
+            "SELECT campaign FROM stop_review_assignments WHERE id=?", (result[0],)
+        ).fetchone()[0])
         self.assertEqual(0, conn.execute(
             "SELECT COUNT(*) FROM stop_review_assignments WHERE stop_id=6"
         ).fetchone()[0])
