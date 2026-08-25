@@ -1,5 +1,8 @@
 import json
+import os
 import sqlite3
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -309,6 +312,19 @@ class ActiveReviewWorkflowTests(unittest.TestCase):
             "SELECT COUNT(*) FROM stop_observations"
         ).fetchone()[0]
         conn.close()
+        migration_required = self.client.post(
+            "/review/submit", json={"stop_id": 1, "assignment_id": 999}
+        )
+        self.assertEqual(503, migration_required.status_code)
+        self.assertEqual(
+            "review_schema_migration_required",
+            migration_required.get_json()["code"],
+        )
+        conn = sqlite3.connect(self.db)
+        self.assertEqual(before, conn.execute(
+            "SELECT COUNT(*) FROM stop_observations"
+        ).fetchone()[0])
+        conn.close()
         response = self.client.post(
             "/review/submit",
             json={"stop_id": 2, "assignment_id": 20},
@@ -350,8 +366,21 @@ class ActiveReviewWorkflowTests(unittest.TestCase):
         conn.execute("INSERT INTO stop_improvement_impact VALUES (1,10,5)")
         conn.execute("INSERT INTO stop_review_assignments VALUES "
                      "(21,1,1,'opportunity',NULL,'assigned',NULL)")
-        before = conn.execute("SELECT COUNT(*) FROM stop_observations").fetchone()[0]
+        conn.execute("""INSERT INTO stop_observations
+            (id,physical_stop_id,observed_at,shelter_present,bench_present,
+             notes,reviewer_id,source,review_mode,streetview_imagery_month)
+            VALUES (31,1,'2024-01-02','unknown','unknown','older review',1,
+                    'community_review','remote',NULL)""")
         conn.commit()
+        conn.close()
+        env = os.environ.copy()
+        env["DMV_BUS_STOPS_DB"] = str(self.db)
+        subprocess.check_call(
+            [sys.executable, "scripts/active/create_review_tables.py"],
+            cwd=Path(__file__).resolve().parents[1], env=env,
+        )
+        conn = sqlite3.connect(self.db)
+        before = conn.execute("SELECT COUNT(*) FROM stop_observations").fetchone()[0]
         conn.close()
         with self.client.session_transaction() as session:
             session["reviewer_key"] = "reviewer"
@@ -375,9 +404,12 @@ class ActiveReviewWorkflowTests(unittest.TestCase):
         row = conn.execute("""SELECT assignment_id,weather_exposure,
           riders_avoid_facilities,review_mode,streetview_imagery_month,observed_at
           FROM stop_observations WHERE assignment_id=21""").fetchone()
+        older = conn.execute("""SELECT id,notes,assignment_id,review_mode,
+          streetview_imagery_month FROM stop_observations WHERE id=31""").fetchone()
         conn.close()
         self.assertEqual((21, "exposed", "yes", "street_view", "2025-05"), row[:5])
         self.assertNotEqual(row[4], row[5])
+        self.assertEqual((31, "older review", None, "remote", None), older)
 
 
 if __name__ == "__main__":

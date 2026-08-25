@@ -149,6 +149,10 @@ CREATE TABLE IF NOT EXISTS stop_observations (
 );
 
 
+CREATE INDEX IF NOT EXISTS idx_stop_observations_assignment
+ON stop_observations(assignment_id);
+
+
 -- Rebuildable canonical shelter/bench synthesis. Source evidence remains in
 -- its own tables; this table contains normalized provenance only.
 CREATE TABLE IF NOT EXISTS stop_amenity_status (

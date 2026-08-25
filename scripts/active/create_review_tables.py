@@ -41,6 +41,27 @@ if "campaign" not in assignment_columns:
     cur.execute("ALTER TABLE stop_review_assignments ADD COLUMN campaign TEXT")
 
 
+observation_table = cur.execute(
+    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='stop_observations'"
+).fetchone()
+if observation_table:
+    observation_columns = {
+        row[1] for row in cur.execute("PRAGMA table_info(stop_observations)")
+    }
+    for column, declaration in (
+        (
+            "assignment_id",
+            "INTEGER REFERENCES stop_review_assignments(id)",
+        ),
+        ("weather_exposure", "TEXT"),
+        ("riders_avoid_facilities", "TEXT"),
+    ):
+        if column not in observation_columns:
+            cur.execute(
+                f"ALTER TABLE stop_observations ADD COLUMN {column} {declaration}"
+            )
+
+
 cur.execute("""
 CREATE INDEX IF NOT EXISTS idx_review_assignments_stop
 ON stop_review_assignments(stop_id)
@@ -51,6 +72,13 @@ cur.execute("""
 CREATE INDEX IF NOT EXISTS idx_review_assignments_reviewer
 ON stop_review_assignments(reviewer_id)
 """)
+
+
+if observation_table:
+    cur.execute("""
+    CREATE INDEX IF NOT EXISTS idx_stop_observations_assignment
+    ON stop_observations(assignment_id)
+    """)
 
 
 conn.commit()

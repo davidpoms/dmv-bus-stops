@@ -2807,6 +2807,24 @@ def submit_review():
     if not stop_is_current(stop_id):
         return inactive_stop_response(stop_id)
 
+    required_observation_columns = {
+        "assignment_id",
+        "weather_exposure",
+        "riders_avoid_facilities",
+    }
+    observation_columns = {
+        row[1] for row in query_db("PRAGMA table_info(stop_observations)")
+    }
+    missing_observation_columns = sorted(
+        required_observation_columns - observation_columns
+    )
+    if missing_observation_columns:
+        return {
+            "error": "stop_observations schema migration is required",
+            "code": "review_schema_migration_required",
+            "missing_columns": missing_observation_columns,
+        }, 503
+
     reviewer_key = session.get(
         "reviewer_key"
     )
@@ -2901,17 +2919,6 @@ def submit_review():
                 "Review already submitted"
         }, 409
 
-
-    observation_columns = {
-        row[1] for row in query_db("PRAGMA table_info(stop_observations)")
-    }
-    for column, declaration in (
-        ("assignment_id", "INTEGER"),
-        ("weather_exposure", "TEXT"),
-        ("riders_avoid_facilities", "TEXT"),
-    ):
-        if column not in observation_columns:
-            query_db(f"ALTER TABLE stop_observations ADD COLUMN {column} {declaration}")
 
     existing_review = query_db(
         """

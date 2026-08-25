@@ -64,6 +64,15 @@ class ApiDatabasePathTests(unittest.TestCase):
                 );
                 INSERT INTO stop_review_assignments VALUES
                     (41,7,3,'opportunity','completed','2025-01-01','2025-01-02');
+                CREATE TABLE stop_observations (
+                    id INTEGER PRIMARY KEY, physical_stop_id INTEGER NOT NULL,
+                    observer TEXT, observed_at TEXT, source TEXT,
+                    reviewer_id INTEGER, review_mode TEXT,
+                    streetview_imagery_month TEXT, hostile_design TEXT
+                );
+                INSERT INTO stop_observations VALUES
+                    (73,7,'legacy observer','2024-06-01','community_review',
+                     3,'remote',NULL,'unknown');
             """)
             conn.commit()
             conn.close()
@@ -88,6 +97,33 @@ class ApiDatabasePathTests(unittest.TestCase):
             self.assertEqual(1, conn.execute(
                 "SELECT COUNT(*) FROM stop_review_assignments"
             ).fetchone()[0])
+            observation_columns = {
+                row[1]: row[2] for row in conn.execute(
+                    "PRAGMA table_info(stop_observations)"
+                )
+            }
+            self.assertEqual("INTEGER", observation_columns["assignment_id"])
+            self.assertEqual("TEXT", observation_columns["weather_exposure"])
+            self.assertEqual("TEXT", observation_columns["riders_avoid_facilities"])
+            self.assertEqual(
+                (73, 7, "legacy observer", None, None, None),
+                conn.execute("""
+                    SELECT id,physical_stop_id,observer,assignment_id,
+                           weather_exposure,riders_avoid_facilities
+                    FROM stop_observations WHERE id=73
+                """).fetchone(),
+            )
+            self.assertIn("idx_stop_observations_assignment", {
+                row[1] for row in conn.execute(
+                    "PRAGMA index_list(stop_observations)"
+                )
+            })
+            self.assertIn(
+                ("assignment_id", "stop_review_assignments", "id"),
+                {(row[3], row[2], row[4]) for row in conn.execute(
+                    "PRAGMA foreign_key_list(stop_observations)"
+                )},
+            )
             conn.close()
 
     def test_app_has_no_cwd_relative_production_database_literal(self):

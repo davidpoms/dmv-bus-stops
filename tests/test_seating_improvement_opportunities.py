@@ -145,9 +145,11 @@ class SeatingImprovementOpportunityTests(unittest.TestCase):
         modes = {value for value, _label in SURVEY["review_mode"]["options"]}
         self.assertTrue({"in_person", "street_view", "other_remote_visual", "remote"} <= modes)
         source = inspect.getsource(api_app.submit_review)
-        self.assertIn('("assignment_id", "INTEGER")', source)
-        self.assertIn('("weather_exposure", "TEXT")', source)
-        self.assertIn('("riders_avoid_facilities", "TEXT")', source)
+        self.assertIn('"assignment_id",', source)
+        self.assertIn('"weather_exposure",', source)
+        self.assertIn('"riders_avoid_facilities",', source)
+        self.assertIn('"review_schema_migration_required"', source)
+        self.assertNotIn("ALTER TABLE stop_observations", source)
         self.assertIn("WHERE assignment_id=?", source)
         self.assertNotIn("WHERE physical_stop_id=?\n        AND reviewer_id=?", source)
 
