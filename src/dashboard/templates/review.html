@@ -51,9 +51,10 @@ Want to help beyond this review?
 </h3>
 
 <p>
-Stewarding means helping maintain a current community record of this stop over
-time. It does not mean owning or maintaining the stop, and there are no automatic
-reminders yet.
+You can keep an eye on conditions, document changes, help build the case for
+seating improvements, support property-owner follow-up where relevant, or take
+part in bus-stop and route advocacy. This does not make you the stop owner or a
+transit-agency representative.
 </p>
 
 <button
@@ -291,8 +292,8 @@ e.preventDefault();
 const selectedMode = document.querySelector('[name="review_mode"]:checked')?.value;
 const imageryMonth = document.querySelector('[name="streetview_imagery_month"]');
 const imageryUnknown = document.getElementById("streetviewImageryMonthUnknown");
-if (selectedMode === "street_view" && !imageryMonth?.value && !imageryUnknown?.checked) {
-    alert("Enter the Street View imagery capture month/year or acknowledge that it could not be determined.");
+if (selectedMode === "remote" && !imageryMonth?.value && !imageryUnknown?.checked) {
+    alert("Enter the imagery capture month/year or acknowledge that it could not be determined.");
     return;
 }
 

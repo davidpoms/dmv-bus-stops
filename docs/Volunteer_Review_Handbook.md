@@ -40,12 +40,12 @@ that opportunity universe; the score orders stops and is not a pass/fail gate.
 ### My Route
 
 Choose routes you know or ride. The selected stop comes from those routes, not
-from the Opportunity Review ranking.
+from the seating-opportunity review rotation.
 
 ### Near Me
 
 Choose a stop near your supplied location. Location is used for selection; it
-does not turn the review into an Opportunity Review assignment.
+does not turn the review into a seating-opportunity assignment.
 
 ### Map or direct stop page
 

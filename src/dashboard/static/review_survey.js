@@ -102,6 +102,22 @@ document.addEventListener(
 
         });
 
+        const imageryQuestion = document.querySelector(
+            '[data-field="streetview_imagery_month"]'
+        );
+        if (imageryQuestion) {
+            const remote = mode === "remote";
+            imageryQuestion.style.display = remote ? "block" : "none";
+            imageryQuestion.querySelectorAll("input").forEach(control => {
+                const unknownDate = document.getElementById(
+                    "streetviewImageryMonthUnknown"
+                )?.checked;
+                control.disabled = !remote || (
+                    control.type === "month" && unknownDate
+                );
+            });
+        }
+
     }
 
 
@@ -308,7 +324,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const acknowledgement = document.createElement("label");
         acknowledgement.innerHTML =
             '<input type="checkbox" id="streetviewImageryMonthUnknown"> ' +
-            'I could not determine the Street View imagery capture month/year.';
+            "I couldn't determine the imagery date.";
         monthQuestion.appendChild(acknowledgement);
         const checkbox = acknowledgement.querySelector("input");
         const month = monthQuestion.querySelector('input[type="month"]');

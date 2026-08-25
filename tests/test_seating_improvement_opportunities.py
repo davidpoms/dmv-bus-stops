@@ -143,7 +143,7 @@ class SeatingImprovementOpportunityTests(unittest.TestCase):
 
     def test_survey_provenance_and_prospective_fields_are_wired(self):
         modes = {value for value, _label in SURVEY["review_mode"]["options"]}
-        self.assertTrue({"in_person", "street_view", "other_remote_visual", "remote"} <= modes)
+        self.assertEqual({"in_person", "remote"}, modes)
         source = inspect.getsource(api_app.submit_review)
         self.assertIn('"assignment_id",', source)
         self.assertIn('"weather_exposure",', source)

@@ -185,17 +185,61 @@ def get_current_amenity_status(stop_id):
     )
     if not table_exists:
         return []
+    columns = {row[1] for row in query_db("PRAGMA table_info(stop_amenity_status)")}
+    optional = {
+        "local_yes_sources": "'[]'",
+        "local_no_sources": "'[]'",
+        "osm_yes": "0",
+        "osm_no": "0",
+        "community_yes_count": "0",
+        "community_no_count": "0",
+    }
+    optional_select = ", ".join(
+        name if name in columns else f"{fallback} AS {name}"
+        for name, fallback in optional.items()
+    )
     return query_db(
-        """
+        f"""
         SELECT amenity_type, derived_status, consensus_status,
                evidence_conflict, consensus_conflicts_with_other_evidence,
-               rationale, updated_at
+               rationale, updated_at, {optional_select}
         FROM stop_amenity_status
         WHERE physical_stop_id=?
         ORDER BY CASE amenity_type WHEN 'shelter' THEN 1 ELSE 2 END
         """,
         (stop_id,)
     )
+
+
+def get_serving_headings(stop_id):
+    """Return latest authoritative WMATA heading values without inference."""
+    tables = query_db(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='stop_wmata_evidence'"
+    )
+    if not tables:
+        return []
+    columns = {row[1] for row in query_db("PRAGMA table_info(stop_wmata_evidence)")}
+    if not {"id", "physical_stop_id", "wmata_stop_id", "wmata_heading", "created_at"} <= columns:
+        return []
+    rows = query_db(
+        """
+        WITH latest AS (
+            SELECT wmata_stop_id,wmata_heading,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY wmata_stop_id
+                       ORDER BY datetime(created_at) DESC,id DESC
+                   ) sequence
+            FROM stop_wmata_evidence
+            WHERE physical_stop_id=?
+              AND wmata_heading IS NOT NULL
+              AND TRIM(wmata_heading)!=''
+        )
+        SELECT DISTINCT wmata_heading FROM latest
+        WHERE sequence=1 ORDER BY CAST(wmata_heading AS REAL),wmata_heading
+        """,
+        (stop_id,),
+    )
+    return [row[0] for row in rows]
 
 
 def get_amenity_review_priority(stop_id):
@@ -2137,6 +2181,7 @@ def review_stop_info(stop_id):
 
     amenity_evidence = get_current_amenity_evidence(stop_id)
     amenity_status = get_current_amenity_status(stop_id)
+    serving_headings = get_serving_headings(stop_id)
     amenity_review_priority = get_amenity_review_priority(stop_id)
     bench_candidate = get_bench_candidate(stop_id)
     seating_opportunity = get_seating_opportunity(stop_id)
@@ -2245,7 +2290,25 @@ def review_stop_info(stop_id):
             "evidence_conflict": bool(status[3]),
             "consensus_conflicts_with_other_evidence": bool(status[4]),
             "rationale": json.loads(status[5]) if status[5] else [],
-            "updated_at": status[6]
+            "updated_at": status[6],
+            "conflict_evidence": [
+                *[
+                    {"source": source, "claim": "present", "kind": "local"}
+                    for source in json.loads(status[7] or "[]")
+                ],
+                *[
+                    {"source": source, "claim": "absent", "kind": "local"}
+                    for source in json.loads(status[8] or "[]")
+                ],
+                *([{"source": "OPENSTREETMAP", "claim": "present", "kind": "osm"}]
+                  if status[9] else []),
+                *([{"source": "OPENSTREETMAP", "claim": "absent", "kind": "osm"}]
+                  if status[10] else []),
+                *([{"source": "COMMUNITY", "claim": "present", "kind": "community",
+                    "count": status[11]}] if status[11] else []),
+                *([{"source": "COMMUNITY", "claim": "absent", "kind": "community",
+                    "count": status[12]}] if status[12] else []),
+            ] if status[3] or status[4] else [],
         }
         for status in amenity_status
     ]
@@ -2288,6 +2351,8 @@ def review_stop_info(stop_id):
 
             "serving_direction":
                 row[11],
+
+            "serving_headings": serving_headings,
 
             "streetview_url": streetview_url,
 

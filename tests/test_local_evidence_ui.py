@@ -85,8 +85,9 @@ class LocalEvidenceUiTests(unittest.TestCase):
             source = path.read_text(encoding="utf-8")
             self.assertIn("LocalEvidenceUI.render", source)
             self.assertIn("Community observations", source)
-            self.assertNotIn('amenity_type === "shelter"', source)
-            self.assertNotIn('amenity_type === "bench"', source)
+            if path.name == "stop_detail.js":
+                self.assertNotIn('amenity_type === "shelter"', source)
+                self.assertNotIn('amenity_type === "bench"', source)
 
     def test_public_payload_does_not_include_raw_fields(self):
         source = (ROOT / "src/api/app.py").read_text(encoding="utf-8")

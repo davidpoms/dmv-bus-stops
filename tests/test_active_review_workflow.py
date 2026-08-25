@@ -373,7 +373,7 @@ class ActiveReviewWorkflowTests(unittest.TestCase):
             (id,physical_stop_id,observed_at,shelter_present,bench_present,
              notes,reviewer_id,source,review_mode,streetview_imagery_month)
             VALUES (31,1,'2024-01-02','unknown','unknown','older review',1,
-                    'community_review','remote',NULL)""")
+                    'community_review','street_view',NULL)""")
         conn.commit()
         conn.close()
         env = os.environ.copy()
@@ -391,7 +391,7 @@ class ActiveReviewWorkflowTests(unittest.TestCase):
              patch.object(review_api, "refresh_after_community_mutation"):
             response = self.client.post("/review/submit", json={
                 "stop_id": 1, "assignment_id": 21,
-                "review_mode": "street_view",
+                "review_mode": "remote",
                 "streetview_imagery_month": "2025-05",
                 "weather_exposure": "exposed",
                 "riders_avoid_facilities": "yes",
@@ -410,12 +410,12 @@ class ActiveReviewWorkflowTests(unittest.TestCase):
         older = conn.execute("""SELECT id,notes,assignment_id,review_mode,
           streetview_imagery_month FROM stop_observations WHERE id=31""").fetchone()
         conn.close()
-        self.assertEqual((21, "exposed", "yes", "street_view", "2025-05"), row[:5])
+        self.assertEqual((21, "exposed", "yes", "remote", "2025-05"), row[:5])
         self.assertNotEqual(row[4], row[5])
-        self.assertEqual((31, "older review", None, "remote", None), older)
+        self.assertEqual((31, "older review", None, "street_view", None), older)
         history = self.client.get("/stops/1/community-reviews").get_json()["reviews"]
         submitted = next(item for item in history if item["id"] != 31)
-        self.assertEqual("street_view", submitted["review_mode"])
+        self.assertEqual("remote", submitted["review_mode"])
         self.assertEqual("2025-05", submitted["streetview_imagery_month"])
 
 

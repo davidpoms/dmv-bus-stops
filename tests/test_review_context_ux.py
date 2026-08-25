@@ -22,7 +22,7 @@ class ReviewContextUxTests(unittest.TestCase):
     def test_entry_explanations_are_pathway_accurate_and_need_is_shared(self):
         opportunity = self.opportunity(bench_status="likely_no")
         expected = {
-            "opportunity": "Opportunity Review selected this stop",
+            "opportunity": "reviewing a seating opportunity selected",
             "route": "route you chose to review",
             "nearby": "near the area you chose to review",
             "map": "You chose this stop",
@@ -122,7 +122,9 @@ class ReviewContextUxTests(unittest.TestCase):
         )
         self.assertIn("added to this stop's history", review_page)
         self.assertIn("dated piece of evidence", review_page)
-        self.assertIn("does not mean owning or maintaining", review_page)
+        self.assertIn("help build the case for", review_page)
+        self.assertIn("property-owner follow-up", review_page)
+        self.assertIn("does not make you the stop owner", review_page)
         self.assertIn("View this stop's updated record", review_page)
 
         map_source = (ROOT / "src/dashboard/static/dashboard.js").read_text(
@@ -130,6 +132,33 @@ class ReviewContextUxTests(unittest.TestCase):
         )
         self.assertIn("What we currently know", map_source)
         self.assertIn("A current observation would help improve this record", map_source)
+
+    def test_review_page_puts_orientation_exposure_and_conflicts_up_front(self):
+        source = (ROOT / "src/dashboard/static/review_info_loader.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Serving heading", source)
+        self.assertIn("Rider exposure:", source)
+        self.assertIn("Route-based rider exposure", source)
+        self.assertIn("Where the evidence disagrees", source)
+        self.assertIn("OpenStreetMap", source)
+        self.assertIn("DDOT shelter inventory", source)
+        self.assertIn("Source record:", (ROOT / "src/dashboard/static/local_evidence.js").read_text(encoding="utf-8"))
+        self.assertNotIn("engineering, accessibility compliance, ownership", source)
+        self.assertIn("preliminary visual check", source)
+
+    def test_only_two_current_review_modes_are_offered_and_legacy_is_readable(self):
+        from src.review.community_survey_v1 import SURVEY
+        self.assertEqual({"in_person", "remote"}, {
+            value for value, _ in SURVEY["review_mode"]["options"]
+        })
+        loader = (ROOT / "src/dashboard/static/review_info_loader.js").read_text(encoding="utf-8")
+        self.assertIn('street_view: "Remote (Street View)"', loader)
+        self.assertIn('other_remote_visual: "Remote (visual source)"', loader)
+        survey_js = (ROOT / "src/dashboard/static/review_survey.js").read_text(encoding="utf-8")
+        self.assertIn('mode === "remote"', survey_js)
+        page = (ROOT / "src/dashboard/templates/review.html").read_text(encoding="utf-8")
+        self.assertIn('selectedMode === "remote"', page)
 
 
 if __name__ == "__main__":

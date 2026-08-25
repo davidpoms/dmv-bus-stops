@@ -17,9 +17,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     ] || "Not reported";
 
     const reviewModeLabel = value => ({
-        street_view: "Street View",
-        other_remote_visual: "Other remote visual source",
-        remote: "Legacy remote review",
+        street_view: "Remote (Street View)",
+        other_remote_visual: "Remote (visual source)",
+        remote: "Remote",
         in_person: "In person"
     })[value] || "Not recorded";
 
@@ -29,6 +29,17 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (percentile >= 75) return "High";
         if (percentile >= 40) return "Moderate";
         return "Lower";
+    };
+
+    const headingLabel = value => {
+        const degrees = Number(value);
+        if (!Number.isFinite(degrees)) return String(value);
+        const directions = [
+            "Northbound", "Northeast", "Eastbound", "Southeast",
+            "Southbound", "Southwest", "Westbound", "Northwest"
+        ];
+        const normalized = ((degrees % 360) + 360) % 360;
+        return `${directions[Math.round(normalized / 45) % 8]} (${value}°)`;
     };
 
     try {
@@ -46,11 +57,34 @@ document.addEventListener("DOMContentLoaded", async () => {
         );
         const reviews = info.community_reviews?.reviews || [];
         const percentile = info.impact_summary?.rider_exposure_percentile;
+        const sourceLabel = value => ({
+            DDOT_ARCGIS: "DDOT shelter inventory",
+            ALEXANDRIA: "City of Alexandria inventory",
+            MONTGOMERY_COUNTY_WMATA: "Montgomery County inventory",
+            FAIRFAX_COUNTY: "Fairfax County inventory",
+            PRINCE_GEORGES_COUNTY_THEBUS: "Prince George's County TheBus inventory",
+            FALLS_CHURCH_CITY: "City of Falls Church inventory",
+            OPENSTREETMAP: "OpenStreetMap",
+            COMMUNITY: "Community observations"
+        })[value] || String(value || "Evidence source").replaceAll("_", " ");
+        const conflicts = (info.amenity_status || []).filter(item =>
+            item.derived_status === "conflicting" ||
+            item.consensus_conflicts_with_other_evidence
+        );
+        const headings = info.serving_headings || [];
 
         container.innerHTML = `
             <div class="panel review-stop-summary">
                 <h2>${info.name || "Bus stop"}</h2>
+                ${headings.length ? `<p class="serving-heading"><strong>Serving heading${headings.length > 1 ? "s" : ""}:</strong> ${headings.map(headingLabel).join(" · ")}</p>` : ""}
                 <p>${[info.state, info.county, info.municipality].filter(Boolean).join(" · ")}</p>
+
+                ${percentile !== null && percentile !== undefined ? `
+                    <div class="rider-exposure-summary">
+                        <strong>Rider exposure: ${exposureLabel(percentile)}</strong>
+                        (${Number(percentile).toFixed(1)}th percentile)
+                        <br><small>Route-based rider exposure, not observed boardings at this stop.</small>
+                    </div>` : ""}
 
                 ${info.review_context ? `
                     <div class="evidence-card opportunity-review-context">
@@ -68,6 +102,19 @@ document.addEventListener("DOMContentLoaded", async () => {
                     <p><small>Likely and conflicting records still need current verification.</small></p>
                 </div>
 
+                ${conflicts.length ? `
+                    <div class="evidence-card evidence-conflict-comparison">
+                        <h3>Where the evidence disagrees</h3>
+                        ${conflicts.map(conflict => `
+                            <div class="conflict-amenity">
+                                <strong>${conflict.amenity_type === "bench" ? "Bench" : "Shelter"}</strong>
+                                ${(conflict.conflict_evidence || []).map(claim => `
+                                    <div>${sourceLabel(claim.source)}: <strong>${claim.claim === "present" ? "Present" : "Absent"}</strong>${claim.count ? ` (${claim.count} observation${claim.count === 1 ? "" : "s"})` : ""}</div>
+                                `).join("")}
+                            </div>`).join("")}
+                        <p><small>These records describe a disagreement; they do not establish that one source is wrong.</small></p>
+                    </div>` : ""}
+
                 ${info.amenity_evidence?.length ? `
                     <div class="evidence-card">
                         <h3>Local jurisdiction evidence</h3>
@@ -83,21 +130,12 @@ document.addEventListener("DOMContentLoaded", async () => {
                             Shelter: ${observedAmenity(review.shelter)}<br>
                             Bench: ${observedAmenity(review.bench)}<br>
                             Review method: ${reviewModeLabel(review.review_mode)}
-                            ${review.streetview_imagery_month ? `<br>Street View imagery captured: ${review.streetview_imagery_month}` : ""}
+                            ${review.streetview_imagery_month ? `<br>Imagery captured: ${review.streetview_imagery_month}` : ""}
                             ${review.preliminary_clearance ? `<br>Preliminary visual space observation: ${review.preliminary_clearance}` : ""}
                             ${review.notes?.trim() ? `<br>Notes: ${review.notes}` : ""}
                         </div>`).join("") : `
                         <p>No community observations yet. Your review can create a dated record for this stop.</p>`}
                 </div>
-
-                ${percentile !== null && percentile !== undefined ? `
-                    <details>
-                        <summary>About rider exposure</summary>
-                        <p>Rider exposure: <strong>${exposureLabel(percentile)}</strong>
-                        (${Number(percentile).toFixed(1)}th percentile).</p>
-                        <p>This is based on weekday boardings for routes serving the stop,
-                        not observed boardings at this physical stop.</p>
-                    </details>` : ""}
 
                 <details>
                     <summary>Stop reference details</summary>
@@ -106,9 +144,7 @@ document.addEventListener("DOMContentLoaded", async () => {
                     Coordinates: ${Number(info.lat).toFixed(5)}, ${Number(info.lon).toFixed(5)}</p>
                 </details>
 
-                <p><small>A visual space observation is preliminary. It does not establish
-                engineering, accessibility compliance, ownership, utility clearance,
-                permitting, or construction approval.</small></p>
+                <p><small>This is a preliminary visual check of the available waiting space.</small></p>
 
                 <div class="review-reference-links">
                     ${info.streetview_url ? `<a href="${info.streetview_url}" target="_blank" rel="noopener noreferrer" class="stop-review-button">Open Google Street View</a>` : ""}

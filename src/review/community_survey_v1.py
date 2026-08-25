@@ -15,10 +15,8 @@ SURVEY = {
         "label": "How are you reviewing this stop?",
         "type": "radio",
         "options": [
-            ("street_view", "Street View review"),
-            ("other_remote_visual", "Another map, image, or remote visual source"),
-            ("remote", "Legacy remote review"),
-            ("in_person", "In-person review (visited the stop)")
+            ("in_person", "In person — I visited the stop"),
+            ("remote", "Remote — I used a visual source such as Google Street View")
         ]
     },
 
@@ -28,8 +26,8 @@ SURVEY = {
     {
         "field": "streetview_imagery_month",
         "label": (
-            "When was this Street View imagery captured? Record its month and "
-            "year, which may differ from today's review date."
+            "When was this imagery captured? Record its month and year, which "
+            "may differ from today's review date."
         ),
         "type": "month"
     },
@@ -203,8 +201,9 @@ SURVEY = {
         {
             "field": "steward_interest",
             "label": (
-                "Would you like to help steward this stop by contributing to its "
-                "community record over time? This does not mean owning or maintaining it."
+                "Would you like to help move possible seating improvements forward? "
+                "You could keep an eye on conditions, document changes, support "
+                "property-owner outreach where relevant, or help with bus-stop advocacy."
             ),
             "options": [
                 ("yes", "Yes"),

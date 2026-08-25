@@ -33,7 +33,7 @@ CAMPAIGN_FIELDS = {
 def entry_explanation(scenario):
     return {
         "opportunity": (
-            "Opportunity Review selected this stop because a current "
+            "You're reviewing a seating opportunity selected because a current "
             "observation would be particularly useful here."
         ),
         "route": "This stop is on the route you chose to review.",
