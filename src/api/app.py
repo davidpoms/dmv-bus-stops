@@ -242,6 +242,72 @@ def get_serving_headings(stop_id):
     return [row[0] for row in rows]
 
 
+def build_amenity_status_payload(status_rows, evidence_rows):
+    """Attach only the evidence that contributes to each canonical conclusion."""
+    local_records = []
+    for row in evidence_rows:
+        value = str(row[9] or "").strip().lower()
+        claim = (
+            "present" if value == "yes" or row[4] == 1
+            else "absent" if value == "no" or row[4] == 0
+            else None
+        )
+        if claim:
+            local_records.append({
+                "source": row[1], "source_record": row[2],
+                "amenity_type": row[3], "claim": claim, "kind": "local",
+                "confidence": row[5], "match_distance_m": row[6],
+            })
+
+    payload = []
+    for status in status_rows:
+        amenity = status[0]
+        yes_sources = set(json.loads(status[7] or "[]"))
+        no_sources = set(json.loads(status[8] or "[]"))
+        evidence = [
+            item for item in local_records
+            if item["amenity_type"] == amenity and (
+                (item["claim"] == "present" and item["source"] in yes_sources)
+                or (item["claim"] == "absent" and item["source"] in no_sources)
+            )
+        ]
+        if status[9]:
+            evidence.append({"source": "OPENSTREETMAP", "claim": "present",
+                             "kind": "osm", "explicit": True})
+        if status[10]:
+            evidence.append({"source": "OPENSTREETMAP", "claim": "absent",
+                             "kind": "osm", "explicit": True})
+
+        consensus_claim = status[2] if status[2] in ("yes", "no") else None
+        if consensus_claim:
+            evidence.append({
+                "source": "COMMUNITY_CONSENSUS",
+                "claim": "present" if consensus_claim == "yes" else "absent",
+                "kind": "community_consensus",
+                "count": status[11] if consensus_claim == "yes" else status[12],
+            })
+        else:
+            if status[11]:
+                evidence.append({"source": "COMMUNITY", "claim": "present",
+                                 "kind": "community", "count": status[11]})
+            if status[12]:
+                evidence.append({"source": "COMMUNITY", "claim": "absent",
+                                 "kind": "community", "count": status[12]})
+
+        payload.append({
+            "amenity_type": amenity,
+            "derived_status": status[1],
+            "consensus_status": status[2],
+            "evidence_conflict": bool(status[3]),
+            "consensus_conflicts_with_other_evidence": bool(status[4]),
+            "rationale": json.loads(status[5]) if status[5] else [],
+            "updated_at": status[6],
+            "contributing_evidence": evidence,
+            "conflict_evidence": evidence if status[3] or status[4] else [],
+        })
+    return payload
+
+
 def get_amenity_review_priority(stop_id):
     """Return concise workflow priority when its derived table is available."""
     if not query_db(
@@ -2282,36 +2348,9 @@ def review_stop_info(stop_id):
         for row in amenity_evidence
     ]
 
-    amenity_status_payload = [
-        {
-            "amenity_type": status[0],
-            "derived_status": status[1],
-            "consensus_status": status[2],
-            "evidence_conflict": bool(status[3]),
-            "consensus_conflicts_with_other_evidence": bool(status[4]),
-            "rationale": json.loads(status[5]) if status[5] else [],
-            "updated_at": status[6],
-            "conflict_evidence": [
-                *[
-                    {"source": source, "claim": "present", "kind": "local"}
-                    for source in json.loads(status[7] or "[]")
-                ],
-                *[
-                    {"source": source, "claim": "absent", "kind": "local"}
-                    for source in json.loads(status[8] or "[]")
-                ],
-                *([{"source": "OPENSTREETMAP", "claim": "present", "kind": "osm"}]
-                  if status[9] else []),
-                *([{"source": "OPENSTREETMAP", "claim": "absent", "kind": "osm"}]
-                  if status[10] else []),
-                *([{"source": "COMMUNITY", "claim": "present", "kind": "community",
-                    "count": status[11]}] if status[11] else []),
-                *([{"source": "COMMUNITY", "claim": "absent", "kind": "community",
-                    "count": status[12]}] if status[12] else []),
-            ] if status[3] or status[4] else [],
-        }
-        for status in amenity_status
-    ]
+    amenity_status_payload = build_amenity_status_payload(
+        amenity_status, amenity_evidence
+    )
 
     amenity_review_priority_payload = [
         {

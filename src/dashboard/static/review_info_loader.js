@@ -57,26 +57,12 @@ document.addEventListener("DOMContentLoaded", async () => {
         );
         const reviews = info.community_reviews?.reviews || [];
         const percentile = info.impact_summary?.rider_exposure_percentile;
-        const sourceLabel = value => ({
-            DDOT_ARCGIS: "DDOT shelter inventory",
-            ALEXANDRIA: "City of Alexandria inventory",
-            MONTGOMERY_COUNTY_WMATA: "Montgomery County inventory",
-            FAIRFAX_COUNTY: "Fairfax County inventory",
-            PRINCE_GEORGES_COUNTY_THEBUS: "Prince George's County TheBus inventory",
-            FALLS_CHURCH_CITY: "City of Falls Church inventory",
-            OPENSTREETMAP: "OpenStreetMap",
-            COMMUNITY: "Community observations"
-        })[value] || String(value || "Evidence source").replaceAll("_", " ");
-        const conflicts = (info.amenity_status || []).filter(item =>
-            item.derived_status === "conflicting" ||
-            item.consensus_conflicts_with_other_evidence
-        );
         const headings = info.serving_headings || [];
 
         container.innerHTML = `
             <div class="panel review-stop-summary">
                 <h2>${info.name || "Bus stop"}</h2>
-                ${headings.length ? `<p class="serving-heading"><strong>Serving heading${headings.length > 1 ? "s" : ""}:</strong> ${headings.map(headingLabel).join(" · ")}</p>` : ""}
+                <p class="serving-heading"><strong>Serving direction:</strong> ${headings.length ? headings.map(headingLabel).join(" · ") : "Not available"}</p>
                 <p>${[info.state, info.county, info.municipality].filter(Boolean).join(" · ")}</p>
 
                 ${percentile !== null && percentile !== undefined ? `
@@ -97,23 +83,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
                 <div class="evidence-card">
                     <h3>What we currently know</h3>
-                    <p>Shelter: <strong>${amenityLabel(status.shelter)}</strong><br>
-                    Bench: <strong>${amenityLabel(status.bench)}</strong></p>
+                    ${LocalEvidenceUI.renderCanonicalStatuses(info.amenity_status)}
                     <p><small>Likely and conflicting records still need current verification.</small></p>
                 </div>
-
-                ${conflicts.length ? `
-                    <div class="evidence-card evidence-conflict-comparison">
-                        <h3>Where the evidence disagrees</h3>
-                        ${conflicts.map(conflict => `
-                            <div class="conflict-amenity">
-                                <strong>${conflict.amenity_type === "bench" ? "Bench" : "Shelter"}</strong>
-                                ${(conflict.conflict_evidence || []).map(claim => `
-                                    <div>${sourceLabel(claim.source)}: <strong>${claim.claim === "present" ? "Present" : "Absent"}</strong>${claim.count ? ` (${claim.count} observation${claim.count === 1 ? "" : "s"})` : ""}</div>
-                                `).join("")}
-                            </div>`).join("")}
-                        <p><small>These records describe a disagreement; they do not establish that one source is wrong.</small></p>
-                    </div>` : ""}
 
                 ${info.amenity_evidence?.length ? `
                     <div class="evidence-card">

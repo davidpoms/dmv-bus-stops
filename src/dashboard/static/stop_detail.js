@@ -365,6 +365,9 @@ async function loadStopProfile() {
             review.amenity_evidence,
             {showEmpty: true}
         );
+        const canonicalAmenityHtml = LocalEvidenceUI.renderCanonicalStatuses(
+            review.amenity_status
+        );
 
 
 const latestCommunity =
@@ -504,6 +507,7 @@ const latestCommunity =
                     ? `
                     <div class="card seating-improvement-opportunity-card">
                         <strong>Seating at this stop</strong>
+                        <div class="canonical-amenity-status">${canonicalAmenityHtml}</div>
                         <p>
                             What appears to be here: <strong>${({confirmed_yes: "Bench confirmed",
                                 likely_yes: "Bench likely present", confirmed_no: "Bench confirmed absent",

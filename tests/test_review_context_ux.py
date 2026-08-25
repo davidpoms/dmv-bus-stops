@@ -137,15 +137,33 @@ class ReviewContextUxTests(unittest.TestCase):
         source = (ROOT / "src/dashboard/static/review_info_loader.js").read_text(
             encoding="utf-8"
         )
-        self.assertIn("Serving heading", source)
+        self.assertIn("Serving direction", source)
         self.assertIn("Rider exposure:", source)
         self.assertIn("Route-based rider exposure", source)
-        self.assertIn("Where the evidence disagrees", source)
-        self.assertIn("OpenStreetMap", source)
-        self.assertIn("DDOT shelter inventory", source)
-        self.assertIn("Source record:", (ROOT / "src/dashboard/static/local_evidence.js").read_text(encoding="utf-8"))
+        self.assertIn("renderCanonicalStatuses", source)
+        evidence_ui = (ROOT / "src/dashboard/static/local_evidence.js").read_text(encoding="utf-8")
+        self.assertIn("OpenStreetMap", evidence_ui)
+        self.assertIn("DDOT shelter asset record", evidence_ui)
+        self.assertIn("Source record:", evidence_ui)
         self.assertNotIn("engineering, accessibility compliance, ownership", source)
         self.assertIn("preliminary visual check", source)
+
+    def test_canonical_provenance_distinguishes_explicit_osm_from_missing(self):
+        from src.api.app import build_amenity_status_payload
+        base = ("bench", "likely_no", "not_reached", 0, 0, "[]", None,
+                "[]", "[]", 0, 1, 0, 0)
+        shown = build_amenity_status_payload([base], [])[0]["contributing_evidence"]
+        self.assertEqual([{"source": "OPENSTREETMAP", "claim": "absent",
+                           "kind": "osm", "explicit": True}], shown)
+        missing = list(base)
+        missing[10] = 0
+        self.assertEqual([], build_amenity_status_payload([tuple(missing)], [])[0]["contributing_evidence"])
+
+    def test_view_stop_details_uses_human_page_not_api(self):
+        page = (ROOT / "src/dashboard/templates/review.html").read_text(encoding="utf-8")
+        assignment = page[page.index("viewStopDetailsButton.href"):]
+        self.assertIn("`/stop/${reviewStopId}`", assignment)
+        self.assertNotIn("`/stops/${reviewStopId}`", assignment)
 
     def test_only_two_current_review_modes_are_offered_and_legacy_is_readable(self):
         from src.review.community_survey_v1 import SURVEY

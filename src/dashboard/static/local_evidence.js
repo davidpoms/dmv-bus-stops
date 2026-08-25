@@ -51,7 +51,14 @@
     const SOURCE_LABELS = {
         PRINCE_GEORGES_COUNTY_THEBUS:
             "Prince George's County TheBus stop inventory",
-        DDOT_ARCGIS: "DDOT shelter asset record"
+        DDOT_ARCGIS: "DDOT shelter asset record",
+        MONTGOMERY_COUNTY_WMATA: "Montgomery County inventory",
+        ALEXANDRIA: "City of Alexandria inventory",
+        FAIRFAX_COUNTY: "Fairfax County inventory",
+        FALLS_CHURCH_CITY: "City of Falls Church inventory",
+        OPENSTREETMAP: "OpenStreetMap",
+        COMMUNITY: "Community observations",
+        COMMUNITY_CONSENSUS: "Community consensus"
     };
 
     function escapeHtml(value) {
@@ -105,7 +112,34 @@
     }
 
     function friendlySource(source) {
-        return SOURCE_LABELS[source] || null;
+        return SOURCE_LABELS[source] || genericLabel(source);
+    }
+
+    function canonicalStatusLabel(status) {
+        return ({
+            confirmed_yes: "confirmed present", confirmed_no: "confirmed absent",
+            likely_yes: "likely present", likely_no: "likely absent",
+            conflicting: "status uncertain", unknown: "not enough information"
+        })[status] || "not enough information";
+    }
+
+    function renderCanonicalStatuses(statuses) {
+        return (Array.isArray(statuses) ? statuses : []).map(status => {
+            const amenity = amenityLabel(status.amenity_type);
+            const evidence = status.contributing_evidence || [];
+            return `<div class="canonical-amenity-conclusion">
+                <strong>${escapeHtml(amenity)} ${escapeHtml(canonicalStatusLabel(status.derived_status))}</strong>
+                ${evidence.length ? evidence.map(item => {
+                    const source = friendlySource(item.source);
+                    const action = item.kind === "osm" ? " explicitly marks" : ":";
+                    const count = item.count ? ` (${item.count} observation${item.count === 1 ? "" : "s"})` : "";
+                    const record = item.source_record ? ` — source record ${escapeHtml(item.source_record)}` : "";
+                    return `<div>${escapeHtml(source)}${action} ${escapeHtml(status.amenity_type)} <strong>${item.claim}</strong>${count}${record}</div>`;
+                }).join("") : `<div>No usable amenity evidence is currently available.</div>`}
+                ${(status.evidence_conflict || status.consensus_conflicts_with_other_evidence)
+                    ? `<small>These records disagree; this does not establish that one source is wrong.</small>` : ""}
+            </div>`;
+        }).join("");
     }
 
     function groupEvidence(records) {
@@ -175,6 +209,7 @@
         evidenceValue,
         groupEvidence,
         amenityLabel,
+        renderCanonicalStatuses,
         render
     };
 });
