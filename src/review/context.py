@@ -35,7 +35,7 @@ def entry_explanation(scenario):
             "observation would be particularly useful here."
         ),
         "route": "This stop is on the route you chose to review.",
-        "nearby": "This stop was selected from stops near you.",
+        "nearby": "This stop is near the area you chose to review.",
         "map": "You chose this stop to review.",
         "direct": "You chose this stop to review.",
     }.get(scenario)

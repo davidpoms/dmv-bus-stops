@@ -51,7 +51,9 @@ Want to help beyond this review?
 </h3>
 
 <p>
-Steward this stop and help track future improvements with other community members.
+Stewarding means helping maintain a current community record of this stop over
+time. It does not mean owning or maintaining the stop, and there are no automatic
+reminders yet.
 </p>
 
 <button
@@ -189,7 +191,7 @@ async function(){
     document
     .getElementById("stewardStatus")
     .innerText =
-        "You are now a community steward for this stop!";
+        "This stop has been added to your stewardship list. Future observations can add context as conditions change.";
 
 });
 
@@ -433,18 +435,24 @@ stop-level boardings.
 
 
 <p>
-Your review has been recorded.
+Your observation has been added to this stop's history. The community record and
+review guidance for this stop have been refreshed.
+</p>
+
+<p>
+One observation may not resolve every uncertainty, but it gives future reviewers
+and analysts a dated piece of evidence.
 </p>
 
 <div class="impact-section current-review">
 
 <h2>
-This review
+Route context for this review
 </h2>
 
 
 <p>
-This stop serves approximately
+The routes serving this stop are associated with approximately
 <strong>
 ${
     result.community_impact.average_weekday_boardings
@@ -456,7 +464,8 @@ ${
     "unknown"
 }
 </strong>
-average weekday boardings.
+weekday boardings in the current route-based exposure data. This is not an
+observed boarding count for this stop.
 </p>
 
 
@@ -482,7 +491,7 @@ ${
     ?
     `
     <p>
-    ⭐ You established the first community record for this stop.
+    You added the first completed community review currently recorded for this stop.
     </p>
     `
     :
@@ -578,6 +587,10 @@ ${
 
 
 <div class="completion-actions">
+
+<a href="/stop/${stopId}" class="dashboard-button">
+View this stop's updated record
+</a>
 
 <a href="/review/start?mode=opportunity" class="dashboard-button">
 Review another stop

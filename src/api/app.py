@@ -2659,15 +2659,27 @@ def review_assignment(stop_id):
 @app.route("/stops/<int:stop_id>/community-reviews")
 def community_reviews(stop_id):
 
+    observation_columns = {
+        row[1] for row in query_db("PRAGMA table_info(stop_observations)")
+    }
+    review_mode = "review_mode" if "review_mode" in observation_columns else "NULL"
+    imagery_month = (
+        "streetview_imagery_month"
+        if "streetview_imagery_month" in observation_columns else "NULL"
+    )
+    clearance = "bench_feasible" if "bench_feasible" in observation_columns else "NULL"
     reviews = query_db(
-        """
+        f"""
         SELECT
             id,
             observed_at,
             shelter_present,
             bench_present,
             notes,
-            reviewer_id
+            reviewer_id,
+            {review_mode},
+            {imagery_month},
+            {clearance}
         FROM stop_observations
         WHERE physical_stop_id=?
         AND source='community_review'
@@ -2689,7 +2701,10 @@ def community_reviews(stop_id):
                         "date": row[1],
                         "shelter": row[2],
                         "bench": row[3],
-                        "notes": row[4]
+                        "notes": row[4],
+                        "review_mode": row[6],
+                        "streetview_imagery_month": row[7],
+                        "preliminary_clearance": row[8],
                     }
                     for row in reviews
                 ]

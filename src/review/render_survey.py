@@ -31,6 +31,11 @@ def render_question(question):
 
     html = []
 
+    prompt = (
+        f"<fieldset><legend>{escape(label)}</legend>"
+        if qtype == "radio" or multiple
+        else f'<label for="survey-{escape(field)}">{escape(label)}</label>'
+    )
     html.append(
         f"""
         <div
@@ -38,10 +43,7 @@ def render_question(question):
             data-field="{escape(field)}"
             data-condition="{escape(condition)}"
         >
-
-            <label>
-                {escape(label)}
-            </label>
+            {prompt}
         """
     )
 
@@ -83,7 +85,7 @@ def render_question(question):
 
         html.append(
             f"""
-            <select name="{escape(field)}">
+            <select id="survey-{escape(field)}" name="{escape(field)}">
             """
         )
 
@@ -108,6 +110,7 @@ def render_question(question):
         html.append(
             f"""
             <textarea
+                id="survey-{escape(field)}"
                 name="{escape(field)}"
             ></textarea>
             """
@@ -118,6 +121,7 @@ def render_question(question):
         html.append(
             f"""
             <input
+                id="survey-{escape(field)}"
                 type="month"
                 name="{escape(field)}"
             >
@@ -129,11 +133,15 @@ def render_question(question):
         html.append(
             f"""
             <input
+                id="survey-{escape(field)}"
                 type="text"
                 name="{escape(field)}"
             >
             """
         )
+
+    if qtype == "radio" or multiple:
+        html.append("</fieldset>")
 
     html.append(
         """

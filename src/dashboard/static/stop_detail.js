@@ -441,6 +441,17 @@ const latestCommunity =
 
                         </div>
 
+                        <div class="community-observation-provenance">
+                            Review method: ${({street_view: "Street View",
+                                other_remote_visual: "Other remote visual source",
+                                remote: "Legacy remote review", in_person: "In person"})
+                                [reviewItem.review_mode] || "Not recorded"}
+                            ${reviewItem.streetview_imagery_month
+                                ? `<br>Street View imagery captured: ${reviewItem.streetview_imagery_month}` : ""}
+                            ${reviewItem.preliminary_clearance
+                                ? `<br>Preliminary visual space observation: ${reviewItem.preliminary_clearance}` : ""}
+                        </div>
+
                         ${
                             reviewItem.notes
                                 ? `
@@ -476,18 +487,14 @@ const latestCommunity =
 
                 <br><br>
 
-                Internal ID:
-                ${stop.stop_id || stopId}
-
-                <br><br>
-                External Stop ID:
-                ${stop.external_stop_id || "Not recorded"}
-
-                <br><br>
-
-
                 Routes:
                 ${routeText}
+
+                <details>
+                    <summary>Stop reference details</summary>
+                    Internal physical stop ID: ${stop.stop_id || stopId}<br>
+                    External stop ID: ${stop.external_stop_id || "Not recorded"}
+                </details>
 
             </div>
 
@@ -530,8 +537,11 @@ const latestCommunity =
                 </strong>
 
                 <p>
-                    This stop's serving routes represent a high level
-                    of rider exposure compared with other stops in the region.
+                    Rider exposure is ${(() => {
+                        const value = Number(stop.impact_summary?.rider_exposure_percentile || 0);
+                        return value >= 90 ? "very high" : value >= 75 ? "high" :
+                            value >= 40 ? "moderate" : "lower";
+                    })()} compared with other stops in the region.
                 </p>
 
                 ${

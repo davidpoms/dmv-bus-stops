@@ -24,7 +24,7 @@ class ReviewContextUxTests(unittest.TestCase):
         expected = {
             "opportunity": "Opportunity Review selected this stop",
             "route": "route you chose to review",
-            "nearby": "stops near you",
+            "nearby": "near the area you chose to review",
             "map": "You chose this stop",
             "direct": "You chose this stop",
         }
@@ -80,6 +80,56 @@ class ReviewContextUxTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("mode=map", map_source)
+
+    def test_normal_volunteer_surfaces_are_coherent(self):
+        dashboard = (ROOT / "src/dashboard/templates/dashboard.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(1, dashboard.count("/review/start?mode=opportunity"))
+        self.assertIn("/review/start?mode=route", dashboard)
+        self.assertIn('id="nearbyReviewLink"', dashboard)
+        self.assertIn("Browse the map", dashboard)
+        self.assertIn("Explore by jurisdiction", dashboard)
+        self.assertIn('id="pipelineSearch"', dashboard)
+
+        review_info = (ROOT / "src/dashboard/static/review_info_loader.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Why you're reviewing this stop", review_info)
+        self.assertIn("What would be useful to check", review_info)
+        self.assertNotIn("Why this stop was selected", review_info)
+        self.assertNotIn("Documented need index", review_info)
+        self.assertNotIn("review_priority_score", review_info)
+        self.assertNotIn("Assignment:", review_info)
+
+        stop_detail = (ROOT / "src/dashboard/static/stop_detail.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("How this opportunity was assessed", stop_detail)
+        self.assertIn("Street View imagery captured", stop_detail)
+        self.assertNotIn("Documented need index", stop_detail)
+
+    def test_survey_and_completion_explain_provenance_and_contribution(self):
+        survey = (ROOT / "src/review/community_survey_v1.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("may differ from today's review date", survey)
+        self.assertIn("preliminary visual observation", survey)
+        self.assertIn("Path appears blocked", survey)
+
+        review_page = (ROOT / "src/dashboard/templates/review.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("added to this stop's history", review_page)
+        self.assertIn("dated piece of evidence", review_page)
+        self.assertIn("does not mean owning or maintaining", review_page)
+        self.assertIn("View this stop's updated record", review_page)
+
+        map_source = (ROOT / "src/dashboard/static/dashboard.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("What we currently know", map_source)
+        self.assertIn("A current observation would help improve this record", map_source)
 
 
 if __name__ == "__main__":

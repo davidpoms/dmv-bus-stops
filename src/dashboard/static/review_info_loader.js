@@ -1,446 +1,126 @@
-document.addEventListener(
-    "DOMContentLoaded",
-    async () => {
+document.addEventListener("DOMContentLoaded", async () => {
+    const stopId = window.location.pathname.split("/").pop();
+    const container = document.getElementById("stopInfo");
+    if (!container || !stopId) return;
 
-        const stopId =
-            window.location.pathname.split("/").pop();
+    const amenityLabel = value => ({
+        confirmed_yes: "Confirmed present",
+        confirmed_no: "Confirmed absent",
+        likely_yes: "Likely present",
+        likely_no: "Likely absent",
+        conflicting: "Sources disagree",
+        unknown: "Not enough information"
+    })[value] || "Not enough information";
 
+    const observedAmenity = value => ({yes: "Yes", no: "No", unknown: "Unsure"})[
+        String(value || "").toLowerCase()
+    ] || "Not reported";
 
-        function displayAmenity(value) {
+    const reviewModeLabel = value => ({
+        street_view: "Street View",
+        other_remote_visual: "Other remote visual source",
+        remote: "Legacy remote review",
+        in_person: "In person"
+    })[value] || "Not recorded";
 
-            if (
-                value === true ||
-                value === 1 ||
-                value === "yes" ||
-                value === "Yes"
-            ) {
-                return "Yes";
-            }
+    const exposureLabel = value => {
+        const percentile = Number(value || 0);
+        if (percentile >= 90) return "Very high";
+        if (percentile >= 75) return "High";
+        if (percentile >= 40) return "Moderate";
+        return "Lower";
+    };
 
-            if (
-                value === false ||
-                value === 0 ||
-                value === "no" ||
-                value === "No"
-            ) {
-                return "No";
-            }
-
-            return "Not reported";
+    try {
+        const sourceParams = new URLSearchParams(window.location.search);
+        const infoParams = new URLSearchParams();
+        for (const name of ["assignment_id", "mode", "campaign"]) {
+            if (sourceParams.get(name)) infoParams.set(name, sourceParams.get(name));
         }
-
-
-        const container =
-            document.getElementById("stopInfo");
-
-
-        if (!container) {
-            return;
-        }
-
-
-        try {
-
-            const sourceParams = new URLSearchParams(window.location.search);
-            const assignmentId = sourceParams.get("assignment_id");
-            const infoParams = new URLSearchParams();
-            if (assignmentId) infoParams.set("assignment_id", assignmentId);
-            if (sourceParams.get("mode")) infoParams.set("mode", sourceParams.get("mode"));
-            if (sourceParams.get("campaign")) infoParams.set("campaign", sourceParams.get("campaign"));
-            const infoUrl = `/review/${stopId}/info` +
-                (infoParams.toString() ? `?${infoParams}` : "");
-            const response = await fetch(infoUrl);
-
-
-            const info =
-                await response.json();
-
-            console.log(
-                "Loaded review info:",
-                info
-            );
-
-
-            container.innerHTML = `
-                <div class="panel">
-
-                    <strong>
-                    ${info.name || "Bus Stop"}
-                    </strong>
-
-                    <br>
-
-                    Internal ID:
-                    ${info.stop_id}
-
-                    <br><br>
-
-                    External Stop ID:
-                    ${info.external_stop_id || "Not recorded"}
-
-                    <br><br>
-
-                    Coordinates:
-                    ${info.lat.toFixed(5)},
-                    ${info.lon.toFixed(5)}
-
-                    <br><br>
-
-                    Jurisdiction:
-                    ${info.state || ""}
-                    ${info.county ? " | " + info.county : ""}
-                    ${info.municipality ? " | " + info.municipality : ""}
-
-                    ${
-                        info.review_context
-                        ? `
-                            <div class="evidence-card opportunity-review-context">
-                                ${info.review_context.entry_explanation ? `
-                                <strong>Why you're reviewing this stop</strong>
-                                <p>${info.review_context.entry_explanation}</p>` : ""}
-                                <strong>What would be useful to check</strong>
-                                <p>${info.review_context.evidence_explanation}</p>
-                                <small>A preliminary visual space check is not an engineering,
-                                accessibility, ownership, utility, permitting, or construction approval.</small>
-                            </div><br>`
-                        : ""
-                    }
-
-                    <br><br>
-
-                    Serving direction:
-
-                    <strong>
-                    ${
-                        (() => {
-                            const heading = Number(
-                                info.serving_direction
-                            );
-
-                            if (isNaN(heading)) {
-                                return "Unknown";
-                            }
-
-                            if (heading < 22.5 || heading >= 337.5)
-                                return "North";
-
-                            if (heading < 67.5)
-                                return "Northeast";
-
-                            if (heading < 112.5)
-                                return "East";
-
-                            if (heading < 157.5)
-                                return "Southeast";
-
-                            if (heading < 202.5)
-                                return "South";
-
-                            if (heading < 247.5)
-                                return "Southwest";
-
-                            if (heading < 292.5)
-                                return "West";
-
-                            return "Northwest";
-
-                        })()
-                    }
-                    </strong>
-
-                    <br><br>
-                    ${
-                        info.impact_summary &&
-                        info.impact_summary.rider_exposure_percentile
-                        ?
-                        `
-                        <div class="evidence-card">
-
-                            <strong>
-                            Why this stop was selected
-                            </strong>
-
-                            <br><br>
-
-                            ${
-                                info.amenity_review_priority &&
-                                info.amenity_review_priority.length
-                                ? `<strong>${info.amenity_review_priority[0].amenity_type}:</strong>
-                                   ${info.amenity_review_priority[0].reason}<br><br>`
-                                : ""
-                            }
-
-                            Verification priorities consider rider exposure
-                            and the need for better information about current
-                            stop conditions.
-
-                            <br><br>
-
-                            <strong>
-                            Rider exposure percentile
-                            </strong>
-
-                            <br><br>
-
-                            The routes serving this stop carry more riders
-                            than approximately
-
-                            <strong>
-                            ${
-                                Math.min(
-                                    info.impact_summary.rider_exposure_percentile,
-                                    99
-                                )
-                            }%
-                            </strong>
-
-                            of stops in the region.
-
-                            This is a route-based exposure estimate, not
-                            observed stop-level ridership.
-
-                            <br><br>
-
-                            Estimated route exposure:
-
-                            <strong>
-                            ${
-                                info.impact_summary.estimated_weekday_boardings
-                                ? info.impact_summary.estimated_weekday_boardings.toLocaleString()
-                                : "Unknown"
-                            }
-                            weekday boardings across
-                            ${
-                                info.impact_summary.routes_served || 0
-                            }
-                            serving routes
-                            </strong>
-
-                            <br><br>
-
-                            Routes:
-
-                            ${
-                                info.impact_summary.routes &&
-                                info.impact_summary.routes.length
-                                ? info.impact_summary.routes.join(", ")
-                                : "Unknown"
-                            }
-
-                            <br><br>
-
-                            <small>
-                            Rider exposure is estimated using route-level
-                            ridership data associated with this stop.
-                            Stop-level boarding counts are not available.
-                            </small>
-
-                        </div>
-
-                        <br>
-                        `
-                        :
-                        ""
-                    }
-
-
-                    ${
-                        info.impact_summary
-                        ?
-                        `
-                        <div class="evidence-card">
-
-                            <strong>
-                            Community verification need
-                            </strong>
-
-                            <br><br>
-
-                            Available records do not fully confirm current
-                            waiting conditions.
-
-                            <br><br>
-
-                            Your review helps improve the accuracy of stop
-                            information and identify where improvements may
-                            be needed.
-
-                        </div>
-
-                        <br>
-                        `
-                        :
-                        ""
-                    }
-
-
-
-                    ${
-                        info.amenity_evidence &&
-                        info.amenity_evidence.length > 0
-                        ?
-                        `
-                        <div class="evidence-card">
-
-                            <strong>
-                            Local jurisdiction evidence
-                            </strong>
-
-                            <br><br>
-
-                            Supporting amenity records from local
-                            jurisdictions. Community observations are
-                            shown separately.
-
-                            <br><br>
-
-                            ${
-                                LocalEvidenceUI.render(info.amenity_evidence)
-                            }
-
-                        </div>
-
-                        <br>
-                        `
-                        :
-                        ""
-                    }
-
-
-                    <div class="evidence-card">
-
-                        <strong>
-                        Community observations
-                        </strong>
-
-                        <br><br>
-
-                        ${
-                            info.community_reviews &&
-                            info.community_reviews.review_count > 0
-                            ?
-                            `
-                            ${info.community_reviews.review_count}
-                            observation(s)
-
-                            <br><br>
-
-                            ${
-                                info.community_reviews.reviews.map(
-                                    review => `
-                                    <strong>
-                                    ${review.date}
-                                    </strong>
-
-                                    <br><br>
-
-                                    Shelter:
-                                    ${displayAmenity(review.shelter)}
-
-                                    <br>
-
-                                    Bench:
-                                    ${displayAmenity(review.bench)}
-
-                                    <br>
-
-                                    Review method: ${review.review_mode || "Legacy/unspecified"}
-
-                                    <br>
-
-                                    Assignment: ${review.assignment_id || "Legacy observation"}
-
-                                    ${review.streetview_imagery_month ? `<br>Street View imagery month: ${review.streetview_imagery_month}` : ""}
-
-                                    ${review.preliminary_clearance ? `<br>Preliminary clearance observation: ${review.preliminary_clearance}` : ""}
-
-                                    <br><br>
-
-                                    Notes:
-                                    ${
-                                        review.notes &&
-                                        review.notes.trim()
-                                        ? review.notes
-                                        : "No notes provided."
-                                    }
-
-                                    <br><br>
-                                    `
-                                ).join("")
-                            }
-                            `
-                            :
-                            `
-                            No observations yet.
-
-                            <br><br>
-
-                            Be the first to review this stop.
-                            `
-                        }
-
-                    </div>
-
-                    <br>
-
-                    ${
-                        info.streetview_url
-                        ?
-                        `
-                        <br><br>
-
-                        <a
-                            href="${info.streetview_url}"
-                            target="_blank"
-                            class="stop-review-button">
-
-                            Open Google Street View
-
-                        </a>
-                        `
-                        :
-                        ""
-                    }
-
-                    ${
-                        info.wmata_rider_tools_url
-                        ?
-                        `
-                        <br><br>
-
-                        <a
-                            href="${info.wmata_rider_tools_url}"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            class="stop-review-button">
-
-                            Open WMATA Rider Tools
-
-                        </a>
-                        `
-                        :
-                        ""
-                    }
-
+        const response = await fetch(
+            `/review/${stopId}/info${infoParams.toString() ? `?${infoParams}` : ""}`
+        );
+        const info = await response.json();
+        const status = Object.fromEntries(
+            (info.amenity_status || []).map(item => [item.amenity_type, item.derived_status])
+        );
+        const reviews = info.community_reviews?.reviews || [];
+        const percentile = info.impact_summary?.rider_exposure_percentile;
+
+        container.innerHTML = `
+            <div class="panel review-stop-summary">
+                <h2>${info.name || "Bus stop"}</h2>
+                <p>${[info.state, info.county, info.municipality].filter(Boolean).join(" · ")}</p>
+
+                ${info.review_context ? `
+                    <div class="evidence-card opportunity-review-context">
+                        ${info.review_context.entry_explanation ? `
+                            <h3>Why you're reviewing this stop</h3>
+                            <p>${info.review_context.entry_explanation}</p>` : ""}
+                        <h3>What would be useful to check</h3>
+                        <p>${info.review_context.evidence_explanation}</p>
+                    </div>` : ""}
+
+                <div class="evidence-card">
+                    <h3>What we currently know</h3>
+                    <p>Shelter: <strong>${amenityLabel(status.shelter)}</strong><br>
+                    Bench: <strong>${amenityLabel(status.bench)}</strong></p>
+                    <p><small>Likely and conflicting records still need current verification.</small></p>
                 </div>
-            `;
 
-            document.dispatchEvent(new CustomEvent("review-context-loaded", {
-                detail: info.review_context || {}
-            }));
+                ${info.amenity_evidence?.length ? `
+                    <div class="evidence-card">
+                        <h3>Local jurisdiction evidence</h3>
+                        <p>Supporting local records are shown separately from community observations.</p>
+                        ${LocalEvidenceUI.render(info.amenity_evidence)}
+                    </div>` : ""}
 
+                <div class="evidence-card">
+                    <h3>Community observations</h3>
+                    ${reviews.length ? reviews.map(review => `
+                        <div class="community-observation">
+                            <strong>${review.date || "Date not recorded"}</strong><br>
+                            Shelter: ${observedAmenity(review.shelter)}<br>
+                            Bench: ${observedAmenity(review.bench)}<br>
+                            Review method: ${reviewModeLabel(review.review_mode)}
+                            ${review.streetview_imagery_month ? `<br>Street View imagery captured: ${review.streetview_imagery_month}` : ""}
+                            ${review.preliminary_clearance ? `<br>Preliminary visual space observation: ${review.preliminary_clearance}` : ""}
+                            ${review.notes?.trim() ? `<br>Notes: ${review.notes}` : ""}
+                        </div>`).join("") : `
+                        <p>No community observations yet. Your review can create a dated record for this stop.</p>`}
+                </div>
 
-        } catch(error){
+                ${percentile !== null && percentile !== undefined ? `
+                    <details>
+                        <summary>About rider exposure</summary>
+                        <p>Rider exposure: <strong>${exposureLabel(percentile)}</strong>
+                        (${Number(percentile).toFixed(1)}th percentile).</p>
+                        <p>This is based on weekday boardings for routes serving the stop,
+                        not observed boardings at this physical stop.</p>
+                    </details>` : ""}
 
-            console.error(
-                "Failed loading stop info",
-                error
-            );
+                <details>
+                    <summary>Stop reference details</summary>
+                    <p>Internal physical stop ID: ${info.stop_id}<br>
+                    External stop ID: ${info.external_stop_id || "Not recorded"}<br>
+                    Coordinates: ${Number(info.lat).toFixed(5)}, ${Number(info.lon).toFixed(5)}</p>
+                </details>
 
-            container.innerHTML =
-                "Unable to load stop information.";
+                <p><small>A visual space observation is preliminary. It does not establish
+                engineering, accessibility compliance, ownership, utility clearance,
+                permitting, or construction approval.</small></p>
 
-        }
+                <div class="review-reference-links">
+                    ${info.streetview_url ? `<a href="${info.streetview_url}" target="_blank" rel="noopener noreferrer" class="stop-review-button">Open Google Street View</a>` : ""}
+                    ${info.wmata_rider_tools_url ? `<a href="${info.wmata_rider_tools_url}" target="_blank" rel="noopener noreferrer" class="stop-review-button">Open WMATA Rider Tools</a>` : ""}
+                </div>
+            </div>`;
 
+        document.dispatchEvent(new CustomEvent("review-context-loaded", {
+            detail: info.review_context || {}
+        }));
+    } catch (error) {
+        console.error("Failed loading stop info", error);
+        container.textContent = "Unable to load stop information.";
     }
-);
+});

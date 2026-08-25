@@ -586,6 +586,30 @@ function loadStops() {
 
 
 
+                                const mapAmenityLabel = value => ({
+                                    confirmed_yes: "Confirmed present",
+                                    confirmed_no: "Confirmed absent",
+                                    likely_yes: "Likely present",
+                                    likely_no: "Likely absent",
+                                    conflicting: "Sources disagree",
+                                    unknown: "Not enough information"
+                                })[value] || "Not enough information";
+                                const mapReviewNeed =
+                                    [amenityStatus.bench, amenityStatus.shelter]
+                                        .some(value => ["likely_yes", "likely_no", "conflicting", "unknown"].includes(value))
+                                    ? "A current observation would help improve this record."
+                                    : "A new observation can add current comfort and condition information.";
+                                popup = `
+                                    <b>${props.location.replace("+", " at ")}</b><br><br>
+                                    <b>What we currently know</b><br>
+                                    Bench: ${mapAmenityLabel(amenityStatus.bench)}<br>
+                                    Shelter: ${mapAmenityLabel(amenityStatus.shelter)}<br><br>
+                                    ${mapReviewNeed}<br><br>
+                                    <a href="/stop/${props.stop_id}" class="stop-review-button">View stop details</a>
+                                    <br><br>
+                                    <a href="/review/${props.stop_id}?mode=map" class="stop-review-button">Review this stop</a>
+                                `;
+
                                 marker.bindPopup(
                                     popup
                                 ).openPopup();

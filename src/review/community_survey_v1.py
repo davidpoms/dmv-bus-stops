@@ -16,7 +16,7 @@ SURVEY = {
         "type": "radio",
         "options": [
             ("street_view", "Street View review"),
-            ("other_remote_visual", "Other remote visual review"),
+            ("other_remote_visual", "Another map, image, or remote visual source"),
             ("remote", "Legacy remote review"),
             ("in_person", "In-person review (visited the stop)")
         ]
@@ -27,7 +27,10 @@ SURVEY = {
 
     {
         "field": "streetview_imagery_month",
-        "label": "What month and year is the Street View imagery from?",
+        "label": (
+            "When was this Street View imagery captured? Record its month and "
+            "year, which may differ from today's review date."
+        ),
         "type": "month"
     },
 
@@ -72,7 +75,7 @@ SURVEY = {
 
         {
             "field": "seating_limitations",
-            "label": "Do any features appear to limit normal use of the seating?",
+            "label": "If seating is visible, do any features appear to limit normal use?",
             "options": [
                 ("none", "No apparent limitations"),
                 ("dividers", "Seat dividers limit shared seating"),
@@ -85,7 +88,10 @@ SURVEY = {
 
         {
             "field": "bench_feasible",
-            "label": "If additional seating were installed, could riders still move through the stop safely?",
+            "label": (
+                "If seating were added, does there appear to be enough pass-through "
+                "space for riders? (This is a preliminary visual observation.)"
+            ),
             "options": [
                 ("yes", "Yes"),
                 ("no", "No"),
@@ -105,11 +111,11 @@ SURVEY = {
 
         {
             "field": "accessibility_status",
-            "label": "Does the stop appear accessible for riders using mobility devices?",
+            "label": "What can you observe about the path for riders using mobility devices?",
             "options": [
-                ("good", "Clear accessible path"),
+                ("good", "Path appears clear"),
                 ("possible_obstruction", "Possible obstruction"),
-                ("blocked", "Not accessible"),
+                ("blocked", "Path appears blocked"),
                 ("unknown", "Unsure")
             ]
         },
@@ -196,7 +202,10 @@ SURVEY = {
 
         {
             "field": "steward_interest",
-            "label": "Would you be willing to help advocate for improvements at this stop, including speaking with nearby property owners about possible improvements?",
+            "label": (
+                "Would you like to help steward this stop by contributing to its "
+                "community record over time? This does not mean owning or maintaining it."
+            ),
             "options": [
                 ("yes", "Yes"),
                 ("maybe", "Maybe"),

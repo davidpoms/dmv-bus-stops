@@ -413,6 +413,10 @@ class ActiveReviewWorkflowTests(unittest.TestCase):
         self.assertEqual((21, "exposed", "yes", "street_view", "2025-05"), row[:5])
         self.assertNotEqual(row[4], row[5])
         self.assertEqual((31, "older review", None, "remote", None), older)
+        history = self.client.get("/stops/1/community-reviews").get_json()["reviews"]
+        submitted = next(item for item in history if item["id"] != 31)
+        self.assertEqual("street_view", submitted["review_mode"])
+        self.assertEqual("2025-05", submitted["streetview_imagery_month"])
 
 
 if __name__ == "__main__":
