@@ -280,7 +280,30 @@ def get_seating_opportunity(stop_id):
         "SELECT * FROM seating_improvement_opportunities WHERE physical_stop_id=?",
         (stop_id,),
     )
-    return serialize_seating_opportunity(rows[0]) if rows else None
+    if not rows:
+        return None
+    item = serialize_seating_opportunity(rows[0])
+    has_status = query_db(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='stop_amenity_status'"
+    )
+    status_rows = query_db(
+        "SELECT amenity_type,community_observation_count,community_yes_count,"
+        "community_no_count FROM stop_amenity_status WHERE physical_stop_id=?",
+        (stop_id,),
+    ) if has_status else []
+    status = {row[0]: row for row in status_rows}
+    item["near_consensus"] = any(
+        row[1] in (1, 2) and not (row[2] > 0 and row[3] > 0)
+        for row in status.values()
+    )
+    prior = query_db(
+        "SELECT COUNT(*),MAX(observed_at) FROM stop_observations "
+        "WHERE physical_stop_id=? AND source='community_review'",
+        (stop_id,),
+    )[0]
+    item["prior_observation_count"] = prior[0]
+    item["last_observed_at"] = prior[1]
+    return item
 
 
 def stop_is_current(stop_id):

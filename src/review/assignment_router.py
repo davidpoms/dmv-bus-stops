@@ -4,6 +4,11 @@ import uuid
 from pathlib import Path
 
 from src.review.context import WORKFLOW_CAMPAIGN
+from src.review.opportunity_cohorts import (
+    COHORT_ROTATION,
+    campaign_for_cohort,
+    classification_sql,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -108,6 +113,84 @@ def stop_is_active(stop_id):
     conn.close()
 
     return row is not None
+
+
+def _supports_unified_cohorts(cur):
+    tables = {row[0] for row in cur.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'"
+    )}
+    columns = {row[1] for row in cur.execute(
+        "PRAGMA table_info(seating_improvement_opportunities)"
+    )}
+    return (
+        {"stop_amenity_status", "stop_observations",
+         "stop_amenity_review_priority"} <= tables
+        and {"bench_status", "shelter_status", "adequacy_status",
+             "clearance_status", "rider_exposure_percentile"} <= columns
+    )
+
+
+def _unified_opportunity_candidate(cur, reviewer_id):
+    """Select by cohort rotation, then transparent within-cohort ordering."""
+    assignment_count = cur.execute(
+        "SELECT COUNT(*) FROM stop_review_assignments WHERE scenario='opportunity'"
+    ).fetchone()[0]
+    start = assignment_count % len(COHORT_ROTATION)
+    rotation = COHORT_ROTATION[start:] + COHORT_ROTATION[:start]
+    seen = set()
+    for cohort in rotation:
+        if cohort in seen:
+            continue
+        seen.add(cohort)
+        cohort_case = classification_sql()
+        row = cur.execute(
+            f"""
+            WITH observation_summary AS (
+                SELECT physical_stop_id, COUNT(*) prior_observations,
+                       MAX(datetime(observed_at)) last_observed_at
+                FROM stop_observations
+                WHERE source='community_review'
+                GROUP BY physical_stop_id
+            ), classified AS (
+                SELECT sio.*,
+                  COALESCE(obs.prior_observations,0) prior_observations,
+                  obs.last_observed_at,
+                  {cohort_case} evidence_cohort
+                FROM seating_improvement_opportunities sio
+                JOIN stop_amenity_status bs ON bs.physical_stop_id=sio.physical_stop_id
+                  AND bs.amenity_type='bench'
+                JOIN stop_amenity_status ss ON ss.physical_stop_id=sio.physical_stop_id
+                  AND ss.amenity_type='shelter'
+                LEFT JOIN observation_summary obs
+                  ON obs.physical_stop_id=sio.physical_stop_id
+            )
+            SELECT c.opportunity_rank,c.physical_stop_id,c.evidence_cohort
+            FROM classified c
+            JOIN stop_gtfs_status g ON g.physical_stop_id=c.physical_stop_id
+              AND g.current_gtfs=1
+            WHERE c.evidence_cohort=?
+              AND c.physical_stop_id NOT IN
+                  (SELECT stop_id FROM stop_review_assignments WHERE reviewer_id=?)
+              AND c.physical_stop_id NOT IN
+                  (SELECT stop_id FROM stop_review_assignments WHERE status='assigned')
+            ORDER BY
+              CASE WHEN c.evidence_cohort='near_consensus' THEN
+                (SELECT MIN(observations_needed_for_consensus)
+                 FROM stop_amenity_review_priority p
+                 WHERE p.physical_stop_id=c.physical_stop_id) END,
+              CASE WHEN c.evidence_cohort='longitudinal_follow_up'
+                   THEN c.last_observed_at IS NULL END,
+              CASE WHEN c.evidence_cohort='longitudinal_follow_up'
+                   THEN datetime(c.last_observed_at) END,
+              CASE WHEN c.evidence_cohort IN ('presence_conflict','presence_unknown')
+                   THEN c.rider_exposure_percentile END DESC,
+              c.opportunity_rank,c.rider_exposure_percentile DESC,c.physical_stop_id
+            LIMIT 1
+            """, (cohort, reviewer_id)
+        ).fetchone()
+        if row:
+            return row
+    return None
 
 
 
@@ -366,27 +449,30 @@ def assign_stop(
 
     elif scenario == "opportunity":
 
-        workflow_clause = "AND sio.workflow_state=?" if campaign else ""
-        params = []
-        if campaign:
-            params.append(CAMPAIGN_WORKFLOW[campaign])
-        params.append(reviewer_id)
-        row = cur.execute(
-            f"""
-            SELECT sio.opportunity_rank, sio.physical_stop_id
-            FROM seating_improvement_opportunities sio
-            JOIN stop_gtfs_status sgs
-              ON sgs.physical_stop_id=sio.physical_stop_id AND sgs.current_gtfs=1
-            WHERE sio.workflow_state!='no_current_action'
-              {workflow_clause}
-              AND sio.physical_stop_id NOT IN
-                  (SELECT stop_id FROM stop_review_assignments WHERE reviewer_id=?)
-              AND sio.physical_stop_id NOT IN
-                  (SELECT stop_id FROM stop_review_assignments WHERE status='assigned')
-            ORDER BY sio.opportunity_rank, sio.physical_stop_id
-            LIMIT 1
-            """, tuple(params)
-        ).fetchone()
+        if campaign is None and _supports_unified_cohorts(cur):
+            row = _unified_opportunity_candidate(cur, reviewer_id)
+        else:
+            workflow_clause = "AND sio.workflow_state=?" if campaign else ""
+            params = []
+            if campaign:
+                params.append(CAMPAIGN_WORKFLOW[campaign])
+            params.append(reviewer_id)
+            row = cur.execute(
+                f"""
+                SELECT sio.opportunity_rank, sio.physical_stop_id
+                FROM seating_improvement_opportunities sio
+                JOIN stop_gtfs_status sgs
+                  ON sgs.physical_stop_id=sio.physical_stop_id AND sgs.current_gtfs=1
+                WHERE sio.workflow_state!='no_current_action'
+                  {workflow_clause}
+                  AND sio.physical_stop_id NOT IN
+                      (SELECT stop_id FROM stop_review_assignments WHERE reviewer_id=?)
+                  AND sio.physical_stop_id NOT IN
+                      (SELECT stop_id FROM stop_review_assignments WHERE status='assigned')
+                ORDER BY sio.opportunity_rank, sio.physical_stop_id
+                LIMIT 1
+                """, tuple(params)
+            ).fetchone()
 
     else:
 
@@ -462,7 +548,18 @@ def assign_stop(
 
     assigned_stop_id = row[1]
 
-    if scenario == "opportunity" and campaign is None:
+    if scenario == "opportunity" and campaign is None and len(row) > 2:
+        evidence_row = cur.execute(
+            "SELECT bench_status,shelter_status,adequacy_status,clearance_status,"
+            "workflow_state FROM seating_improvement_opportunities WHERE physical_stop_id=?",
+            (assigned_stop_id,),
+        ).fetchone()
+        item = dict(zip(("bench_status", "shelter_status", "adequacy_status",
+                         "clearance_status", "workflow_state"), evidence_row or ()))
+        campaign = campaign_for_cohort(
+            row[2], item, WORKFLOW_CAMPAIGN.get(item.get("workflow_state"))
+        )
+    elif scenario == "opportunity" and campaign is None:
         workflow_row = cur.execute(
             "SELECT workflow_state FROM seating_improvement_opportunities "
             "WHERE physical_stop_id=?",

@@ -1,5 +1,7 @@
 """Plain-language review context derived from existing routing and evidence."""
 
+from src.review.opportunity_cohorts import COHORT_REASON, campaign_for_cohort, primary_cohort
+
 
 WORKFLOW_CAMPAIGN = {
     "verify_presence": "presence_verification",
@@ -99,13 +101,17 @@ def evidence_explanation(opportunity):
 
 
 def build_review_context(scenario, opportunity, campaign=None):
-    focus = campaign or WORKFLOW_CAMPAIGN.get(
+    # Classification is universal; only cohort mixing is opportunity-specific.
+    cohort = primary_cohort(opportunity or {})
+    focus = campaign or campaign_for_cohort(cohort, opportunity) or WORKFLOW_CAMPAIGN.get(
         opportunity.get("workflow_state") if opportunity else None
     )
     return {
         "scenario": scenario,
         "entry_explanation": entry_explanation(scenario),
-        "evidence_explanation": evidence_explanation(opportunity),
+        "evidence_explanation": COHORT_REASON.get(
+            cohort, evidence_explanation(opportunity)
+        ),
         "review_focus": focus,
         "emphasized_fields": list(CAMPAIGN_FIELDS.get(focus, ())),
     }
