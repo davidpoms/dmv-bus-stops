@@ -154,7 +154,8 @@ class ResetGuardTests(unittest.TestCase):
     def test_reset_is_narrow_transactional_and_requires_confirmation(self):
         conn = sqlite3.connect(":memory:")
         self.addCleanup(conn.close)
-        human = ("community_reviewers", "stop_review_assignments", "stop_observations",
+        human = ("community_reviewers", "community_reviewer_routes",
+                 "stop_review_assignments", "stop_observations",
                  "stop_consensus", "community_stewardships", "review_feedback",
                  "community_requests")
         for table in human:

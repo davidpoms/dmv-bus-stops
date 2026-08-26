@@ -23,6 +23,12 @@ Operational rules:
 4. Apply only the required migration/rebuild to production.
 5. Recompute the production hash and validate again.
 
+Physical Stop V2 uses `scripts/active/migrate_physical_stops_v2.py`, as documented
+in `docs/physical-stop-identity-v2.md`. Review a fresh-copy JSON report, preserve a
+byte-verified rollback copy, and obtain separate production approval before using
+its production-only override. Proposal gates, integrity checks, and the second-run
+identity no-op check are mandatory.
+
 Some older producers still accept their database as a positional argument or
 Python parameter instead of reading `DMV_BUS_STOPS_DB`. Check each entry point;
 do not assume the override is universal outside the application, assignment

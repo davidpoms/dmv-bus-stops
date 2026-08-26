@@ -25,6 +25,7 @@ before an approved mutation.
 | `import_prince_georges_raw_evidence.py` | raw PG provenance import | preflight by default; `--apply` mutates explicit DB |
 | `import_prince_georges_thebus_amenities.py` | TheBus amenity import | preflight by default; `--apply` mutates explicit DB |
 | `migrate_amenity_evidence_identity.py` | amenity evidence identity migration | mutates explicit/selected DB after collision audit |
+| `migrate_physical_stops_v2.py --db <copy> --plan/--apply` | complete V2 identity cutover and derived rebuild | explicit DB required; repository production DB refused without production-only override |
 | `rebuild_amenity_review_priority.py` | canonical amenity status/priority rebuild | mutates explicit/selected DB |
 | `rebuild_stop_amenity_status.py` | canonical shelter/bench synthesis rebuild | mutates explicit/selected DB |
 | `rebuild_stop_routes_clean.py` | specialized route repair | destructive selected-DB rebuild with backup; not routine |
@@ -35,7 +36,8 @@ before an approved mutation.
 `--bootstrap-empty-database` and refuses a populated identity registry.
 
 The V2 manifest generator lives under `scripts/diagnostics` because proposal
-generation is read-only. No active V2 identity-apply command is supported yet.
+generation is read-only. The active cutover command regenerates and validates that
+proposal itself; it never accepts an external manifest as authority.
 
 Read-only checks belong in `scripts/diagnostics`. Historical implementations belong
 in Git history or the curated `scripts/archive/migrations` reference set.

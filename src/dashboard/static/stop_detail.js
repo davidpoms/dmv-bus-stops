@@ -5,6 +5,15 @@ async function loadStopProfile() {
         const stopResponse = await fetch(`/stops/${stopId}`);
         const stop = await stopResponse.json();
 
+        if (stop.identity_status === "retired") {
+            document.getElementById("name").textContent = `Historical stop ${stopId}`;
+            const links = (stop.successors || []).map(successor =>
+                `<li><a href="${successor.url}">Current stop ${successor.stop_id}</a></li>`
+            ).join("");
+            details.innerHTML = `<p>${stop.message}</p><ul>${links}</ul>`;
+            return;
+        }
+
         const reviewResponse = await fetch(`/review/${stopId}/info`);
         const review = await reviewResponse.json();
 

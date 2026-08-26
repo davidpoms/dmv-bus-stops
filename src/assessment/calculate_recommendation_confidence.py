@@ -47,9 +47,9 @@ def setup_table(cursor):
     )
 
 
-def calculate_confidence():
+def calculate_confidence(database_path=None):
 
-    conn = sqlite3.connect(DATABASE_PATH)
+    conn = sqlite3.connect(database_path or DATABASE_PATH)
 
     cursor = conn.cursor()
 

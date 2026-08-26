@@ -68,10 +68,10 @@ def weekdays_in_month(date_string):
 
 
 
-def calculate_scores():
+def calculate_scores(database_path=None):
 
     conn = sqlite3.connect(
-        DATABASE_PATH
+        database_path or DATABASE_PATH
     )
 
     cursor = conn.cursor()

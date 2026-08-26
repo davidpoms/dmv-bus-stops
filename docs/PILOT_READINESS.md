@@ -9,6 +9,10 @@ identity baseline. Current owner-created review data may be reset only through t
 narrow confirmed cutover command. After that baseline, reviewer accounts and all
 contribution history are durable and normal reconciliation cannot truncate them.
 
+The V2 cutover now has a supported explicit-database orchestrator. Production
+cutover remains an operational gate until the fresh-copy rehearsal report is
+reviewed and the production window and byte-verified rollback are approved.
+
 ## Configuration inventory
 
 | Setting | Classification | Default and failure behavior |

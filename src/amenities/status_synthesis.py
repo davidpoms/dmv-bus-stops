@@ -138,14 +138,23 @@ def synthesize_rows(conn, updated_at=None, physical_stop_ids=None):
                                       "yes_sources": set(), "no_sources": set()})
         for amenity in AMENITY_TYPES
     }
-    for row in conn.execute(
-        """
-        SELECT physical_stop_id, source, amenity_type, present, value
-        FROM stop_amenity_evidence
-        WHERE source != 'DDOT'
-          AND amenity_type IN ('shelter', 'bench')
-        """
-    ):
+    has_attribution = conn.execute("""SELECT 1 FROM sqlite_master WHERE type='table'
+        AND name='physical_stop_evidence_attribution'""").fetchone() is not None
+    local_sql = """
+        SELECT COALESCE(a.physical_stop_id,e.physical_stop_id),
+               e.source,e.amenity_type,e.present,e.value
+        FROM stop_amenity_evidence e
+        LEFT JOIN physical_stop_evidence_attribution a
+          ON a.evidence_table='stop_amenity_evidence'
+         AND a.evidence_row_id=e.id
+         AND a.attribution_version='physical-stop-v2-cutover-1'
+        WHERE e.source != 'DDOT'
+          AND (a.attribution_method IS NULL OR a.attribution_method!='unresolved')
+          AND e.amenity_type IN ('shelter', 'bench')
+        """ if has_attribution else """SELECT physical_stop_id,source,amenity_type,
+          present,value FROM stop_amenity_evidence WHERE source!='DDOT'
+          AND amenity_type IN ('shelter','bench')"""
+    for row in conn.execute(local_sql):
         stop_id, source, amenity, present, value = row
         if stop_id not in active_stops:
             continue
@@ -158,9 +167,14 @@ def synthesize_rows(conn, updated_at=None, physical_stop_ids=None):
         amenity: defaultdict(lambda: {"yes": False, "no": False})
         for amenity in AMENITY_TYPES
     }
-    for stop_id, raw_tags in conn.execute(
-        "SELECT stop_id, osm_tags FROM stop_osm_evidence"
-    ):
+    osm_sql = """SELECT COALESCE(a.physical_stop_id,e.stop_id),e.osm_tags
+           FROM stop_osm_evidence e
+           LEFT JOIN physical_stop_evidence_attribution a
+             ON a.evidence_table='stop_osm_evidence' AND a.evidence_row_id=e.id
+            AND a.attribution_version='physical-stop-v2-cutover-1'
+           WHERE a.attribution_method IS NULL OR a.attribution_method!='unresolved'""" \
+        if has_attribution else "SELECT stop_id,osm_tags FROM stop_osm_evidence"
+    for stop_id, raw_tags in conn.execute(osm_sql):
         if stop_id not in active_stops:
             continue
         tags = _osm_tags(raw_tags)

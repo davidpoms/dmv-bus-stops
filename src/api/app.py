@@ -514,6 +514,30 @@ def inactive_stop_response(stop_id):
     ), 409
 
 
+def retired_stop_payload(stop_id):
+    """Describe a historical identity without aliasing it to one successor."""
+    tables = query_db("""SELECT name FROM sqlite_master WHERE type='table'
+        AND name IN ('physical_stop_identity_state','physical_stop_identity_edges')""")
+    if len(tables) != 2:
+        return None
+    state = query_db("""SELECT identity_status,retired_at
+        FROM physical_stop_identity_state WHERE physical_stop_id=?""", (stop_id,))
+    if not state or state[0][0] != "retired":
+        return None
+    successors = [row[0] for row in query_db("""SELECT successor_physical_stop_id
+        FROM physical_stop_identity_edges WHERE predecessor_physical_stop_id=?
+        ORDER BY successor_physical_stop_id""", (stop_id,))]
+    return {
+        "stop_id": stop_id,
+        "identity_status": "retired",
+        "retired_at": state[0][1],
+        "message": "This historical physical stop was split into current boarding locations.",
+        "successor_stop_ids": successors,
+        "successors": [{"stop_id": value, "url": f"/stop/{value}"}
+                       for value in successors],
+    }
+
+
 
 
 
@@ -1213,6 +1237,10 @@ def stop_page(stop_id):
 
 @app.route("/stops/<int:stop_id>")
 def stop_detail(stop_id):
+
+    retired = retired_stop_payload(stop_id)
+    if retired:
+        return retired, 410
 
     stop = query_db(
 """

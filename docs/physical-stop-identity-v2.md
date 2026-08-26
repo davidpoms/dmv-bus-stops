@@ -142,6 +142,100 @@ rebuild orchestrator covering the identity apply plus every row above. It is
 deliberately outside this foundation commit; maintainers must not assemble a
 production cutover ad hoc from the individual calls.
 
+## Cutover orchestrator
+
+The supported entry point requires an explicit database:
+
+```bash
+python scripts/active/migrate_physical_stops_v2.py --db <fresh-copy.db> --plan
+python scripts/active/migrate_physical_stops_v2.py --db <fresh-copy.db> --apply \
+  --report <cutover-report.json>
+```
+
+The command refuses the repository production database unless the unmistakable
+`--allow-production-database` override is supplied. That override is reserved for a
+separately reviewed production operation. Before first mutation it regenerates and
+gates proposal version `physical-stop-v2-proposal-1`, 384 predecessors, 791
+children, the five manual exceptions, and canonical SHA
+`A21D2223DBC08C6D6327C7072404B8B9912C17898AA91282511F2A4B8B724D23`.
+
+Apply retains retired predecessors, allocates successors above the existing maximum,
+moves every member exactly once, and records split events, edges, and member lineage.
+It then resets the explicitly allowlisted pre-volunteer test accounts/contributions,
+recomputes child geography, persists fail-closed evidence attribution, and rebuilds
+current products. Raw and unresolved evidence remain intact. This destructive human-
+data reset is justified only before volunteer testing and is not a future strategy.
+
+Compatibility decisions are: rebuild `stop_priority_snapshots`,
+`recommendation_confidence`, `project_priorities`, `stop_transit_evidence`, and the
+four geography summary tables; retain source/audit/backup tables; leave empty legacy
+`stop_locations` tables retired; and generate file reports only on demand after
+cutover. Integrity, FK, lifecycle, current-member ownership, and retired-derived-row
+checks are mandatory.
+
+A second `--apply` verifies identity lineage as a no-op and reruns only idempotent
+derived rebuilds. Partial event state aborts. Rollback means restoring the byte-
+verified pre-cutover copy, never reversing lineage with ad hoc SQL.
+
+Retired `/stops/<id>` requests return HTTP 410 with lineage and successor links;
+`/stop/<id>` renders the same explanation. A predecessor is never silently aliased.
+
+## Reviewed production cutover runbook
+
+This procedure requires separate production authorization. Do not infer approval
+from a merged commit or a successful rehearsal.
+
+1. Verify the deployed Git revision contains the reviewed cutover commit and record
+   `git rev-parse HEAD`.
+2. Resolve and record the absolute production database path. Confirm it is the
+   intended file, not a worktree database or rehearsal copy.
+3. Record its size, modification time, and SHA-256. The reviewed pre-cutover SHA is
+   `73EE4D4DA7B65A3E3EE7AA67F8C7D86EC8AC731B8269BC1E4342CCD4892ACEC3`;
+   stop if the authorized run expects that hash and it differs.
+4. Create an independent rollback copy outside the application path. Hash both files
+   and require byte-identical SHA-256 values before proceeding.
+5. Run preflight against the absolute production path using the explicit production-
+   only override:
+
+   ```bash
+   python scripts/active/migrate_physical_stops_v2.py \
+     --db <absolute-production.db> --plan --allow-production-database \
+     --report <production-plan.json>
+   ```
+
+6. Independently confirm proposal version `physical-stop-v2-proposal-1`, 384
+   parents, 791 children, manual exceptions 406/2231/4468/5196/6080, and canonical
+   SHA `A21D2223DBC08C6D6327C7072404B8B9912C17898AA91282511F2A4B8B724D23`.
+7. During the authorized window, run the single apply/rebuild command against the
+   same absolute path:
+
+   ```bash
+   python scripts/active/migrate_physical_stops_v2.py \
+     --db <absolute-production.db> --apply --allow-production-database \
+     --report <production-apply.json>
+   ```
+
+8. Review the report: identity counts, contribution reset, geography, evidence
+   quarantine, every derived rebuild, heading audit, retired-row checks,
+   `integrity_check=ok`, and zero foreign-key violations.
+9. Start the application with that same explicit `DMV_BUS_STOPS_DB`; smoke-test the
+   dashboard, retired stop 935, both successors, opportunity/direct/route/map review,
+   reviewer profile and anonymous review, stop API, and jurisdiction summaries.
+10. Record the final production database SHA, size, modification time, report paths,
+    Git revision, operator, reviewer, and completion time.
+
+If apply or validation fails, stop application writes, preserve the failed database
+and reports for diagnosis, replace the production file with the independently
+verified rollback copy using the deployment's atomic replacement procedure, verify
+the restored SHA, restart the application, and repeat pre-cutover smoke checks. Do
+not reverse lineage or repair a partial cutover with ad hoc SQL.
+
+After cutover, `build_physical_stops.py` remains bootstrap-only and is never a
+routine rebuild tool. Future source refreshes reconcile against persistent physical
+identities. Real reviewer/community history must never use the destructive test
+reset. Future splits and merges require explicit reconciliation, reviewed lineage,
+and append-only lifecycle records.
+
 ## Current feed limitation
 
 WMATA snapshot `S1000250` (2026-06-21 through 2026-09-12) supplies stop ID, code,

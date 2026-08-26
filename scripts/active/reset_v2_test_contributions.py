@@ -1,4 +1,8 @@
-"""Explicitly erase disposable pre-pilot contribution data for a V2 cutover."""
+"""ONE-TIME PRE-VOLUNTEER reset of disposable test contributions for V2 cutover.
+
+This is not a routine migration or reconciliation strategy. After real volunteer
+work begins, reviewer accounts and contribution history are durable.
+"""
 
 from __future__ import annotations
 
@@ -20,7 +24,8 @@ CONFIRMATION = "RESET DISPOSABLE V2 TEST CONTRIBUTIONS"
 
 # Child-to-parent order. This list is deliberately narrow and audited.
 TABLES = (
-    "reviewer_login_tokens", "reviewer_auth_attempts", "stop_observations",
+    "reviewer_login_tokens", "reviewer_auth_attempts", "community_reviewer_routes",
+    "stop_observations",
     "stop_review_assignments", "stop_consensus", "community_stewardships",
     "review_feedback", "community_requests", "community_reviewers",
 )
@@ -48,7 +53,7 @@ def reset_test_contributions(conn, *, confirmation, allow_default=False,
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Destructively reset disposable pre-pilot contribution data only."
+        description="ONE-TIME PRE-VOLUNTEER destructive reset of test contributions only."
     )
     parser.add_argument("--db", type=Path, default=DEFAULT_DATABASE)
     parser.add_argument("--confirm", required=True)
