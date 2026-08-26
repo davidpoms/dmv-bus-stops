@@ -154,7 +154,11 @@ python scripts/active/migrate_physical_stops_v2.py --db <fresh-copy.db> --apply 
 
 The command refuses the repository production database unless the unmistakable
 `--allow-production-database` override is supplied. That override is reserved for a
-separately reviewed production operation. Before first mutation it regenerates and
+separately reviewed production operation. The orchestrator makes this target-safety
+decision once and explicitly propagates the authorization to its nested disposable-
+contribution reset. The reset command retains its independent
+`--allow-default-database` guard when invoked directly; path existence, an environment
+variable, or a nested call alone never implies authorization. Before first mutation it regenerates and
 gates proposal version `physical-stop-v2-proposal-1`, 384 predecessors, 791
 children, the five manual exceptions, and canonical SHA
 `A21D2223DBC08C6D6327C7072404B8B9912C17898AA91282511F2A4B8B724D23`.
@@ -176,6 +180,41 @@ checks are mandatory.
 A second `--apply` verifies identity lineage as a no-op and reruns only idempotent
 derived rebuilds. Partial event state aborts. Rollback means restoring the byte-
 verified pre-cutover copy, never reversing lineage with ad hoc SQL.
+
+The JSON report is an atomic, durable phase checkpoint, not merely an end-of-run
+summary. It records the target, starting SHA, proposal identity/counts, current and
+failed phases, safe error details, and these states: proposal validation, schema
+initialization, identity application, test-contribution reset, geography, evidence,
+derived rebuild, invariant validation, and smoke readiness. A `.tmp` report is
+flushed and replaced atomically at each boundary. `status=complete` appears only
+after all invariants pass; after failure, inspect `failed_phase`, the completed phase
+states, `sha256_at_failure`, and `recovery` before touching the database.
+The database also stores a narrow `physical_stop_v2_cutover_state` marker. Identity
+lineage without a `complete` orchestration marker is treated as an incomplete
+cutover and refused on retry; this prevents an identity-only database from being
+mistaken for a successfully rebuilt one. The marker contains no secrets or user data.
+
+Transaction and recovery boundaries are intentionally explicit:
+
+| Boundary | Commit behavior |
+|---|---|
+| Proposal validation | read-only; no transaction mutation |
+| Review schema initialization | supported idempotent migration; commits independently |
+| Physical identity mutation | one atomic SQLite transaction, followed by identity validation |
+| Disposable test-contribution reset | narrow independent transaction after propagated authorization |
+| Geography recomputation | independently committed producer transaction |
+| Evidence attribution | independently committed producer transaction; raw evidence is retained |
+| Derived rebuilds | supported producers commit independently; not wrapped in one unsafe global transaction |
+| Final invariants | read-only integrity, FK, lineage, active, and retired-derived validation |
+
+Because committed phases can precede a later failure, the supported pre-volunteer
+policy is conservative: after any failure before `status=complete`, preserve the
+failed database/report for diagnosis, restore the independently hashed pre-cutover
+copy, fix the cause, and restart from that clean baseline. Do not resume a partial
+cutover in place. Automatic file rollback is intentionally absent because replacing
+SQLite files while connections may be open is unsafe. Once real volunteer history
+exists, reconciliation must preserve that history through persistent lineage and
+must never use this baseline reset.
 
 Retired `/stops/<id>` requests return HTTP 410 with lineage and successor links;
 `/stop/<id>` renders the same explanation. A predecessor is never silently aliased.
@@ -224,11 +263,14 @@ from a merged commit or a successful rehearsal.
 10. Record the final production database SHA, size, modification time, report paths,
     Git revision, operator, reviewer, and completion time.
 
-If apply or validation fails, stop application writes, preserve the failed database
-and reports for diagnosis, replace the production file with the independently
-verified rollback copy using the deployment's atomic replacement procedure, verify
-the restored SHA, restart the application, and repeat pre-cutover smoke checks. Do
-not reverse lineage or repair a partial cutover with ad hoc SQL.
+If apply or validation fails, consult the checkpoint report and stop all application
+access to the database. Preserve the failed database and reports for diagnosis, then
+replace the production file with the independently verified rollback copy using the
+deployment's atomic replacement procedure. Verify the restored SHA, run
+`PRAGMA integrity_check` and `PRAGMA foreign_key_check`, and require `ok` and zero
+violations. Fix and review the responsible code before restarting from that clean
+baseline. Restart the application only after those checks, then repeat pre-cutover
+smoke checks. Do not reverse lineage or repair a partial cutover with ad hoc SQL.
 
 After cutover, `build_physical_stops.py` remains bootstrap-only and is never a
 routine rebuild tool. Future source refreshes reconcile against persistent physical

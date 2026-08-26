@@ -29,6 +29,15 @@ byte-verified rollback copy, and obtain separate production approval before usin
 its production-only override. Proposal gates, integrity checks, and the second-run
 identity no-op check are mandatory.
 
+Production authorization is decided at the V2 orchestration boundary and explicitly
+propagated only to the nested pre-volunteer contribution reset. Direct reset execution
+still requires its own default-database override. The atomic checkpoint report is the
+source of truth after a failure. During this pre-volunteer migration window, any
+failure before `status=complete` requires restoring the independently hashed rollback
+copy before retrying, rather than resuming the partially committed database. Stop
+application access first; after restoration, verify the SHA, SQLite integrity, and
+foreign keys, fix and review the cause, and restart only from the clean baseline.
+
 Some older producers still accept their database as a positional argument or
 Python parameter instead of reading `DMV_BUS_STOPS_DB`. Check each entry point;
 do not assume the override is universal outside the application, assignment

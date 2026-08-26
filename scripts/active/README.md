@@ -25,7 +25,7 @@ before an approved mutation.
 | `import_prince_georges_raw_evidence.py` | raw PG provenance import | preflight by default; `--apply` mutates explicit DB |
 | `import_prince_georges_thebus_amenities.py` | TheBus amenity import | preflight by default; `--apply` mutates explicit DB |
 | `migrate_amenity_evidence_identity.py` | amenity evidence identity migration | mutates explicit/selected DB after collision audit |
-| `migrate_physical_stops_v2.py --db <copy> --plan/--apply` | complete V2 identity cutover and derived rebuild | explicit DB required; repository production DB refused without production-only override |
+| `migrate_physical_stops_v2.py --db <copy> --plan/--apply --report <json>` | complete V2 identity cutover and derived rebuild | explicit DB required; repository production DB refused without production-only override; report is an atomic phase checkpoint |
 | `rebuild_amenity_review_priority.py` | canonical amenity status/priority rebuild | mutates explicit/selected DB |
 | `rebuild_stop_amenity_status.py` | canonical shelter/bench synthesis rebuild | mutates explicit/selected DB |
 | `rebuild_stop_routes_clean.py` | specialized route repair | destructive selected-DB rebuild with backup; not routine |

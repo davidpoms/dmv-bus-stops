@@ -9,6 +9,7 @@ import os
 import runpy
 import sqlite3
 import sys
+from contextlib import closing
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -34,16 +35,26 @@ from src.processing.physical_stop_geography import (
     preflight_manifest_geography, recompute_geography,
 )
 from src.processing.physical_stop_v2_cutover import (
-    CUTOVER_VERSION, apply_reviewed_proposal, cutover_state, validate_cutover,
-    validate_proposal_gate,
+    CUTOVER_VERSION, EXPECTED_SHA256, apply_reviewed_proposal, cutover_state,
+    validate_cutover, validate_proposal_gate,
 )
-from src.processing.physical_stop_v2_proposal import generate_manifest
+from src.processing.physical_stop_identity_v2 import MANUAL_EXCEPTIONS
+from src.processing.physical_stop_v2_proposal import (
+    EXPECTED_CHILD_COUNT, EXPECTED_PARENT_COUNT, PROPOSAL_VERSION,
+    generate_manifest, manifest_sha256,
+)
 from src.review.create_review_queue import create_review_queue
 from src.scoring.calculate_stop_priority import calculate_scores
 from src.processing.serving_directions import load_member_directions
 
 
 DEFAULT_PRODUCTION_DB = (ROOT / "src" / "database" / "dmv_bus_stops.db").resolve()
+PHASES = (
+    "proposal_validated", "schema_initialized", "identities_applied",
+    "test_contributions_reset", "geography_rebuilt", "evidence_attributed",
+    "derived_rebuild_completed", "invariants_validated", "smoke_ready",
+)
+CHECKPOINT_TABLE = "physical_stop_v2_cutover_state"
 
 
 def sha256(path):
@@ -61,6 +72,74 @@ def require_safe_target(path, *, allow_production=False):
     if not target.is_file():
         raise FileNotFoundError(target)
     return target
+
+
+def write_report_atomic(path, report):
+    """Durably replace a checkpoint report without exposing partial JSON."""
+    if path is None:
+        return
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(destination.name + ".tmp")
+    payload = json.dumps(report, indent=2, sort_keys=True) + "\n"
+    with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(payload)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, destination)
+
+
+def checkpoint(report, report_path, phase, status="complete"):
+    report["phases"][phase] = status
+    report["current_phase"] = phase
+    write_report_atomic(report_path, report)
+
+
+def proposal_metadata(manifest):
+    return {
+        "proposal_version": manifest["proposal_version"],
+        "proposal_sha256": manifest_sha256(manifest),
+        "parent_count": manifest["automatic_parent_count"],
+        "child_count": manifest["child_group_count"],
+        "manual_exceptions": manifest["manual_exceptions"],
+    }
+
+
+def initialize_persistent_checkpoint(conn, starting_sha):
+    """Create the durable first-cutover marker before identity mutation."""
+    with conn:
+        conn.execute(f"""CREATE TABLE IF NOT EXISTS {CHECKPOINT_TABLE}(
+            migration_version TEXT PRIMARY KEY,
+            cutover_status TEXT NOT NULL CHECK(cutover_status IN ('running','failed','complete')),
+            current_phase TEXT NOT NULL,
+            starting_sha256 TEXT NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )""")
+        conn.execute(f"""INSERT INTO {CHECKPOINT_TABLE}
+            (migration_version,cutover_status,current_phase,starting_sha256)
+            VALUES (?, 'running', 'schema_initialized', ?)
+            ON CONFLICT(migration_version) DO UPDATE SET
+              cutover_status='running',current_phase='schema_initialized',
+              starting_sha256=excluded.starting_sha256,updated_at=CURRENT_TIMESTAMP""",
+            (CUTOVER_VERSION, starting_sha))
+
+
+def persistent_checkpoint(conn):
+    exists = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                          (CHECKPOINT_TABLE,)).fetchone()
+    if not exists:
+        return None
+    row = conn.execute(f"""SELECT cutover_status,current_phase,starting_sha256
+        FROM {CHECKPOINT_TABLE} WHERE migration_version=?""", (CUTOVER_VERSION,)).fetchone()
+    return None if row is None else {
+        "status": row[0], "current_phase": row[1], "starting_sha256": row[2]}
+
+
+def update_persistent_checkpoint(conn, status, phase):
+    with conn:
+        conn.execute(f"""UPDATE {CHECKPOINT_TABLE} SET cutover_status=?,current_phase=?,
+            updated_at=CURRENT_TIMESTAMP WHERE migration_version=?""",
+            (status, phase, CUTOVER_VERSION))
 
 
 def migrate_review_schema(path):
@@ -180,7 +259,7 @@ def rebuild_compatibility_outputs(conn):
 
 
 def rebuild_products(path):
-    with sqlite3.connect(path) as conn:
+    with closing(sqlite3.connect(path)) as conn, conn:
         rebuild_gtfs_status(conn)
         rebuild_compatibility_outputs(conn)
         rebuild_stop_amenity_status(conn)
@@ -230,58 +309,174 @@ def validate_database(conn):
             "active_retired": active_retired, "retired_derived_rows": retired_derived}
 
 
-def run(path, *, apply=False, reset_contributions=True, allow_production=False):
+def run(path, *, apply=False, reset_contributions=True, allow_production=False,
+        report_path=None, failure_after_phase=None):
     target = require_safe_target(path, allow_production=allow_production)
-    report = {"database": str(target), "sha256_before": sha256(target), "mode": "apply" if apply else "plan"}
-    with sqlite3.connect(target) as conn:
-        state = cutover_state(conn)
-        report["cutover_state_before"] = state
-        if state == "pristine":
-            manifest = generate_manifest(conn, validate=True)
-            report["proposal_gate"] = validate_proposal_gate(manifest)
-            report["evidence_preflight"] = preflight_manifest_attribution(conn, manifest)
-            geography = preflight_manifest_geography(conn, manifest)
-            report["geography_preflight"] = {
-                "coverage": geography["coverage"],
-                "parent_child_differences": len(geography["parent_child_differences"]),
-                "sibling_crossing_parents": len(geography["child_geography_crossings"]),
-            }
-        elif state == "applied":
-            manifest = None
-            report["proposal_gate"] = "already applied; verified by lineage"
-        else:
-            raise RuntimeError("partial cutover state; refusing to continue")
-        report["counts_before"] = table_counts(conn)
-        report["heading_audit_before"] = heading_audit(conn)
-        if not apply:
-            return report
-        migrate_review_schema(target)
-        if manifest is not None:
-            result = apply_reviewed_proposal(conn, manifest, confirm=True)
-            report["identity_apply"] = {**result,
-                "successor_id_range": [min(result["successor_ids"]), max(result["successor_ids"])]}
-            current_ids = result["successor_ids"]
-            report["contribution_reset_before"] = {
-                table: report["counts_before"].get(table, 0) for table in TABLES}
-            if reset_contributions:
-                report["contribution_reset_deleted"] = reset_test_contributions(
-                    conn, confirmation=CONFIRMATION, database_path=target)
-            report["geography_recomputed"] = recompute_geography(conn, current_ids)
-            report["evidence_attribution"] = apply_manifest_attribution(conn, manifest)
-        else:
-            report["identity_apply"] = apply_reviewed_proposal(conn, confirm=True)
-        validate_cutover(conn)
-    rebuild_products(target)
-    with sqlite3.connect(target) as conn:
-        report["identity_validation"] = validate_cutover(conn)
-        report["database_validation"] = validate_database(conn)
-        report["counts_after"] = table_counts(conn)
-        report["active_stops"] = conn.execute(
-            "SELECT COUNT(*) FROM stop_gtfs_status WHERE current_gtfs=1").fetchone()[0]
-        report["heading_audit_after"] = heading_audit(conn)
-        report["acceptance"] = acceptance_results(conn)
-    report["sha256_after"] = sha256(target)
-    return report
+    report = {
+        "database": str(target), "sha256_before": sha256(target),
+        "mode": "apply" if apply else "plan", "status": "running",
+        "current_phase": "proposal_validated", "failed_phase": None,
+        "error": None, "phases": {phase: "pending" for phase in PHASES},
+        "proposal_version": PROPOSAL_VERSION,
+        "proposal_sha256": EXPECTED_SHA256,
+        "parent_count": EXPECTED_PARENT_COUNT,
+        "child_count": EXPECTED_CHILD_COUNT,
+        "manual_exceptions": sorted(MANUAL_EXCEPTIONS),
+    }
+    first_cutover = False
+    persistent_started = False
+    write_report_atomic(report_path, report)
+
+    def fail_after(phase, next_phase):
+        if failure_after_phase == phase:
+            report["current_phase"] = next_phase
+            raise RuntimeError(f"injected failure after {phase}")
+
+    try:
+        with closing(sqlite3.connect(target)) as conn, conn:
+            state = cutover_state(conn)
+            report["cutover_state_before"] = state
+            prior_checkpoint = persistent_checkpoint(conn)
+            report["persistent_checkpoint_before"] = prior_checkpoint
+            if prior_checkpoint and prior_checkpoint["status"] != "complete":
+                raise RuntimeError(
+                    "incomplete V2 orchestration checkpoint detected; rollback to the "
+                    "verified pre-cutover database before retrying")
+            if state == "applied" and (
+                    prior_checkpoint is None or prior_checkpoint["status"] != "complete"):
+                raise RuntimeError(
+                    "identity migration exists without a COMPLETE orchestration checkpoint; "
+                    "rollback to the verified pre-cutover database before retrying")
+            if state == "pristine":
+                first_cutover = True
+                manifest = generate_manifest(conn, validate=True)
+                report.update(proposal_metadata(manifest))
+                report["proposal_gate"] = validate_proposal_gate(manifest)
+                report["evidence_preflight"] = preflight_manifest_attribution(conn, manifest)
+                geography = preflight_manifest_geography(conn, manifest)
+                report["geography_preflight"] = {
+                    "coverage": geography["coverage"],
+                    "parent_child_differences": len(geography["parent_child_differences"]),
+                    "sibling_crossing_parents": len(geography["child_geography_crossings"]),
+                }
+            elif state == "applied":
+                manifest = None
+                report.update({
+                    "proposal_version": PROPOSAL_VERSION,
+                    "proposal_sha256": EXPECTED_SHA256,
+                    "parent_count": EXPECTED_PARENT_COUNT,
+                    "child_count": EXPECTED_CHILD_COUNT,
+                    "manual_exceptions": sorted(MANUAL_EXCEPTIONS),
+                })
+                report["proposal_gate"] = "already applied; verified by lineage"
+            else:
+                raise RuntimeError("partial cutover state; rollback to the verified pre-cutover database before retrying")
+            checkpoint(report, report_path, "proposal_validated")
+            report["counts_before"] = table_counts(conn)
+            report["heading_audit_before"] = heading_audit(conn)
+            if not apply:
+                report["status"] = "plan_complete"
+                write_report_atomic(report_path, report)
+                return report
+
+            report["current_phase"] = "schema_initialized"
+            write_report_atomic(report_path, report)
+            migrate_review_schema(target)
+            if first_cutover:
+                initialize_persistent_checkpoint(conn, report["sha256_before"])
+                persistent_started = True
+            checkpoint(report, report_path, "schema_initialized")
+
+            report["current_phase"] = "identities_applied"
+            write_report_atomic(report_path, report)
+            if manifest is not None:
+                result = apply_reviewed_proposal(conn, manifest, confirm=True)
+                report["identity_apply"] = {**result,
+                    "successor_id_range": [min(result["successor_ids"]), max(result["successor_ids"])]}
+                current_ids = result["successor_ids"]
+            else:
+                report["identity_apply"] = apply_reviewed_proposal(conn, confirm=True)
+                current_ids = []
+            checkpoint(report, report_path, "identities_applied",
+                       "already_complete" if manifest is None else "complete")
+            if first_cutover:
+                update_persistent_checkpoint(conn, "running", "identities_applied")
+            fail_after("identities_applied", "test_contributions_reset")
+
+            if manifest is not None:
+                report["current_phase"] = "test_contributions_reset"
+                report["contribution_reset_before"] = {
+                    table: report["counts_before"].get(table, 0) for table in TABLES}
+                write_report_atomic(report_path, report)
+                if reset_contributions:
+                    report["contribution_reset_deleted"] = reset_test_contributions(
+                        conn, confirmation=CONFIRMATION, database_path=target,
+                        allow_default=allow_production)
+                    checkpoint(report, report_path, "test_contributions_reset")
+                    update_persistent_checkpoint(conn, "running", "test_contributions_reset")
+                else:
+                    checkpoint(report, report_path, "test_contributions_reset", "skipped")
+                fail_after("test_contributions_reset", "geography_rebuilt")
+
+                report["current_phase"] = "geography_rebuilt"
+                write_report_atomic(report_path, report)
+                report["geography_recomputed"] = recompute_geography(conn, current_ids)
+                checkpoint(report, report_path, "geography_rebuilt")
+                update_persistent_checkpoint(conn, "running", "geography_rebuilt")
+
+                report["current_phase"] = "evidence_attributed"
+                write_report_atomic(report_path, report)
+                report["evidence_attribution"] = apply_manifest_attribution(conn, manifest)
+                checkpoint(report, report_path, "evidence_attributed")
+                update_persistent_checkpoint(conn, "running", "evidence_attributed")
+            else:
+                for phase in ("test_contributions_reset", "geography_rebuilt", "evidence_attributed"):
+                    checkpoint(report, report_path, phase, "not_required")
+            validate_cutover(conn)
+
+        report["current_phase"] = "derived_rebuild_completed"
+        write_report_atomic(report_path, report)
+        rebuild_products(target)
+        checkpoint(report, report_path, "derived_rebuild_completed")
+        if first_cutover:
+            with closing(sqlite3.connect(target)) as conn:
+                update_persistent_checkpoint(conn, "running", "derived_rebuild_completed")
+        fail_after("derived_rebuild_completed", "invariants_validated")
+
+        report["current_phase"] = "invariants_validated"
+        write_report_atomic(report_path, report)
+        with closing(sqlite3.connect(target)) as conn, conn:
+            report["identity_validation"] = validate_cutover(conn)
+            report["database_validation"] = validate_database(conn)
+            report["counts_after"] = table_counts(conn)
+            report["active_stops"] = conn.execute(
+                "SELECT COUNT(*) FROM stop_gtfs_status WHERE current_gtfs=1").fetchone()[0]
+            report["heading_audit_after"] = heading_audit(conn)
+            report["acceptance"] = acceptance_results(conn)
+        checkpoint(report, report_path, "invariants_validated")
+        checkpoint(report, report_path, "smoke_ready")
+        if first_cutover:
+            with closing(sqlite3.connect(target)) as conn:
+                update_persistent_checkpoint(conn, "complete", "smoke_ready")
+        report["sha256_after"] = sha256(target)
+        report["status"] = "complete"
+        report["current_phase"] = "complete"
+        write_report_atomic(report_path, report)
+        return report
+    except Exception as error:
+        report["status"] = "failed"
+        report["failed_phase"] = report["current_phase"]
+        report["error"] = {"type": type(error).__name__, "message": str(error)}
+        report["sha256_at_failure"] = sha256(target)
+        report["recovery"] = (
+            "Restore the independently hashed pre-cutover database before retrying; "
+            "do not resume this incomplete pre-volunteer cutover in place."
+        )
+        if persistent_started:
+            with closing(sqlite3.connect(target)) as conn:
+                update_persistent_checkpoint(conn, "failed", report["failed_phase"])
+        write_report_atomic(report_path, report)
+        raise
 
 
 def main(argv=None):
@@ -297,10 +492,9 @@ def main(argv=None):
     args = parser.parse_args(argv)
     report = run(args.db, apply=args.apply,
                  reset_contributions=not args.skip_test_contribution_reset,
-                 allow_production=args.allow_production_database)
+                 allow_production=args.allow_production_database,
+                 report_path=args.report)
     output = json.dumps(report, indent=2, sort_keys=True)
-    if args.report:
-        args.report.write_text(output + "\n", encoding="utf-8")
     print(output)
     return 0
 
