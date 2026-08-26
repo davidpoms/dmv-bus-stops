@@ -54,6 +54,30 @@ CREATE TABLE IF NOT EXISTS stop_routes (
         REFERENCES routes(id)
 );
 
+CREATE TABLE IF NOT EXISTS gtfs_feed_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    feed_id TEXT NOT NULL, snapshot_sha256 TEXT NOT NULL,
+    source_file TEXT NOT NULL, source_url TEXT,
+    feed_publisher_name TEXT, feed_publisher_url TEXT, feed_lang TEXT,
+    feed_start_date TEXT, feed_end_date TEXT, feed_version TEXT,
+    imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(feed_id, snapshot_sha256)
+);
+
+CREATE TABLE IF NOT EXISTS gtfs_stop_structure (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_id INTEGER NOT NULL, gtfs_stop_id TEXT NOT NULL,
+    stop_code TEXT, stop_name TEXT, stop_lat TEXT, stop_lon TEXT,
+    location_type TEXT, parent_station TEXT, platform_code TEXT,
+    zone_id TEXT, wheelchair_boarding TEXT,
+    quality_flags TEXT NOT NULL DEFAULT '[]', raw_row_json TEXT NOT NULL,
+    FOREIGN KEY(snapshot_id) REFERENCES gtfs_feed_snapshots(id),
+    UNIQUE(snapshot_id, gtfs_stop_id)
+);
+CREATE INDEX IF NOT EXISTS idx_gtfs_stop_structure_feed_stop ON gtfs_stop_structure(snapshot_id,gtfs_stop_id);
+CREATE INDEX IF NOT EXISTS idx_gtfs_stop_structure_parent ON gtfs_stop_structure(snapshot_id,parent_station);
+CREATE INDEX IF NOT EXISTS idx_gtfs_stop_structure_stop_code ON gtfs_stop_structure(snapshot_id,stop_code);
+
 
 -- =====================================================
 -- HUMAN VERIFIED STOP CONDITIONS

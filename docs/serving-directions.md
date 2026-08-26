@@ -40,6 +40,10 @@ and explicit treatment of observations, assignments, consensus, and stewardship
 history that cannot safely be attributed to a resulting child stop. No history
 may be reassigned from geometry alone.
 
+Versioned `gtfs_stop_structure` metadata supports that future audit without
+changing current physical identities. `parent_station` establishes facility
+membership, not equivalence of its bays or platforms.
+
 `src.processing.heading_audit` is a supported diagnostic module for that work.
 It provides circular angular separation and connected-component chaining helpers;
 its contradiction threshold is an audit classification, never a display filter.

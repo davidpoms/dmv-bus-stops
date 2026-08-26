@@ -50,6 +50,7 @@ class ServingDirectionTests(unittest.TestCase):
                 ('I1',301,'wmata_stop_code'),
                 ('I2',302,'wmata_stop_code'),
                 ('BAD',401,'wmata_stop_code');
+            INSERT INTO gtfs_stop_map VALUES ('FALLBACK',101,'coordinate');
 
             -- The physical_stop_id on evidence is deliberately unreliable.
             INSERT INTO stop_wmata_evidence VALUES
@@ -61,6 +62,8 @@ class ServingDirectionTests(unittest.TestCase):
                 (6,3,'I1','DUP','45',1,'high','2026-01-01'),
                 (7,3,'I2','MOA','45',1,'high','2026-01-01'),
                 (8,4,'BAD','PRS','not-a-heading',1,'high','2026-01-01');
+            INSERT INTO stop_wmata_evidence VALUES
+                (9,1,'FALLBACK','ABS','299',1,'high','2026-01-01');
             """
         )
         conn.commit()
@@ -77,6 +80,7 @@ class ServingDirectionTests(unittest.TestCase):
         self.assertEqual(["119", "297"], [d["heading_degrees"] for d in directions])
         self.assertEqual(["W1", "W2"], [d["wmata_stop_id"] for d in directions])
         self.assertNotIn("UNRELATED", {d["wmata_stop_id"] for d in directions})
+        self.assertNotIn("FALLBACK", {d["wmata_stop_id"] for d in directions})
 
     def test_status_and_spatial_distance_do_not_control_identity(self):
         directions = public_api.get_serving_directions(1)

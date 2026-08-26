@@ -300,6 +300,14 @@ def get_serving_directions(stop_id):
         JOIN latest l ON CAST(l.wmata_stop_id AS TEXT)=CAST(g.gtfs_stop_id AS TEXT)
                      AND l.sequence=1
         WHERE pm.physical_stop_id=?
+          AND (
+              g.match_method!='coordinate'
+              OR NOT EXISTS (
+                  SELECT 1 FROM gtfs_stop_map exact
+                  WHERE exact.bus_stop_id=g.bus_stop_id
+                    AND exact.match_method='wmata_stop_code'
+              )
+          )
         ORDER BY CAST(l.wmata_heading AS REAL),l.wmata_heading,l.wmata_stop_id
         """,
         (stop_id,),

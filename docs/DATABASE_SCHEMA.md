@@ -35,6 +35,14 @@ Agency/GTFS stop records, route identities, and their many-to-many relationship.
 Canonical physical locations and the source stop records clustered into each
 location. `physical_stop_id` is the public and analytical stop identity.
 
+### `gtfs_feed_snapshots`, `gtfs_stop_structure`
+
+Immutable source-level GTFS metadata is keyed by feed ID plus ZIP SHA-256; stop IDs
+are unique only within a snapshot. Source values including `parent_station`,
+`platform_code`, `location_type`, `stop_code`, `zone_id`, and
+`wheelchair_boarding` are retained faithfully. Quality flags expose unresolved
+parents or malformed coordinates. This metadata does not change physical IDs.
+
 ### `stop_gtfs_status`
 
 Current service scope. The only active-stop predicate is:

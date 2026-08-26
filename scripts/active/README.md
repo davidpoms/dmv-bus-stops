@@ -8,6 +8,7 @@ before an approved mutation.
 | Command | Purpose | Effect / safe use |
 |---|---|---|
 | `build_gtfs_stop_map.py` | rebuild GTFS-to-stop mappings | mutates selected DB; reviewed source refresh only |
+| `import_gtfs_stop_structure.py <feed.zip> --feed-id <id>` | preserve immutable GTFS stop/facility metadata | metadata-only import; idempotent by feed ID and ZIP SHA-256 |
 | `build_gtfs_stop_status.py` | rebuild canonical active-stop status | mutates selected DB and creates a local backup |
 | `create_review_tables.py` | idempotent review/auth schema migration | mutates selected DB; deployment migration |
 | `download_census_boundaries.py` | refresh Census geography files | network/file write; review generated diffs |
@@ -30,3 +31,7 @@ before an approved mutation.
 
 Read-only checks belong in `scripts/diagnostics`. Historical implementations belong
 in Git history or the curated `scripts/archive/migrations` reference set.
+
+The stop-structure importer requires an explicit local ZIP and never downloads or
+rebuilds current pipelines. Obtain the WMATA Bus GTFS ZIP through the configured
+WMATA source, keep it outside Git, and use the stable feed ID `wmata-bus`.

@@ -34,6 +34,15 @@ router, and active review-table migration.
 place identity, with `physical_stop_members` connecting source records to it.
 Public review, amenity, and opportunity logic uses `physical_stop_id`.
 
+Versioned facility context is preserved separately in `gtfs_feed_snapshots` and
+`gtfs_stop_structure`. Import an explicit ZIP against a database copy with
+`python scripts/active/import_gtfs_stop_structure.py <feed.zip> --feed-id
+wmata-bus --db <copy>`. A shared `parent_station` means shared facility, not the
+same boarding point; platform identity, snapshot, coordinates, and provenance
+must be evaluated together before a future physical-stop migration.
+The frozen diagnostic disposition and exact-versus-fallback precedence are in
+`docs/physical-stop-identity-v2.md`.
+
 An active stop means exactly:
 
 ```sql
