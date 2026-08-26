@@ -19,6 +19,10 @@ Supporting references:
   guides.
 - `ROADMAP.md` is intentionally empty; do not infer planned functionality from
   it. Future work should be documented only after scope is approved.
+- [Local development](LOCAL_DEVELOPMENT.md) provides the repeatable `.env` setup
+  and local-only startup/test commands.
+- [Small-pilot readiness audit](PILOT_READINESS.md) records deployment blockers,
+  repository housekeeping decisions, and the supervised-pilot checklist.
 
 The executable schema is `src/database/schema.sql`. Existing SQLite databases
 also depend on active idempotent migrations, so schema prose is not a substitute

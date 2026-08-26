@@ -29,6 +29,9 @@ class AmenityReviewPriorityTests(unittest.TestCase):
           consensus_conflicts_with_other_evidence INTEGER);
         """)
 
+    def tearDown(self):
+        self.db.close()
+
     def add_pair(self, stop, shelter, bench, observations=0, consensus="not_reached"):
         self.db.executemany("INSERT INTO stop_amenity_status VALUES (?,?,?,?,?,?,?,?,?)", [
             (stop,"shelter",shelter,consensus,int(shelter=="conflicting"),observations,observations,0,0),

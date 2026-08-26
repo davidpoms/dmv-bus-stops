@@ -2,6 +2,13 @@ import json
 import os
 import sqlite3
 import secrets
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+
+BASE_DIR = Path(__file__).resolve().parents[2]
+load_dotenv(BASE_DIR / ".env")
 
 """
 DMV Bus Stops Improvement API
@@ -11,7 +18,6 @@ from flask import Flask, jsonify, send_from_directory, request, render_template,
 import calendar
 import math
 from datetime import datetime, timedelta
-from pathlib import Path
 
 
 from src.review.assignment_router import (
@@ -66,8 +72,6 @@ def require_deployment_secret():
             "error": "FLASK_SECRET_KEY must be configured before serving requests",
             "code": "server_configuration_required",
         }, 503
-
-BASE_DIR = Path(__file__).resolve().parents[2]
 
 DATABASE_PATH = Path(
     os.environ.get(

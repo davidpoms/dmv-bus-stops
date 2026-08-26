@@ -53,6 +53,9 @@ class AmenityStatusSynthesisTests(unittest.TestCase):
             """
         )
 
+    def tearDown(self):
+        self.db.close()
+
     def add_stop(self, stop_id, current=1, external=None, geography=None):
         self.db.execute("INSERT INTO physical_stops VALUES (?)", (stop_id,))
         if current is not None:

@@ -113,11 +113,20 @@ reviewing a stop.
 
 ## Running the project
 
-The application is a Flask service backed by SQLite. From the repository root:
+The application is a Flask service backed by SQLite. Follow the concise
+[local development quickstart](docs/LOCAL_DEVELOPMENT.md) to create a virtual
+environment, copy `.env.example` to the ignored `.env`, generate a persistent
+local secret, and start the application.
+
+The local command is:
 
 ```bash
 python -m src.api.app
 ```
+
+This uses Flask's development server and is not a production deployment command.
+Production requires a separate WSGI-server decision, HTTPS, secure cookies, and
+deployment-managed secrets.
 
 By default it uses `src/database/dmv_bus_stops.db`. To run against a copy or a
 separate deployment database, set `DMV_BUS_STOPS_DB` to that path before starting

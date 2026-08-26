@@ -535,3 +535,44 @@ These may still have consumers. “Legacy” does not mean safe to delete.
 
 Prefer small, idempotent active migrations; explicit source authority; temporary-
 copy preflights; and consumer audits before retiring compatibility fields.
+
+## 17. Repository map and supported operations
+
+- `src/`: active application and domain code. The Flask entry point is
+  `src/api/app.py`; supported diagnostic modules also live under their domain,
+  including `src/processing/heading_audit.py`.
+- `scripts/active/`: intended maintainer commands. This directory has a mixed
+  historical DB-target interface, so inspect each command before use; its presence
+  does not authorize running it against production.
+- `scripts/archive/`: historical patches, experiments, migrations, and audits.
+  It is not supported execution and is excluded from compilation requirements.
+- `tests/`: active regression suite.
+- `docs/`: current project, volunteer, schema, operations, and pilot guidance.
+- `src/database/dmv_bus_stops.db`: default local SQLite location. Deployment should
+  set an absolute `DMV_BUS_STOPS_DB`. `src/database/backups/` and other database
+  copies are local operational material, not normal source changes.
+- `.env`: ignored local/deployment configuration. Start from `.env.example`; never
+  commit real secrets.
+
+Verified routine commands:
+
+```bash
+python -m src.api.app
+python -m unittest discover -s tests -p "test_*.py" -v
+python -m compileall -q src scripts/active tests
+git diff --check
+python scripts/active/create_review_tables.py
+python scripts/active/preflight_amenity_review_priority.py <database>
+python scripts/active/rebuild_stop_amenity_status.py --db <database>
+python scripts/active/rebuild_amenity_review_priority.py <database>
+python scripts/active/generate_seating_improvement_opportunities.py <database>
+```
+
+The first command is local development only, not a production WSGI server. Before
+every migration/rebuild, use an explicit database target, backup and hash it, test a
+copy, and verify post-operation invariants. Do not broadly execute archived scripts,
+compile `scripts/archive`, rebuild physical stops, or rerun the unbounded historical
+WMATA evidence importer as routine pilot operations.
+
+See [Local development](LOCAL_DEVELOPMENT.md) and
+[Small-pilot readiness audit](PILOT_READINESS.md).
