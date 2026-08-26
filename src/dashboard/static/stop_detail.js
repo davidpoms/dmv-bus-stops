@@ -5,13 +5,24 @@ async function loadStopProfile() {
         const stopResponse = await fetch(`/stops/${stopId}`);
         const stop = await stopResponse.json();
 
-        if (stop.identity_status === "retired") {
+        if (stopResponse.status === 410 && stop.identity_status === "retired") {
             document.getElementById("name").textContent = `Historical stop ${stopId}`;
             const links = (stop.successors || []).map(successor =>
                 `<li><a href="${successor.url}">Current stop ${successor.stop_id}</a></li>`
             ).join("");
-            details.innerHTML = `<p>${stop.message}</p><ul>${links}</ul>`;
+            details.innerHTML = `
+                <div class="card retired-stop-message">
+                    <strong>This stop ID is retired</strong>
+                    <p>${stop.message || "Use a current successor boarding location instead."}</p>
+                    ${links
+                        ? `<p>Current boarding locations:</p><ul>${links}</ul>`
+                        : "<p>No current successor link is available.</p>"}
+                </div>`;
             return;
+        }
+
+        if (!stopResponse.ok) {
+            throw new Error(`Stop request failed with HTTP ${stopResponse.status}`);
         }
 
         const reviewResponse = await fetch(`/review/${stopId}/info`);

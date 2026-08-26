@@ -1582,17 +1582,17 @@ GROUP BY ps.id
     )
 
 
-    heading = 0
+    streetview_display_heading = 0
 
     if road and road["heading"] is not None:
-        heading = road["heading"]
+        streetview_display_heading = road["heading"]
 
 
     streetview_url = (
         "https://www.google.com/maps/@?api=1"
         "&map_action=pano"
         f"&viewpoint={row[1]},{row[2]}"
-        f"&heading={heading}"
+        f"&heading={streetview_display_heading}"
         "&pitch=0"
         "&fov=90"
     )
@@ -1737,7 +1737,9 @@ GROUP BY ps.id
                 row[6].split(",")
                 if row[5]
                 else [],
-            "heading": heading,
+            # Nearest-road camera orientation only. Transit direction is exposed
+            # separately by the identity-linked serving_directions payload.
+            "streetview_display_heading": streetview_display_heading,
             "streetview_url": streetview_url,
 
 
@@ -2491,9 +2493,6 @@ def review_stop_info(stop_id):
                 f"https://www.wmata.com/ridertools/stop/{row[17]}"
                 if row[17]
                 else None,
-
-            "serving_direction":
-                row[11],
 
             "serving_headings": serving_headings,
 

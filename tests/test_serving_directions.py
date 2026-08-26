@@ -37,12 +37,23 @@ class ServingDirectionTests(unittest.TestCase):
                 wmata_stop_id TEXT, wmata_status TEXT, wmata_heading TEXT,
                 match_distance_m REAL, match_confidence TEXT, created_at TEXT
             );
+            CREATE TABLE physical_stop_identity_state(
+                physical_stop_id INTEGER PRIMARY KEY, identity_status TEXT,
+                retired_at TEXT
+            );
+            CREATE TABLE physical_stop_identity_edges(
+                predecessor_physical_stop_id INTEGER,
+                successor_physical_stop_id INTEGER
+            );
 
             INSERT INTO bus_stops VALUES
                 (101,'source-101'),(102,'source-102'),(201,'source-201'),
                 (301,'source-301'),(302,'source-302'),(401,'source-401');
+            INSERT INTO bus_stops VALUES
+                (959,'1002216'),(1185,'1002217');
             INSERT INTO physical_stop_members VALUES
                 (1,101),(1,102),(2,201),(3,301),(3,302),(4,401);
+            INSERT INTO physical_stop_members VALUES (7755,959),(7756,1185);
             INSERT INTO gtfs_stop_map VALUES
                 ('W1',101,'wmata_stop_code'),
                 ('W2',102,'wmata_stop_code'),
@@ -50,6 +61,8 @@ class ServingDirectionTests(unittest.TestCase):
                 ('I1',301,'wmata_stop_code'),
                 ('I2',302,'wmata_stop_code'),
                 ('BAD',401,'wmata_stop_code');
+            INSERT INTO gtfs_stop_map VALUES
+                ('7867',959,'wmata_stop_code'),('7868',1185,'wmata_stop_code');
             INSERT INTO gtfs_stop_map VALUES ('FALLBACK',101,'coordinate');
 
             -- The physical_stop_id on evidence is deliberately unreliable.
@@ -64,6 +77,12 @@ class ServingDirectionTests(unittest.TestCase):
                 (8,4,'BAD','PRS','not-a-heading',1,'high','2026-01-01');
             INSERT INTO stop_wmata_evidence VALUES
                 (9,1,'FALLBACK','ABS','299',1,'high','2026-01-01');
+            INSERT INTO stop_wmata_evidence VALUES
+                (10,7755,'7867','PRS','119',5,'high','2026-08-26'),
+                (11,7756,'7868','PRS','297',5,'high','2026-08-26');
+            INSERT INTO physical_stop_identity_state VALUES
+                (935,'retired','2026-08-26'),(7755,'current',NULL),(7756,'current',NULL);
+            INSERT INTO physical_stop_identity_edges VALUES (935,7755),(935,7756);
             """
         )
         conn.commit()
@@ -136,6 +155,59 @@ class ServingDirectionTests(unittest.TestCase):
         self.assertIn("info.serving_directions", review)
         self.assertIn("review.serving_directions", detail)
         self.assertNotIn("review.serving_headings", detail)
+
+    def test_post_v2_successors_keep_identity_specific_serving_directions(self):
+        southeast = public_api.get_serving_directions(7755)
+        northwest = public_api.get_serving_directions(7756)
+        self.assertEqual(
+            [("119", "Southeast", "1002216", "7867")],
+            [(item["heading_degrees"], item["compass_label"],
+              item["source_stop_id"], item["wmata_stop_id"])
+             for item in southeast],
+        )
+        self.assertEqual(
+            [("297", "Northwest", "1002217", "7868")],
+            [(item["heading_degrees"], item["compass_label"],
+              item["source_stop_id"], item["wmata_stop_id"])
+             for item in northwest],
+        )
+
+    def test_retired_stop_api_and_page_link_every_successor(self):
+        original_testing = public_api.app.testing
+        public_api.app.testing = True
+        self.addCleanup(setattr, public_api.app, "testing", original_testing)
+        response = public_api.app.test_client().get("/stops/935")
+        self.assertEqual(410, response.status_code)
+        payload = response.get_json()
+        self.assertEqual([7755, 7756], payload["successor_stop_ids"])
+        self.assertEqual(
+            [{"stop_id": 7755, "url": "/stop/7755"},
+             {"stop_id": 7756, "url": "/stop/7756"}],
+            payload["successors"],
+        )
+        detail = (ROOT / "src/dashboard/static/stop_detail.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("stopResponse.status === 410", detail)
+        self.assertIn("(stop.successors || []).map", detail)
+        self.assertIn("Current stop ${successor.stop_id}", detail)
+
+    def test_streetview_orientation_is_not_transit_serving_direction(self):
+        api_source = (ROOT / "src/api/app.py").read_text(encoding="utf-8")
+        documentation = (ROOT / "docs/serving-directions.md").read_text(
+            encoding="utf-8"
+        )
+        review = (ROOT / "src/dashboard/static/review_info_loader.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('"streetview_display_heading": streetview_display_heading', api_source)
+        self.assertNotIn('"heading": heading', api_source)
+        self.assertNotIn('"serving_direction":', api_source)
+        self.assertIn('"serving_directions": serving_directions', api_source)
+        self.assertIn("nearest-road orientation", documentation)
+        self.assertIn("must never be substituted", documentation)
+        self.assertIn("info.serving_directions", review)
+        self.assertNotIn("info.streetview_display_heading", review)
 
 
 if __name__ == "__main__":
