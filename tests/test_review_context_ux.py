@@ -70,12 +70,10 @@ class ReviewContextUxTests(unittest.TestCase):
         self.assertIn("Review a seating opportunity", dashboard)
         self.assertNotIn("campaign=presence_verification", dashboard)
         self.assertIn("What would help next", dashboard)
-        for relative in (
-            "src/dashboard/static/stop_detail.js",
-            "scripts/active/build_stop_profile_page.py",
-        ):
-            source = (ROOT / relative).read_text(encoding="utf-8")
-            self.assertIn("mode=direct", source)
+        source = (ROOT / "src/dashboard/static/stop_detail.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("mode=direct", source)
         map_source = (ROOT / "src/dashboard/static/dashboard.js").read_text(
             encoding="utf-8"
         )

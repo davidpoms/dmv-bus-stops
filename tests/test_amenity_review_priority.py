@@ -100,8 +100,8 @@ class AmenityReviewPriorityScriptTests(unittest.TestCase):
         scripts = (
             ("scripts/active/rebuild_amenity_review_priority.py",
              "scripts.active.rebuild_amenity_review_priority"),
-            ("scripts/active/preflight_amenity_review_priority.py",
-             "scripts.active.preflight_amenity_review_priority"),
+            ("scripts/diagnostics/preflight_amenity_review_priority.py",
+             "scripts.diagnostics.preflight_amenity_review_priority"),
         )
         for script, module in scripts:
             with self.subTest(invocation="direct", script=script):

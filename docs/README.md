@@ -23,6 +23,9 @@ Supporting references:
   and local-only startup/test commands.
 - [Small-pilot readiness audit](PILOT_READINESS.md) records deployment blockers,
   repository housekeeping decisions, and the supervised-pilot checklist.
+- [`scripts/active`](../scripts/active/README.md) inventories supported mutating
+  commands; [`scripts/diagnostics`](../scripts/diagnostics/README.md) lists supported
+  read-only checks.
 
 The executable schema is `src/database/schema.sql`. Existing SQLite databases
 also depend on active idempotent migrations, so schema prose is not a substitute

@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.replace_ddot_shelter_evidence import (
+from scripts.active.replace_ddot_shelter_evidence import (
     apply_replacement,
     preflight,
     validate_source_report,

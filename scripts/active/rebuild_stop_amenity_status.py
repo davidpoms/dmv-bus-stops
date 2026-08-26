@@ -1,6 +1,7 @@
 """Rebuild canonical shelter/bench status for current GTFS stops."""
 
 import argparse
+import os
 import sqlite3
 import sys
 from pathlib import Path
@@ -11,7 +12,9 @@ sys.path.insert(0, str(BASE_DIR))
 from src.amenities.status_synthesis import rebuild_stop_amenity_status
 
 
-DEFAULT_DB = Path("src/database/dmv_bus_stops.db")
+DEFAULT_DB = Path(os.environ.get(
+    "DMV_BUS_STOPS_DB", BASE_DIR / "src" / "database" / "dmv_bus_stops.db"
+))
 
 
 def main():

@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 
-SCRIPT = Path(__file__).parents[1] / "scripts" / "import_prince_georges_thebus_amenities.py"
+SCRIPT = Path(__file__).parents[1] / "scripts" / "active" / "import_prince_georges_thebus_amenities.py"
 SPEC = importlib.util.spec_from_file_location("thebus_import", SCRIPT)
 thebus = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(thebus)

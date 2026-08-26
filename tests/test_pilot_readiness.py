@@ -41,11 +41,27 @@ class PilotReadinessTests(unittest.TestCase):
         archive = (ROOT / "scripts/archive/README.md").read_text(encoding="utf-8")
         local = (ROOT / "docs/LOCAL_DEVELOPMENT.md").read_text(encoding="utf-8")
         pilot = (ROOT / "docs/PILOT_READINESS.md").read_text(encoding="utf-8")
-        self.assertIn("not a supported executable migration set", archive)
+        self.assertIn("not a supported executable", archive)
         self.assertIn("Flask's built-in server", local)
         self.assertIn("production deployment server", local)
         self.assertIn("Physical-stop identity", pilot)
         self.assertIn("Feedback mechanism", pilot)
+
+    def test_script_lifecycle_contract_is_explicit(self):
+        active = ROOT / "scripts/active"
+        diagnostics = ROOT / "scripts/diagnostics"
+        archive = ROOT / "scripts/archive"
+        active_readme = (active / "README.md").read_text(encoding="utf-8")
+        diagnostics_readme = (diagnostics / "README.md").read_text(encoding="utf-8")
+        self.assertIn("DMV_BUS_STOPS_DB", active_readme)
+        self.assertIn("mode=ro", diagnostics_readme)
+        self.assertFalse((active / "build_stop_profile_page.py").exists())
+        self.assertTrue((diagnostics / "validate_geography.py").exists())
+        self.assertTrue((archive / "migrations").is_dir())
+        self.assertIn(
+            "Git history",
+            (archive / "README.md").read_text(encoding="utf-8"),
+        )
 
 
 if __name__ == "__main__":

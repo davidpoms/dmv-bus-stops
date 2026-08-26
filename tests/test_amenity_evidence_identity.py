@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.migrate_amenity_evidence_identity import migrate
+from scripts.active.migrate_amenity_evidence_identity import migrate
 from src.amenities.importer import insert_amenity_evidence
 
 

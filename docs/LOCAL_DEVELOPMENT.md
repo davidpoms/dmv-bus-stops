@@ -34,7 +34,7 @@ Open `http://localhost:8000/`. Local HTTP normally uses
 
 ```powershell
 python -m unittest discover -s tests -p "test_*.py" -v
-python -m compileall -q src scripts/active tests
+python -m compileall -q src scripts/active scripts/diagnostics tests
 git diff --check
 ```
 

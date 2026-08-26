@@ -1,10 +1,14 @@
 import sqlite3
 import shutil
+import os
 from pathlib import Path
 from datetime import datetime
 
 
-DB = Path("src/database/dmv_bus_stops.db")
+ROOT = Path(__file__).resolve().parents[2]
+DB = Path(os.environ.get(
+    "DMV_BUS_STOPS_DB", ROOT / "src" / "database" / "dmv_bus_stops.db"
+))
 
 
 def table_exists(conn, table_name):

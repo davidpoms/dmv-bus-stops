@@ -1,42 +1,35 @@
-__pycache__/
-src/database/*.db
-
-# generated exports
+# Generated exports
 *.csv
 *.json
 *.html
 !src/dashboard/templates/*.html
+exports/
 
-# raw source data
+# Raw source data
 data/raw/
 
-# temporary files
+# Temporary files and local scratch scripts
+.tmp/
+*.tmp
+*_temp.py
+*_tmp.py
 *.save
-
-# Dashboard patch history
 
 # Databases
 *.db
+*.bak
+*.backup*
+*.broken_backup
+*_backup*
+*.bak_*
+*.backup_*
+archive/
+*.log
 
 # Python cache
 __pycache__/
 *.pyc
-
-# Temporary backups
-*.backup*
-*.broken_backup
-
-
-# Keep archived scripts
-!scripts/
-
-*.bak
-*.backup*
-*_backup*
-
-*.bak_*
-*.backup_*
-*.log
+*.pyo
 
 .env
 .env.*

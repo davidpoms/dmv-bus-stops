@@ -1,6 +1,7 @@
 """Rebuild canonical amenity status and review priority derived tables."""
 
 import argparse
+import os
 import sqlite3
 import sys
 from pathlib import Path
@@ -11,7 +12,9 @@ sys.path.insert(0, str(BASE_DIR))
 from src.amenities.review_priority import rebuild_review_priority
 from src.amenities.status_synthesis import rebuild_stop_amenity_status
 
-DATABASE_PATH = BASE_DIR / "src" / "database" / "dmv_bus_stops.db"
+DATABASE_PATH = Path(os.environ.get(
+    "DMV_BUS_STOPS_DB", BASE_DIR / "src" / "database" / "dmv_bus_stops.db"
+))
 
 
 def rebuild(database_path=DATABASE_PATH):

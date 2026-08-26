@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 
 
-SCRIPT = Path(__file__).parents[1] / "scripts" / "import_prince_georges_raw_evidence.py"
+SCRIPT = Path(__file__).parents[1] / "scripts" / "active" / "import_prince_georges_raw_evidence.py"
 SPEC = importlib.util.spec_from_file_location("pg_import", SCRIPT)
 pg = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(pg)

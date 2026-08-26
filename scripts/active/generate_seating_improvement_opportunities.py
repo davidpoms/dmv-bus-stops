@@ -1,6 +1,7 @@
 """Direct/module-safe entry point for seating opportunity generation."""
 
 import sys
+import os
 from pathlib import Path
 
 if __package__ in (None, ""):
@@ -12,4 +13,8 @@ from src.assessment.generate_seating_improvement_opportunities import (  # noqa:
 
 
 if __name__ == "__main__":
-    generate_opportunities(sys.argv[1] if len(sys.argv) > 1 else None)
+    database = (
+        sys.argv[1] if len(sys.argv) > 1
+        else os.environ.get("DMV_BUS_STOPS_DB")
+    )
+    generate_opportunities(database)

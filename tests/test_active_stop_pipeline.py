@@ -4,8 +4,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts import generate_improvement_recommendations as legacy_recommendations
-from scripts import generate_priority_levels
+from scripts.active import generate_improvement_recommendations as legacy_recommendations
+from scripts.active import generate_priority_levels
 from src.assessment import create_opportunity_assessments
 from src.assessment import generate_impact_summary
 from src.assessment import generate_improvement_recommendations
@@ -156,8 +156,8 @@ class ActiveStopPipelineTests(unittest.TestCase):
             "src/assessment/generate_impact_summary.py",
             "src/assessment/create_project_priorities.py",
             "src/assessment/calculate_recommendation_confidence.py",
-            "scripts/generate_improvement_recommendations.py",
-            "scripts/generate_priority_levels.py",
+            "scripts/active/generate_improvement_recommendations.py",
+            "scripts/active/generate_priority_levels.py",
         )
         for relative_path in paths:
             with self.subTest(path=relative_path):

@@ -1,10 +1,11 @@
 import sqlite3
 import sys
+import os
 from pathlib import Path
 import pandas as pd
 
 
-BASE_DIR = Path(__file__).resolve().parents[1]
+BASE_DIR = Path(__file__).resolve().parents[2]
 
 sys.path.insert(
     0,
@@ -14,7 +15,9 @@ sys.path.insert(
 from clients.gtfs_loader import download_gtfs
 
 
-DB = BASE_DIR / "src" / "database" / "dmv_bus_stops.db"
+DB = Path(os.environ.get(
+    "DMV_BUS_STOPS_DB", BASE_DIR / "src" / "database" / "dmv_bus_stops.db"
+))
 
 MATCH_DISTANCE = 0.0005
 

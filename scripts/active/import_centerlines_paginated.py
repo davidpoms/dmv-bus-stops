@@ -1,10 +1,14 @@
 import sqlite3
 import requests
 import json
+import os
 from pathlib import Path
 
 
-DB = Path("src/database/dmv_bus_stops.db")
+ROOT = Path(__file__).resolve().parents[2]
+DB = Path(os.environ.get(
+    "DMV_BUS_STOPS_DB", ROOT / "src" / "database" / "dmv_bus_stops.db"
+))
 
 
 SOURCES = [

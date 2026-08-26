@@ -48,10 +48,9 @@ Gunicorn. Select and test one rather than committing both speculative paths.
 
 ## Database safety
 
-The Flask app, assignment router, and active review-table migration honor
-`DMV_BUS_STOPS_DB`. Many other scripts in `scripts/active` still hard-code the
-repository database or accept a positional `--db`/database argument. Never assume
-the environment override applies to an operational script without checking it.
+The Flask app, assignment router, review-table migration, and retained active commands
+honor `DMV_BUS_STOPS_DB` or require an explicit database argument. Prefer an explicit
+absolute path even when a repo-relative development default exists.
 
 Standard PowerShell production operation pattern:
 
@@ -73,8 +72,9 @@ change/no-change; it does not replace row-count and invariant checks.
 |---|---|---|
 | `src/` | A — active/supported | Application, domain producers, schema, and diagnostic modules. |
 | `src/processing/heading_audit.py` | B — active diagnostic | Tested circular-heading/chaining helpers; never a display filter. |
-| `scripts/active/` | A/F — supported intent, mixed readiness | Maintainer-command namespace; individual DB targeting remains inconsistent. |
-| `scripts/archive/` | C — archived/historical | Not supported execution; malformed historical patches need not compile. |
+| `scripts/active/` | A — active/supported | Reviewed mutating/source-refresh commands; see its inventory before use. |
+| `scripts/diagnostics/` | B — active diagnostic | Supported read-only checks using SQLite `mode=ro`. |
+| `scripts/archive/` | C — archived/historical | Selected old migration records; unsupported and not compiled. |
 | `tests/` | A — active/supported | Full regression suite. |
 | `docs/` | A — active/supported | Audience-specific guidance and technical handoff. |
 | `src/database/dmv_bus_stops.db` | D — local/deployment data | Ignored by pattern but may exist locally; not changed by this audit. |
@@ -88,41 +88,12 @@ rules remain; tracked files would remain tracked despite ignore rules.
 
 ## `scripts/active` audit
 
-`scripts/active` should contain commands a maintainer may legitimately run today.
-Compilation succeeds, but presence here does not yet imply production-safe defaults.
-
-| Script | Purpose/status | DB behavior | Mutation/safety |
-|---|---|---|---|
-| `build_gtfs_stop_map.py` | current GTFS mapping producer | hard-coded repo DB | destructive rebuild; copy/preflight required |
-| `build_gtfs_stop_status.py` | canonical active-stop producer | hard-coded repo DB | destructive derived rebuild; tested indirectly |
-| `build_stop_profile_page.py` | legacy static-page builder | no DB override | generated output; likely superseded by Flask page |
-| `build_stop_transit_evidence.py` | compatibility transit evidence | hard-coded repo DB | delete/insert rebuild |
-| `create_evidence_schema.py` | historical schema bootstrap | hard-coded repo DB | schema mutation; review before use |
-| `create_review_tables.py` | supported deployment migration | honors override | idempotent schema migration; covered by tests |
-| `create_stop_observations_table.py` | earlier schema bootstrap | hard-coded repo DB | superseded in part by review migration |
-| `download_census_boundaries.py` | source downloader | files/network | current only for intentional source refresh |
-| `download_dc_boundaries.py` | source downloader | files/network | current only for intentional source refresh |
-| `download_dcgis_stops.py` | source downloader | files/network | source refresh; provenance review required |
-| `download_wmata_stops.py` | source downloader | files/network | source refresh; no production DB write |
-| `generate_seating_improvement_opportunities.py` | canonical seating derived producer | positional DB | destructive derived rebuild; tested |
-| `import_centerlines.py` | centerline importer | hard-coded repo DB | mutating; older one-shot path |
-| `import_centerlines_paginated.py` | paginated centerline importer | hard-coded repo DB | mutating; likely preferred over prior script |
-| `import_prince_georges_centerlines.py` | PG centerline importer | hard-coded repo DB | mutating jurisdiction path |
-| `import_wmata_evidence.py` | historical WMATA evidence import | hard-coded repo DB | unbounded nearest-neighbor evidence; not safe for routine rerun |
-| `import_wmata_transit_evidence.py` | compatibility wrapper/import | inspect explicit inputs | not a normal pilot operation |
-| `preflight_amenity_review_priority.py` | read-only derived-table validation | positional DB | supported preflight; direct/module tested |
-| `rebuild_active_wmata_view.py` | legacy WMATA view | hard-coded repo DB | status semantics unresolved; do not use for pilot |
-| `rebuild_amenity_review_priority.py` | canonical status/priority rebuild | positional/default DB | supported with explicit DB; tested |
-| `rebuild_stop_amenity_status.py` | canonical amenity synthesis | `--db` supported | supported with explicit DB; tested |
-| `rebuild_stop_routes_clean.py` | route repair/rebuild | hard-coded repo DB | destructive specialized maintenance |
-| `rebuild_stop_transit_evidence.py` | compatibility updater | hard-coded repo DB | specialized mutation |
-| `rebuild_transit_evidence.py` | compatibility rebuild | hard-coded repo DB | delete/insert; overlaps prior producer |
-| `validate_geography.py` | geography diagnostic | hard-coded repo DB | read-only but target unsafe by default |
-| `validate_route_integrity.py` | route diagnostic | hard-coded repo DB | read-only but target unsafe by default |
-
-Recommended follow-up: move clearly superseded scripts only after consumer/history
-review, and make every retained mutating command require an explicit database target.
-No scripts were moved in this branch.
+`scripts/active` now contains reviewed current commands only. Its maintained
+[inventory](../scripts/active/README.md) records purpose, mutation behavior, and safe
+use. SQLite commands use `DMV_BUS_STOPS_DB`, an explicit path, or both. Supported
+read-only checks live in [`scripts/diagnostics`](../scripts/diagnostics/README.md) and
+open existing databases with `mode=ro`. Selected old migrations remain under
+`scripts/archive`; patch/debug implementations belong in Git history.
 
 ## Secrets and private data
 

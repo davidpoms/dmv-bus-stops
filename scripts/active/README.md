@@ -1,0 +1,32 @@
+# Supported maintainer commands
+
+This directory contains commands a maintainer may legitimately run against current
+code and schema. Commands that touch SQLite use `DMV_BUS_STOPS_DB`, an explicit
+database argument, or both. Always target a copy first; back up and hash any database
+before an approved mutation.
+
+| Command | Purpose | Effect / safe use |
+|---|---|---|
+| `build_gtfs_stop_map.py` | rebuild GTFS-to-stop mappings | mutates selected DB; reviewed source refresh only |
+| `build_gtfs_stop_status.py` | rebuild canonical active-stop status | mutates selected DB and creates a local backup |
+| `create_review_tables.py` | idempotent review/auth schema migration | mutates selected DB; deployment migration |
+| `download_census_boundaries.py` | refresh Census geography files | network/file write; review generated diffs |
+| `download_dc_boundaries.py` | refresh DC geography files | network/file write; review generated diffs |
+| `download_dcgis_stops.py` | download DC stop-source data | network/file write; intentional source refresh only |
+| `download_wmata_stops.py` | download WMATA stop-source data | network/file write; intentional source refresh only |
+| `generate_improvement_recommendations.py` | compatibility recommendation rebuild | mutates selected DB; current-stop invariant enforced |
+| `generate_priority_levels.py` | compatibility impact-level rebuild | mutates selected DB; current-stop invariant enforced |
+| `generate_seating_improvement_opportunities.py` | canonical seating-opportunity rebuild | mutates explicit/selected DB |
+| `import_centerlines_paginated.py` | refresh regional centerlines | network and selected-DB mutation |
+| `import_falls_church_amenities.py` | curated Falls Church amenity import | preflight by default; `--apply` mutates explicit DB |
+| `import_prince_georges_centerlines.py` | refresh Prince George's centerlines | network and selected-DB mutation |
+| `import_prince_georges_raw_evidence.py` | raw PG provenance import | preflight by default; `--apply` mutates explicit DB |
+| `import_prince_georges_thebus_amenities.py` | TheBus amenity import | preflight by default; `--apply` mutates explicit DB |
+| `migrate_amenity_evidence_identity.py` | amenity evidence identity migration | mutates explicit/selected DB after collision audit |
+| `rebuild_amenity_review_priority.py` | canonical amenity status/priority rebuild | mutates explicit/selected DB |
+| `rebuild_stop_amenity_status.py` | canonical shelter/bench synthesis rebuild | mutates explicit/selected DB |
+| `rebuild_stop_routes_clean.py` | specialized route repair | destructive selected-DB rebuild with backup; not routine |
+| `replace_ddot_shelter_evidence.py` | atomic DDOT evidence replacement | preflight default; `--apply` mutates explicit/selected DB |
+
+Read-only checks belong in `scripts/diagnostics`. Historical implementations belong
+in Git history or the curated `scripts/archive/migrations` reference set.

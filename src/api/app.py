@@ -4516,7 +4516,7 @@ def priority_summary():
     }
 
     # priority_level is a derived classification populated by
-    # scripts/generate_priority_levels.py. Before that rebuild has run, the
+    # scripts/active/generate_priority_levels.py. Before that rebuild has run, the
     # endpoint has no classifications to report; impact_level is not a proxy.
     if "priority_level" not in columns:
         return jsonify(

@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "scripts" / "import_falls_church_amenities.py"
+SCRIPT = ROOT / "scripts" / "active" / "import_falls_church_amenities.py"
 SPEC = importlib.util.spec_from_file_location("falls_church_importer", SCRIPT)
 importer = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(importer)

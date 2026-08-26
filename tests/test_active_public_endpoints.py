@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts import generate_priority_levels
+from scripts.active import generate_priority_levels
 from src.api import app as public_api
 from src.amenities.status_synthesis import SCHEMA_SQL
 
