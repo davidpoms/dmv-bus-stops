@@ -32,8 +32,14 @@ Agency/GTFS stop records, route identities, and their many-to-many relationship.
 
 ### `physical_stops`, `physical_stop_members`
 
-Canonical physical locations and the source stop records clustered into each
-location. `physical_stop_id` is the public and analytical stop identity.
+Persistent canonical boarding locations and their source stop members.
+`physical_stop_id` is the public and analytical identity and is never reused.
+Routine refreshes reconcile members; they do not recluster and renumber the region.
+
+Lifecycle is additive: `physical_stop_identity_state` records current/retired state;
+events and edges represent predecessor/successor relationships; member lineage
+records movement; and `physical_stop_evidence_attribution` versions exact, spatial,
+or unresolved evidence linkage. Retirement is not deletion.
 
 ### `gtfs_feed_snapshots`, `gtfs_stop_structure`
 
@@ -57,6 +63,8 @@ Historical physical stops may remain even when they are not current.
 
 State, county, municipality, ward, ANC, and other geographic associations.
 These dimensions overlap intentionally.
+`src.processing.physical_stop_geography` is the supported offline point-in-polygon
+service. Missing or conflicting coverage produces null rather than guessed geography.
 
 ## Source evidence
 

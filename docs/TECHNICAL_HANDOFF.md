@@ -34,6 +34,16 @@ router, and active review-table migration.
 place identity, with `physical_stop_members` connecting source records to it.
 Public review, amenity, and opportunity logic uses `physical_stop_id`.
 
+Physical Stop Identity V2 makes that identity persistent. Routine refreshes produce
+a reconciliation plan and preserve IDs; the old connected-component builder is
+bootstrap-only. Lifecycle tables retain retired identities and successor lineage.
+Geography is recomputed from coordinates, while evidence attribution is versioned
+separately from raw claims. The automatic proposal is reproducible through
+`scripts/diagnostics/generate_physical_stop_v2_manifest.py`; its reviewed cardinality
+gate is 384 parents and 791 child groups. Proposal generation is read-only and is not
+permission to migrate production. A full temporary migration orchestrator and the
+remaining compatibility rebuild contracts are still required.
+
 Versioned facility context is preserved separately in `gtfs_feed_snapshots` and
 `gtfs_stop_structure`. Import an explicit ZIP against a database copy with
 `python scripts/active/import_gtfs_stop_structure.py <feed.zip> --feed-id

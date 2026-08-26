@@ -8,6 +8,8 @@ One physical stop may contain multiple WMATA
 operational stop records.
 """
 
+import argparse
+import os
 import sqlite3
 import math
 from pathlib import Path
@@ -15,15 +17,9 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 
-DATABASE_PATH = (
-    BASE_DIR
-    /
-    "src"
-    /
-    "database"
-    /
-    "dmv_bus_stops.db"
-)
+DATABASE_PATH = Path(os.environ.get(
+    "DMV_BUS_STOPS_DB", BASE_DIR / "src" / "database" / "dmv_bus_stops.db"
+))
 
 
 MAX_DISTANCE_METERS = 20
@@ -202,10 +198,10 @@ def cluster_stops(stops):
 
 
 
-def build_physical_stops():
+def build_physical_stops(database_path=DATABASE_PATH, *, bootstrap_empty=False):
 
     conn = sqlite3.connect(
-        DATABASE_PATH
+        database_path
     )
 
     cursor = conn.cursor()
@@ -215,14 +211,13 @@ def build_physical_stops():
 
         setup_tables(cursor)
 
-
-        cursor.execute(
-            "DELETE FROM physical_stop_members;"
-        )
-
-        cursor.execute(
-            "DELETE FROM physical_stops;"
-        )
+        existing = cursor.execute("SELECT COUNT(*) FROM physical_stops").fetchone()[0]
+        if existing or not bootstrap_empty:
+            raise RuntimeError(
+                "build_physical_stops is bootstrap-only and requires an empty "
+                "identity registry plus --bootstrap-empty-database; use the V2 "
+                "reconciliation workflow for established identities"
+            )
 
 
         cursor.execute(
@@ -384,5 +379,12 @@ def build_physical_stops():
 
 
 if __name__ == "__main__":
-
-    build_physical_stops()
+    parser = argparse.ArgumentParser(
+        description="Bootstrap physical identities in an EMPTY database only."
+    )
+    parser.add_argument("--db", type=Path, default=DATABASE_PATH)
+    parser.add_argument("--bootstrap-empty-database", action="store_true")
+    arguments = parser.parse_args()
+    build_physical_stops(
+        arguments.db, bootstrap_empty=arguments.bootstrap_empty_database
+    )

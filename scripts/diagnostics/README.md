@@ -1,5 +1,11 @@
 # Supported diagnostics
 
+`generate_physical_stop_v2_manifest.py` generates the canonical read-only V2 split
+proposal from database/source inputs. Use `--validate` to enforce 384 automatic
+parents, 791 child groups, and five manual exceptions. `--out` writes canonical JSON;
+the command prints proposal version and SHA-256. It never allocates or changes IDs and
+does not depend on ignored `.tmp` artifacts.
+
 These commands are current, read-only integrity and preflight tools. They open an
 existing SQLite database with `mode=ro`; they do not create or mutate databases.
 

@@ -11,6 +11,7 @@ before an approved mutation.
 | `import_gtfs_stop_structure.py <feed.zip> --feed-id <id>` | preserve immutable GTFS stop/facility metadata | metadata-only import; idempotent by feed ID and ZIP SHA-256 |
 | `build_gtfs_stop_status.py` | rebuild canonical active-stop status | mutates selected DB and creates a local backup |
 | `create_review_tables.py` | idempotent review/auth schema migration | mutates selected DB; deployment migration |
+| `create_physical_stop_identity_v2.py [db] --apply` | install additive V2 lifecycle tables | idempotent selected-DB migration; dry run without `--apply` |
 | `download_census_boundaries.py` | refresh Census geography files | network/file write; review generated diffs |
 | `download_dc_boundaries.py` | refresh DC geography files | network/file write; review generated diffs |
 | `download_dcgis_stops.py` | download DC stop-source data | network/file write; intentional source refresh only |
@@ -28,6 +29,13 @@ before an approved mutation.
 | `rebuild_stop_amenity_status.py` | canonical shelter/bench synthesis rebuild | mutates explicit/selected DB |
 | `rebuild_stop_routes_clean.py` | specialized route repair | destructive selected-DB rebuild with backup; not routine |
 | `replace_ddot_shelter_evidence.py` | atomic DDOT evidence replacement | preflight default; `--apply` mutates explicit/selected DB |
+| `reset_v2_test_contributions.py --db <copy> --confirm "RESET DISPOSABLE V2 TEST CONTRIBUTIONS"` | one-time pre-pilot test-data reset | destructive and narrow; refuses the default DB unless separately authorized |
+
+`src/processing/build_physical_stops.py` is bootstrap-only. It requires
+`--bootstrap-empty-database` and refuses a populated identity registry.
+
+The V2 manifest generator lives under `scripts/diagnostics` because proposal
+generation is read-only. No active V2 identity-apply command is supported yet.
 
 Read-only checks belong in `scripts/diagnostics`. Historical implementations belong
 in Git history or the curated `scripts/archive/migrations` reference set.

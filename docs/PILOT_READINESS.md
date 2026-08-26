@@ -4,6 +4,11 @@ This audit targets a supervised 3–5 person volunteer pilot. It does not approv
 a public production launch or change data, scoring, evidence, review routing, or
 physical-stop identity.
 
+Before real volunteer contributions begin, complete or explicitly defer the V2
+identity baseline. Current owner-created review data may be reset only through the
+narrow confirmed cutover command. After that baseline, reviewer accounts and all
+contribution history are durable and normal reconciliation cannot truncate them.
+
 ## Configuration inventory
 
 | Setting | Classification | Default and failure behavior |

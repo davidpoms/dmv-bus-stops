@@ -25,6 +25,109 @@ CREATE TABLE IF NOT EXISTS bus_stops (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Persistent boarding-location identities. Routine feed refreshes reconcile
+-- members against these rows; they must not truncate and recreate this table.
+CREATE TABLE IF NOT EXISTS physical_stops (
+    id INTEGER PRIMARY KEY,
+    latitude REAL NOT NULL,
+    longitude REAL NOT NULL,
+    primary_name TEXT,
+    member_count INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    state TEXT,
+    dc_ward TEXT,
+    dc_anc TEXT,
+    county TEXT,
+    municipality TEXT
+);
+
+CREATE TABLE IF NOT EXISTS physical_stop_members (
+    physical_stop_id INTEGER NOT NULL,
+    bus_stop_id INTEGER NOT NULL UNIQUE,
+    PRIMARY KEY (physical_stop_id, bus_stop_id),
+    FOREIGN KEY (physical_stop_id) REFERENCES physical_stops(id),
+    FOREIGN KEY (bus_stop_id) REFERENCES bus_stops(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_physical_members_stop
+ON physical_stop_members(bus_stop_id);
+
+CREATE TABLE IF NOT EXISTS physical_stop_identity_events (
+    id INTEGER PRIMARY KEY,
+    migration_version TEXT NOT NULL,
+    event_sequence INTEGER NOT NULL,
+    event_type TEXT NOT NULL CHECK (event_type IN (
+        'split', 'merge', 'replacement', 'membership_adjustment',
+        'creation', 'retirement', 'movement'
+    )),
+    reason_code TEXT NOT NULL,
+    reason_json TEXT NOT NULL DEFAULT '{}',
+    effective_at TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (migration_version, event_sequence)
+);
+
+CREATE TABLE IF NOT EXISTS physical_stop_identity_edges (
+    event_id INTEGER NOT NULL,
+    predecessor_physical_stop_id INTEGER NOT NULL,
+    successor_physical_stop_id INTEGER NOT NULL,
+    relationship_type TEXT NOT NULL,
+    PRIMARY KEY (
+        event_id, predecessor_physical_stop_id,
+        successor_physical_stop_id, relationship_type
+    ),
+    FOREIGN KEY (event_id) REFERENCES physical_stop_identity_events(id),
+    FOREIGN KEY (predecessor_physical_stop_id) REFERENCES physical_stops(id),
+    FOREIGN KEY (successor_physical_stop_id) REFERENCES physical_stops(id)
+);
+
+CREATE TABLE IF NOT EXISTS physical_stop_identity_state (
+    physical_stop_id INTEGER PRIMARY KEY,
+    identity_status TEXT NOT NULL CHECK (
+        identity_status IN ('current', 'retired', 'manual_exception')
+    ),
+    retirement_event_id INTEGER,
+    retired_at TEXT,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (physical_stop_id) REFERENCES physical_stops(id),
+    FOREIGN KEY (retirement_event_id) REFERENCES physical_stop_identity_events(id),
+    CHECK (
+        (identity_status = 'retired' AND retirement_event_id IS NOT NULL
+         AND retired_at IS NOT NULL)
+        OR
+        (identity_status <> 'retired' AND retirement_event_id IS NULL
+         AND retired_at IS NULL)
+    )
+);
+
+CREATE TABLE IF NOT EXISTS physical_stop_member_lineage (
+    event_id INTEGER NOT NULL,
+    bus_stop_id INTEGER NOT NULL,
+    predecessor_physical_stop_id INTEGER,
+    successor_physical_stop_id INTEGER,
+    PRIMARY KEY (event_id, bus_stop_id),
+    FOREIGN KEY (event_id) REFERENCES physical_stop_identity_events(id),
+    FOREIGN KEY (bus_stop_id) REFERENCES bus_stops(id),
+    FOREIGN KEY (predecessor_physical_stop_id) REFERENCES physical_stops(id),
+    FOREIGN KEY (successor_physical_stop_id) REFERENCES physical_stops(id)
+);
+
+CREATE TABLE IF NOT EXISTS physical_stop_evidence_attribution (
+    evidence_table TEXT NOT NULL,
+    evidence_row_id INTEGER NOT NULL,
+    physical_stop_id INTEGER,
+    attribution_method TEXT NOT NULL CHECK (attribution_method IN (
+        'exact_member', 'exact_source_record', 'spatial_reassessed', 'unresolved'
+    )),
+    attribution_version TEXT NOT NULL,
+    distance_m REAL,
+    provenance_json TEXT NOT NULL DEFAULT '{}',
+    attributed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (evidence_table, evidence_row_id, attribution_version),
+    FOREIGN KEY (physical_stop_id) REFERENCES physical_stops(id),
+    CHECK (attribution_method <> 'unresolved' OR physical_stop_id IS NULL)
+);
+
 
 -- =====================================================
 -- ROUTE INFORMATION

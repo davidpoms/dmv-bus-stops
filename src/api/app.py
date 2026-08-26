@@ -48,6 +48,7 @@ from src.review.email_delivery import (
 )
 from src.amenities.status_synthesis import geography_status_rows
 from src.amenities.review_priority import refresh_after_community_mutation
+from src.processing.serving_directions import serving_directions_for_stop
 
 
 app = Flask(
@@ -278,57 +279,37 @@ def get_serving_directions(stop_id):
         "match_distance_m", "match_confidence", "created_at",
     } <= evidence_columns:
         return []
-    rows = query_db(
-        """
-        WITH latest AS (
-            SELECT wmata_stop_id,wmata_heading,wmata_status,
-                   match_distance_m,match_confidence,
-                   ROW_NUMBER() OVER (
-                       PARTITION BY wmata_stop_id
-                       ORDER BY datetime(created_at) DESC,id DESC
-                   ) sequence
-            FROM stop_wmata_evidence
-            WHERE wmata_heading IS NOT NULL
-              AND TRIM(wmata_heading)!=''
-        )
-        SELECT l.wmata_heading,l.wmata_stop_id,pm.bus_stop_id,
-               b.external_stop_id,g.match_method,l.wmata_status,
-               l.match_distance_m,l.match_confidence
-        FROM physical_stop_members pm
-        JOIN bus_stops b ON b.id=pm.bus_stop_id
-        JOIN gtfs_stop_map g ON g.bus_stop_id=pm.bus_stop_id
-        JOIN latest l ON CAST(l.wmata_stop_id AS TEXT)=CAST(g.gtfs_stop_id AS TEXT)
-                     AND l.sequence=1
-        WHERE pm.physical_stop_id=?
-          AND (
-              g.match_method!='coordinate'
-              OR NOT EXISTS (
-                  SELECT 1 FROM gtfs_stop_map exact
-                  WHERE exact.bus_stop_id=g.bus_stop_id
-                    AND exact.match_method='wmata_stop_code'
-              )
-          )
-        ORDER BY CAST(l.wmata_heading AS REAL),l.wmata_heading,l.wmata_stop_id
-        """,
-        (stop_id,),
-    )
+    conn = sqlite3.connect(DATABASE_PATH)
+    try:
+        by_member = serving_directions_for_stop(conn, stop_id)
+        source_ids = dict(conn.execute(
+            """SELECT pm.bus_stop_id,b.external_stop_id
+               FROM physical_stop_members pm
+               JOIN bus_stops b ON b.id=pm.bus_stop_id
+               WHERE pm.physical_stop_id=?""",
+            (stop_id,),
+        ))
+    finally:
+        conn.close()
     directions = []
-    for row in rows:
-        compass_label = compass_heading_label(row[0])
-        if compass_label is None:
-            continue
-        directions.append({
-            "heading_degrees": row[0],
-            "compass_label": compass_label,
-            "wmata_stop_id": row[1],
-            "member_stop_id": row[2],
-            "source_stop_id": row[3],
-            "linkage_method": row[4],
-            "evidence_status": row[5],
-            "match_distance_m": row[6],
-            "confidence": row[7],
-        })
-    return directions
+    for member_stop_id, member_directions in by_member.items():
+        for direction in member_directions:
+            heading = format(direction["heading_degrees"], "g")
+            directions.append({
+                "heading_degrees": heading,
+                "compass_label": compass_heading_label(heading),
+                "wmata_stop_id": direction["gtfs_stop_id"],
+                "member_stop_id": member_stop_id,
+                "source_stop_id": source_ids.get(member_stop_id),
+                "linkage_method": direction["linkage_method"],
+                "evidence_status": direction["evidence_status"],
+                "match_distance_m": direction["match_distance_m"],
+                "confidence": direction["confidence"],
+            })
+    return sorted(directions, key=lambda item: (
+        float(item["heading_degrees"]), item["heading_degrees"],
+        item["wmata_stop_id"], item["member_stop_id"],
+    ))
 
 
 def get_serving_headings(stop_id):
