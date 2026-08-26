@@ -1,9 +1,6 @@
 # DMV Bus Stop Intelligence Project Handbook
 
-DMV Bus Stop Intelligence treats a bus stop as part of the transit experience,
-not merely a sign where a vehicle arrives. A trustworthy record of waiting
-conditions can help communities ask better questions about comfort,
-accessibility, maintenance, and public investment.
+DMV Bus Stop Intelligence treats a bus stop as part of the transit experience. A trustworthy record of waiting conditions can help communities ask better questions about comfort, accessibility, maintenance, and public investment.
 
 The project follows four principles:
 
