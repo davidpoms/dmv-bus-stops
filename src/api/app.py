@@ -996,10 +996,7 @@ def validation_queue():
 @app.route("/")
 def home():
 
-    return send_from_directory(
-        BASE_DIR,
-        "dmv_bus_stops_dashboard.html"
-    )
+    return redirect(url_for("dashboard"))
 
 
 

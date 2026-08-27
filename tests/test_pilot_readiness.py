@@ -1,5 +1,6 @@
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from src.api.app import app
 
@@ -36,6 +37,14 @@ class PilotReadinessTests(unittest.TestCase):
         )
         self.assertIn('href="/stop/${props.stop_id}"', dashboard)
         self.assertNotIn('href="/stops/${props.stop_id}"', dashboard)
+
+    def test_home_redirects_to_maintained_dashboard(self):
+        with patch.dict(app.config, {"TESTING": True}):
+            client = app.test_client()
+            home = client.get("/")
+            self.assertEqual(302, home.status_code)
+            self.assertEqual("/dashboard", home.headers["Location"])
+            self.assertEqual(200, client.get("/dashboard").status_code)
 
     def test_runbooks_separate_active_archive_local_and_production(self):
         archive = (ROOT / "scripts/archive/README.md").read_text(encoding="utf-8")
