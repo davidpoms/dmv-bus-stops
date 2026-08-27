@@ -2,6 +2,7 @@ import json
 import os
 import sqlite3
 import secrets
+from functools import wraps
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -45,6 +46,7 @@ from src.review.email_delivery import (
     EmailConfigurationError, email_delivery_status, email_required_configuration,
     email_sender_from_env,
 )
+from src.review.admin_dashboard import build_pilot_summary, review_lead_access
 from src.amenities.status_synthesis import geography_status_rows
 from src.amenities.review_priority import refresh_after_community_mutation
 from src.processing.serving_directions import serving_directions_for_stop
@@ -4780,6 +4782,45 @@ def _auth_db():
     return conn
 
 
+def review_lead_required(view):
+    """Protect every pilot-admin surface with the same server-side check."""
+    @wraps(view)
+    def protected(*args, **kwargs):
+        conn = _auth_db()
+        try:
+            allowed, reason = review_lead_access(
+                conn,
+                session.get("authenticated_reviewer_id"),
+                session.get("reviewer_key"),
+            )
+        finally:
+            conn.close()
+        if allowed:
+            return view(*args, **kwargs)
+        if reason == "role_migration_required":
+            return {"error": "Reviewer role migration is required"}, 503
+        if reason == "authentication_required":
+            return {"error": "Verified reviewer sign-in is required"}, 401
+        return {"error": "Review-lead access is required"}, 403
+    return protected
+
+
+@app.route("/admin")
+@review_lead_required
+def pilot_admin_page():
+    return render_template("pilot_admin.html")
+
+
+@app.route("/api/admin/pilot-summary")
+@review_lead_required
+def pilot_admin_summary():
+    conn = _auth_db()
+    try:
+        return jsonify(build_pilot_summary(conn))
+    finally:
+        conn.close()
+
+
 def _reviewer_email_status():
     if app.testing or os.environ.get("REVIEWER_AUTH_DEV_MODE") == "1":
         return {"available": True, "backend": "development"}
@@ -4968,9 +5009,18 @@ def reviewer_status():
 
 @app.route("/reviewer/profile")
 def reviewer_profile_page():
-
+    conn = _auth_db()
+    try:
+        show_pilot_admin, _reason = review_lead_access(
+            conn,
+            session.get("authenticated_reviewer_id"),
+            session.get("reviewer_key"),
+        )
+    finally:
+        conn.close()
     return render_template(
-        "reviewer_profile.html"
+        "reviewer_profile.html",
+        show_pilot_admin=show_pilot_admin,
     )
 
 

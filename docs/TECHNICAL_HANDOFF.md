@@ -402,6 +402,47 @@ Links are captured only in tests or explicit `REVIEWER_AUTH_DEV_MODE=1`, which
 defaults off. Public APIs do not expose email or auth metadata. Legacy text
 reviewer identifiers are not migrated by this feature.
 
+### Pilot review-lead dashboard
+
+`community_reviewers.role` is constrained to `reviewer` or `review_lead` and
+defaults to `reviewer`. `/admin` and `/api/admin/pilot-summary` share one
+server-side authorization check: the session must contain the verified reviewer
+ID and matching reviewer key, the database row must remain email verified, and
+its role must be `review_lead`. Anonymous reviewer keys and ordinary verified
+reviewers are denied. There is no public role-escalation endpoint.
+
+The dashboard is read-only. It summarizes submitted `community_review`
+observations, active-stop coverage using exactly
+`stop_gtfs_status.current_gtfs=1`, separate geography dimensions, route/mode
+activity, consensus progress, conflicts, unknown amenity status, integrity
+cautions, and recent contributions. “Active reviewer” means a reviewer with a
+submitted observation in the stated window; login/session activity is not
+counted. Historical inactive or retired-stop contributions are marked as such.
+The median is calculated among contributors with at least one review. A repeat
+reviewer has at least two reviews; repeat-observation rate is all reviews beyond
+each contributor's first divided by total reviews. Geography groups submitted
+reviews at active stops independently for state, county, municipality, ward, and
+ANC. Route counts include a review in every route serving that stop. Reached and
+near consensus use the canonical amenity workflow states `consensus_reached` and
+`one_observation_short`; conflict counts describe disagreement, not reviewer
+quality.
+
+Review leads can see public display names, contribution counts, timestamps,
+routes, and geography. The API excludes email, token hashes, auth-attempt keys,
+sessions, IP addresses, and private auth metadata. It provides no edits,
+deletion, overrides, evidence or identity mutation, account management, or
+assignment mutation.
+
+After backup and migration, operators assign the role explicitly:
+
+```text
+python scripts/active/set_reviewer_role.py --db <explicit-db> \
+  --reviewer-id <id> --role review_lead
+```
+
+The repository production path additionally requires
+`--allow-production-database`. Demotion uses `--role reviewer`.
+
 `GET /api/reviewer/email-auth-health` reports only availability, backend name,
 secure-cookie status, and required configuration names. It never returns SMTP
 credentials, API keys, or secret values. Configuration names may include

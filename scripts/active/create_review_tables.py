@@ -27,9 +27,31 @@ for column, declaration in (
     ("display_name", "TEXT"), ("profile_token", "TEXT"), ("email", "TEXT"),
     ("profile_created_at", "TIMESTAMP"),
     ("email_verified_at", "TIMESTAMP"), ("claimed_at", "TIMESTAMP"),
+    ("role", "TEXT NOT NULL DEFAULT 'reviewer'"),
 ):
     if column not in reviewer_columns:
         cur.execute(f"ALTER TABLE community_reviewers ADD COLUMN {column} {declaration}")
+
+cur.execute("""CREATE TRIGGER IF NOT EXISTS community_reviewers_role_insert
+BEFORE INSERT ON community_reviewers
+WHEN NEW.role IS NULL OR NEW.role NOT IN ('reviewer','review_lead')
+BEGIN
+    SELECT RAISE(ABORT, 'invalid community reviewer role');
+END""")
+cur.execute("""CREATE TRIGGER IF NOT EXISTS community_reviewers_role_update
+BEFORE UPDATE OF role ON community_reviewers
+WHEN NEW.role IS NULL OR NEW.role NOT IN ('reviewer','review_lead')
+BEGIN
+    SELECT RAISE(ABORT, 'invalid community reviewer role');
+END""")
+invalid_roles = cur.execute(
+    "SELECT COUNT(*) FROM community_reviewers "
+    "WHERE role NOT IN ('reviewer','review_lead') OR role IS NULL"
+).fetchone()[0]
+if invalid_roles:
+    raise RuntimeError(
+        f"community_reviewers contains {invalid_roles} invalid role value(s)"
+    )
 
 cur.execute("""CREATE UNIQUE INDEX IF NOT EXISTS idx_community_reviewers_verified_email
 ON community_reviewers(email) WHERE email_verified_at IS NOT NULL""")

@@ -195,6 +195,9 @@ CREATE TABLE IF NOT EXISTS community_reviewers (
     profile_created_at TIMESTAMP,
     email_verified_at TIMESTAMP,
     claimed_at TIMESTAMP,
+    role TEXT NOT NULL DEFAULT 'reviewer' CHECK (
+        role IN ('reviewer', 'review_lead')
+    ),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

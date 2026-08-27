@@ -32,6 +32,7 @@ before an approved mutation.
 | `rebuild_stop_routes_clean.py` | specialized route repair | destructive selected-DB rebuild with backup; not routine |
 | `replace_ddot_shelter_evidence.py` | atomic DDOT evidence replacement | preflight default; `--apply` mutates explicit/selected DB |
 | `reset_v2_test_contributions.py --db <copy> --confirm "RESET DISPOSABLE V2 TEST CONTRIBUTIONS"` | historical first-cutover test-data reset | destructive and narrow; refuses databases where V2 cutover state exists |
+| `set_reviewer_role.py --db <db> --reviewer-id <id> --role reviewer\|review_lead` | promote or demote a verified pilot review lead | explicit database; repository production path additionally requires `--allow-production-database`; no web role editor |
 | `python -m scripts.active.serve_pilot` | limited-pilot Waitress runner | validates production environment (including optional Resend HTTPS or SMTP email) and serves behind operator-managed HTTPS |
 
 `src/processing/build_physical_stops.py` is bootstrap-only. It requires

@@ -139,6 +139,12 @@ You may review anonymously. If email sign-in is offered, a one-time email link
 can keep your profile and review history together across browsers or devices.
 Your email is not displayed with public observations.
 
+Designated pilot review leads may see your display name, review time, and
+contribution counts when monitoring coverage and evidence quality. They cannot
+see your email, sign-in links, session information, or other private
+authentication details through the review-lead dashboard, and they cannot edit
+your observation.
+
 Choosing to steward a stop means an interest in helping keep its community
 record current. It does not give ownership of the stop or authority to enter
 property, maintain facilities, or act for a transit agency.

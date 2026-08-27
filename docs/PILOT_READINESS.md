@@ -162,7 +162,8 @@ notice; link the handbook during onboarding rather than drafting a legal policy 
 `review_feedback` and `community_requests` tables exist but have no coherent current
 general-feedback route/UI. The legacy community-action path is not a substitute.
 Before inviting volunteers, designate a monitored email or issue-form URL and add one
-link after an owner is chosen. No admin/feedback system was built.
+link after an owner is chosen. A compact review-lead dashboard now provides
+read-only pilot visibility, but it is not a feedback intake system.
 
 Existing database data can measure assignments created/completed, scenario, campaign,
 observations, reviewers, verified-email claims, repeat reviewers, distinct reviewed
@@ -208,7 +209,7 @@ third-party analytics are unnecessary.
 | Physical-stop V2 baseline | Ready | Ready | preserve lifecycle/lineage and durable history | data |
 | Local evidence gaps | Not a blocker | Not a blocker | communicate uncertainty | data |
 | Observation sparsity | Not a blocker | Not a blocker | pilot purpose is collection | data |
-| Admin layer | Not a blocker | Not a pilot prerequisite | manual triage for small pilot | deferred |
+| Review-lead visibility | Ready after role migration | Ready after role migration | assign a designated verified account | code/deployment |
 | Photo uploads | Not a blocker | Not a pilot prerequisite | no action | deferred |
 | Steward notifications | Not a blocker | Not a pilot prerequisite | set expectations | deferred |
 | Geographic continuity | Not a blocker | Not a deployment blocker | choose bounded pilot area/tasks | operations |
@@ -218,7 +219,7 @@ Physical-stop V2 is the authoritative baseline. Remaining quarantined evidence a
 explicit manual exceptions are pilot cautions, not migration blockers: provenance is
 preserved and uncertainty must remain visible.
 
-The admin layer is post-pilot. Account merge/recovery exceptions, moderation,
+The pilot dashboard is visibility only. Account merge/recovery exceptions, moderation,
 conflict/source inspection, feedback triage, stewardship, and assignment management
 can be handled manually for 3–5 supervised volunteers. Evidence deletion/moderation
 and account merging require designed audit trails before automation.

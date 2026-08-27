@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pilot Review Lead</title>
+<link rel="stylesheet" href="/static/dashboard.css">
+<style>
+.admin-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:1rem; }
+.admin-card { padding:1rem; border:1px solid #d8dee4; border-radius:8px; background:#fff; }
+.admin-card .value { display:block; font-size:1.8rem; font-weight:700; }
+.admin-table { width:100%; border-collapse:collapse; }
+.admin-table th,.admin-table td { text-align:left; padding:.55rem; border-bottom:1px solid #ddd; }
+.admin-section { margin:1.5rem 0; }
+.muted { color:#555; }
+</style>
+</head>
+<body>
+<main class="panel">
+<p><a href="/dashboard">← Dashboard</a></p>
+<h1>Pilot review lead</h1>
+<p class="muted">Read-only activity, coverage, and evidence-quality signals. Conflict identifies useful follow-up, not volunteer error.</p>
+<div id="adminStatus">Loading pilot summary…</div>
+<section class="admin-section"><h2>Pilot activity</h2><div id="activity" class="admin-grid"></div></section>
+<section class="admin-section"><h2>Coverage</h2><div id="coverage" class="admin-grid"></div><div id="geography"></div><div id="routes"></div></section>
+<section class="admin-section"><h2>Review quality and consensus</h2><div id="quality" class="admin-grid"></div></section>
+<section class="admin-section"><h2>Needs attention</h2><div id="attention" class="admin-grid"></div><div id="attentionLinks"></div></section>
+<section class="admin-section"><h2>Recent contributions</h2><div id="recent"></div></section>
+<section class="admin-section"><h2>Metric definitions</h2><ul id="definitions"></ul></section>
+</main>
+<script>
+const labels = {
+ total_reviewers:"Total reviewer profiles",active_reviewers_7d:"Contributors, last 7 days",
+ active_reviewers_30d:"Contributors, last 30 days",reviews_total:"Submitted reviews",
+ reviews_7d:"Reviews, last 7 days",reviews_30d:"Reviews, last 30 days",
+ median_reviews_per_contributor:"Median reviews per contributor",repeat_reviewers:"Repeat contributors",
+ repeat_observation_rate:"Repeat-observation rate",active_stops:"Active stops",
+ distinct_active_stops_reviewed:"Active stops reviewed",active_stops_never_reviewed:"Active stops never reviewed",
+ active_stop_review_percent:"Active-stop coverage (%)",stops_with_2plus_observations:"Stops with 2+ observations",
+ stops_with_reached_consensus:"Stops with reached consensus",stops_near_consensus:"Stops near consensus",
+ community_conflict_stops:"Community-observation conflicts",canonical_evidence_conflict_stops:"Canonical evidence conflicts",
+ unknown_bench_stops:"Unknown bench status",unknown_shelter_stops:"Unknown shelter status",
+ reviews_with_unsure_presence:"Reviews with unsure presence",manual_identity_exceptions:"Manual identity exceptions",
+ derived_integrity_anomalies:"Derived-data integrity anomalies"
+};
+function card(container,key,value){
+ const box=document.createElement("div"); box.className="admin-card";
+ const number=document.createElement("span"); number.className="value";
+ number.textContent=key==="repeat_observation_rate" ? `${(Number(value)*100).toFixed(1)}%` : value;
+ const caption=document.createElement("span"); caption.textContent=labels[key]||key;
+ box.append(number,caption); container.appendChild(box);
+}
+function cards(id,data){const el=document.getElementById(id); Object.entries(data).forEach(([k,v])=>{if(typeof v!=="object")card(el,k,v);});}
+function table(title,headers,rows){
+ const wrap=document.createElement("div"); const h=document.createElement("h3");h.textContent=title;wrap.appendChild(h);
+ if(!rows.length){const p=document.createElement("p");p.textContent="No activity yet.";wrap.appendChild(p);return wrap;}
+ const t=document.createElement("table");t.className="admin-table";const tr=document.createElement("tr");
+ headers.forEach(x=>{const th=document.createElement("th");th.textContent=x[0];tr.appendChild(th);});
+ const head=document.createElement("thead");head.appendChild(tr);t.appendChild(head);const body=document.createElement("tbody");
+ rows.forEach(row=>{const line=document.createElement("tr");headers.forEach(x=>{const td=document.createElement("td");if(x[2]&&row[x[2]]){const a=document.createElement("a");a.href=row[x[2]];a.textContent=row[x[1]]??"Not available";td.appendChild(a);}else{td.textContent=row[x[1]]??"Not available";}line.appendChild(td);});body.appendChild(line);});
+ t.appendChild(body);wrap.appendChild(t);return wrap;
+}
+async function load(){
+ const response=await fetch("/api/admin/pilot-summary"); if(!response.ok){document.getElementById("adminStatus").textContent="Unable to load pilot summary.";return;}
+ const data=await response.json(); document.getElementById("adminStatus").textContent=`Updated ${data.generated_at}`;
+ cards("activity",data.activity);cards("coverage",data.coverage);cards("quality",data.quality);cards("attention",data.needs_attention);
+ const geography=document.getElementById("geography");Object.entries(data.coverage.geography).forEach(([dimension,rows])=>geography.appendChild(table(dimension.replace("_"," "),[["Area","value"],["Reviews","review_count"],["Stops","reviewed_stop_count"]],rows)));
+ document.getElementById("routes").appendChild(table("Routes",[["Route","route_id"],["Reviews","review_count"],["Stops","reviewed_stop_count"]],data.coverage.routes));
+ const links=document.getElementById("attentionLinks");Object.entries(data.needs_attention.examples).forEach(([kind,rows])=>{const h=document.createElement("h3");h.textContent=(labels[kind]||kind).replaceAll("_"," ");links.appendChild(h);if(!rows.length){const p=document.createElement("p");p.textContent="None currently.";links.appendChild(p);}rows.forEach(row=>{const p=document.createElement("p"),a=document.createElement("a");a.href=row.stop_url;a.textContent=`${row.stop_name||"Bus Stop"} (Stop ${row.physical_stop_id})`;p.appendChild(a);links.appendChild(p);});});
+ const recentRows=data.recent_reviews.map(row=>({stop:`${row.stop_name||"Bus Stop"} (${row.physical_stop_id})`,stop_url:row.stop_url,geography:[row.geography.municipality,row.geography.county,row.geography.state].filter(Boolean).join(", "),review_mode:row.review_mode,observed_at:row.observed_at,reviewer_display_name:row.reviewer_display_name,status:`Bench: ${row.bench_status||"unknown"}; shelter: ${row.shelter_status||"unknown"}${row.active_stop?"":"; historical inactive/retired stop"}`}));
+ document.getElementById("recent").appendChild(table("",[["Stop","stop","stop_url"],["Geography","geography"],["Mode","review_mode"],["Submitted","observed_at"],["Reviewer","reviewer_display_name"],["Current summary","status"]],recentRows));
+ const defs=document.getElementById("definitions");Object.entries(data.definitions).forEach(([key,value])=>{const li=document.createElement("li");li.textContent=`${key.replaceAll("_"," ")}: ${value}`;defs.appendChild(li);});
+}
+load();
+</script>
+</body>
+</html>

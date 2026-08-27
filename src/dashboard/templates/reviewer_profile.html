@@ -36,6 +36,13 @@ or authority over a stop.</p>
 <p><a href="/dashboard#map">Find a stop to steward</a></p>
 </div>
 
+{% if show_pilot_admin %}
+<div class="panel volunteer-card">
+<h2>Pilot tools</h2>
+<p><a href="/admin" class="dashboard-button">Pilot review dashboard</a></p>
+</div>
+{% endif %}
+
 <script>
 let profileData = null;
 

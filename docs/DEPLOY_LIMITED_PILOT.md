@@ -76,6 +76,38 @@ python scripts/active/create_review_tables.py
 python -m scripts.active.serve_pilot
 ```
 
+The migration adds the constrained `reviewer`/`review_lead` role. After the
+intended reviewer has completed email sign-in, grant read-only pilot-summary
+access with an explicit database target:
+
+```powershell
+python scripts/active/set_reviewer_role.py `
+  --db $env:DMV_BUS_STOPS_DB `
+  --reviewer-id <id> `
+  --role review_lead `
+  --allow-production-database
+```
+
+There is no web role editor. Confirm the database and reviewer ID first. Use
+`--role reviewer` to remove access.
+
+For an existing PythonAnywhere pilot database, preserve all contribution and account
+history with this deployment sequence:
+
+1. Stop or quiesce review traffic and create a verified hosted-database backup.
+2. Pull the reviewed current `main` release; do not recreate or reset the database.
+3. Set `DMV_BUS_STOPS_DB` to the explicit absolute hosted path and run
+   `python scripts/active/create_review_tables.py`.
+4. Run SQLite `PRAGMA integrity_check` and `PRAGMA foreign_key_check` against that
+   same path.
+5. Identify the already authenticated, email-verified reviewer ID.
+6. Run `set_reviewer_role.py --db <hosted-db> --reviewer-id <id> --role review_lead`.
+   Add `--allow-production-database` only when the target is the repository's
+   protected default production path.
+7. Reload the PythonAnywhere web application.
+8. Verify the designated account can open `/admin` while an ordinary account and a
+   signed-out browser are denied.
+
 The runner fails before binding if the secret is weak/placeholder, database path is
 relative or missing, secure cookies are disabled, development auth is enabled, the
 support contact is missing, SMTP is partial, or API/assignment database paths differ.
@@ -168,3 +200,6 @@ intentional smoke contribution. Never delete it afterward.
     notes, cookie, token, or query-string values.
 11. Recompute the live database SHA, run integrity/FK checks, and retain the result
     with the deployment record.
+12. Sign in as the designated review lead and open `/admin`. Confirm signed-out and
+    ordinary-reviewer browsers are denied, totals match known submissions, inactive
+    history is marked, and no email or authentication metadata appears.
