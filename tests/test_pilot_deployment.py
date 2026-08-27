@@ -81,11 +81,19 @@ class PilotDeploymentTests(unittest.TestCase):
                 create_verified_backup(source, backup)
 
     def test_support_contact_is_visible_without_exposing_configuration(self):
-        with patch.dict("os.environ", {"PILOT_SUPPORT_CONTACT": "help@example.org"}):
+        support = "mdcdsatransit@gmail.com"
+        with patch.dict("os.environ", {"PILOT_SUPPORT_CONTACT": support}):
             api.app.config.update(TESTING=True)
-            page = api.app.test_client().get("/dashboard").get_data(as_text=True)
-        self.assertIn("help@example.org", page)
-        self.assertNotIn("FLASK_SECRET_KEY", page)
+            api.app.secret_key = "deployment-test-secret"
+            client = api.app.test_client()
+            pages = [client.get(path).get_data(as_text=True) for path in (
+                "/dashboard", "/feedback", "/handbook", "/volunteer-handbook"
+            )]
+        for page in pages:
+            self.assertIn(support, page)
+            self.assertNotIn("help@example.org", page)
+            self.assertNotIn("login@dmvbusstop.org", page)
+            self.assertNotIn("FLASK_SECRET_KEY", page)
 
     def test_runtime_has_no_request_body_or_session_debug_prints(self):
         source = (Path(__file__).resolve().parents[1] / "src/api/app.py").read_text(

@@ -259,7 +259,14 @@ class PilotAdminDashboardTests(unittest.TestCase):
         self.login(4, "owner")
         listing = self.client.get("/api/admin/reviewers")
         self.assertEqual(200, listing.status_code)
-        self.assertNotIn("@example.com", listing.get_data(as_text=True))
+        reviewers = listing.get_json()["reviewers"]
+        self.assertEqual("reviewer@example.com", next(
+            row["email"] for row in reviewers if row["reviewer_id"] == 2
+        ))
+        self.assertNotIn("reviewer_key", listing.get_data(as_text=True))
+        page = self.client.get("/admin/reviewers")
+        self.assertEqual(200, page.status_code)
+        self.assertIn("Account email", page.get_data(as_text=True))
         self.assertEqual(400, self.client.post(
             "/api/admin/reviewers/2/role", json={"role": "review_lead"}
         ).status_code)

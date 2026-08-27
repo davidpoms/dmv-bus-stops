@@ -16,6 +16,7 @@ DMV Bus Stops Improvement API
 """
 
 from flask import Flask, jsonify, send_from_directory, request, render_template, redirect, session, url_for
+from markupsafe import escape
 import calendar
 import math
 from datetime import datetime, timedelta
@@ -69,7 +70,18 @@ app.config.update(
 
 @app.context_processor
 def pilot_template_configuration():
-    return {"pilot_support_contact": os.environ.get("PILOT_SUPPORT_CONTACT", "").strip()}
+    return {"pilot_support_contact": pilot_support_contact()}
+
+
+def pilot_support_contact():
+    return os.environ.get("PILOT_SUPPORT_CONTACT", "").strip()
+
+
+def handbook_support_html():
+    contact = pilot_support_contact()
+    if not contact:
+        return ""
+    return f"<p>For pilot support, contact <strong>{escape(contact)}</strong>.</p>"
 
 
 @app.before_request
@@ -4859,16 +4871,16 @@ def pilot_reviewer_management_page():
 @owner_required
 def pilot_reviewers_api():
     rows = query_db("""
-        SELECT r.id,r.display_name,r.role,r.email_verified_at IS NOT NULL,
-               COUNT(o.id),MAX(o.observed_at)
+        SELECT r.id,r.display_name,LOWER(TRIM(r.email)),r.role,
+               r.email_verified_at IS NOT NULL,COUNT(o.id),MAX(o.observed_at)
         FROM community_reviewers r
         LEFT JOIN stop_observations o ON o.reviewer_id=r.id AND o.source='community_review'
         GROUP BY r.id ORDER BY r.id
     """)
     return jsonify({"reviewers": [{
         "reviewer_id": row[0], "display_name": row[1] or "Community Volunteer",
-        "role": row[2], "verified": bool(row[3]), "contribution_count": row[4],
-        "last_contribution_at": row[5],
+        "email": row[2], "role": row[3], "verified": bool(row[4]),
+        "contribution_count": row[5], "last_contribution_at": row[6],
     } for row in rows]})
 
 
@@ -5543,7 +5555,7 @@ def community_handbook():
         extensions=["tables"]
     )
 
-    return html
+    return html + handbook_support_html()
 
 
 
@@ -5559,7 +5571,7 @@ def volunteer_handbook():
         extensions=["tables"]
     )
 
-    return html
+    return html + handbook_support_html()
 
 
 

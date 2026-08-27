@@ -2,6 +2,8 @@
 <title>Send feedback</title><link rel="stylesheet" href="/static/dashboard.css"></head><body>
 <main class="panel"><h1>Send feedback or report a problem</h1>
 <p>Tell the pilot team what was confusing or did not work. Do not include private personal information.</p>
+<p>Need another way to reach the pilot team? Contact pilot support:
+<strong>{{ pilot_support_contact or "ask your pilot coordinator" }}</strong>.</p>
 <form id="feedbackForm">
 <input type="hidden" id="csrf" value="{{ csrf_token }}">
 <input type="hidden" id="stopId" value="{{ stop_id|e }}">
