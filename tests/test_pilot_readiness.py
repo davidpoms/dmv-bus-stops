@@ -1,3 +1,5 @@
+import os
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -45,6 +47,18 @@ class PilotReadinessTests(unittest.TestCase):
             self.assertEqual(302, home.status_code)
             self.assertEqual("/dashboard", home.headers["Location"])
             self.assertEqual(200, client.get("/dashboard").status_code)
+
+    def test_handbooks_resolve_from_repository_outside_process_cwd(self):
+        original_cwd = Path.cwd()
+        with tempfile.TemporaryDirectory(dir=ROOT / ".tmp") as temporary:
+            try:
+                os.chdir(temporary)
+                with patch.dict(app.config, {"TESTING": True}):
+                    client = app.test_client()
+                    self.assertEqual(200, client.get("/handbook").status_code)
+                    self.assertEqual(200, client.get("/volunteer-handbook").status_code)
+            finally:
+                os.chdir(original_cwd)
 
     def test_runbooks_separate_active_archive_local_and_production(self):
         archive = (ROOT / "scripts/archive/README.md").read_text(encoding="utf-8")

@@ -5316,13 +5316,12 @@ def pipeline_geography():
 @app.route("/handbook")
 def community_handbook():
 
-    from pathlib import Path
     import markdown
 
-    path = Path("docs/DMV_Bus_Stop_Intelligence_Handbook.md")
+    path = BASE_DIR / "docs" / "DMV_Bus_Stop_Intelligence_Handbook.md"
 
     html = markdown.markdown(
-        path.read_text(),
+        path.read_text(encoding="utf-8"),
         extensions=["tables"]
     )
 
@@ -5333,13 +5332,12 @@ def community_handbook():
 @app.route("/volunteer-handbook")
 def volunteer_handbook():
 
-    from pathlib import Path
     import markdown
 
-    path = Path("docs/Volunteer_Review_Handbook.md")
+    path = BASE_DIR / "docs" / "Volunteer_Review_Handbook.md"
 
     html = markdown.markdown(
-        path.read_text(),
+        path.read_text(encoding="utf-8"),
         extensions=["tables"]
     )
 
