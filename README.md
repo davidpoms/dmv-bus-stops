@@ -129,6 +129,11 @@ The supported limited-pilot runner is Waitress behind operator-managed HTTPS. Se
 [Deploying the limited volunteer pilot](docs/DEPLOY_LIMITED_PILOT.md) for required
 environment, backup, startup/restart, and smoke-test procedures.
 
+Use `requirements.txt` for development, offline processing, and the standalone
+Waitress path. Hosted WSGI environments such as PythonAnywhere should install
+`requirements-pilot.txt`; PythonAnywhere supplies its own WSGI server and does not
+need Waitress.
+
 By default it uses `src/database/dmv_bus_stops.db`. To run against a copy or a
 separate deployment database, set `DMV_BUS_STOPS_DB` to that path before starting
 the application or an active migration that supports the override.

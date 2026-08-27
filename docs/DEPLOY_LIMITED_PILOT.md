@@ -5,6 +5,12 @@ development server is local-only. Production uses Waitress behind an operator-ma
 HTTPS terminator. The repository does not provide DNS, certificates, firewall rules,
 machine provisioning, process supervision, SMTP credentials, or a support mailbox.
 
+`requirements.txt` is the full development, offline data-processing, scientific,
+and standalone Waitress environment. `requirements-pilot.txt` is the lightweight
+hosted Flask runtime and intentionally omits NumPy, SciPy, pandas, GeoPandas, Shapely,
+PyProj, Pyogrio, and Waitress. The optional road-index engine imports NumPy/SciPy only
+when that feature is first used and otherwise fails closed to no road result.
+
 ## External prerequisites
 
 The operator must supply:
@@ -64,6 +70,28 @@ relative or missing, secure cookies are disabled, development auth is enabled, t
 support contact is missing, SMTP is partial, or API/assignment database paths differ.
 It uses four Waitress threads. SQLite remains the durability boundary; keep this as
 one application process for the limited pilot.
+
+### PythonAnywhere
+
+PythonAnywhere supplies the production WSGI server, so do not install or invoke
+Waitress there. Install the lightweight runtime into the selected virtual environment:
+
+```bash
+python -m pip install -r requirements-pilot.txt
+```
+
+Configure all required environment values in the PythonAnywhere deployment/WSGI
+environment before importing the application, add the repository root to `sys.path`,
+and expose it with:
+
+```python
+from src.api.app import app as application
+```
+
+Use PythonAnywhere's HTTPS URL and keep `SESSION_COOKIE_SECURE=1`. Reload through
+the PythonAnywhere web-app control after code, dependency, environment, or schema
+changes. The operator must still supply persistent storage, secret, support contact,
+backup retention, and optional SMTP credentials.
 
 For restart: stop inbound traffic, stop the supervised Waitress process cleanly,
 verify the configured database path, deploy/install the reviewed release, run only

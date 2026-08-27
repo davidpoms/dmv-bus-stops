@@ -26,8 +26,6 @@ from src.review.assignment_router import (
     normalize_campaign,
 )
 
-from src.spatial.nearest_road import RoadSpatialIndex
-
 from src.assessment.interpretation import (
     interpret_ddot_evidence,
     summarize_stop_evidence,
@@ -654,6 +652,8 @@ def get_road_index():
 
 
     try:
+
+        from src.spatial.nearest_road import RoadSpatialIndex
 
         rows = query_db(
             """
