@@ -46,7 +46,7 @@ from src.review.email_delivery import (
     EmailConfigurationError, email_delivery_status, email_required_configuration,
     email_sender_from_env,
 )
-from src.review.admin_dashboard import build_pilot_summary, review_lead_access
+from src.review.admin_dashboard import build_pilot_summary, owner_access, review_lead_access
 from src.amenities.status_synthesis import geography_status_rows
 from src.amenities.review_priority import refresh_after_community_mutation
 from src.processing.serving_directions import serving_directions_for_stop
@@ -4805,10 +4805,38 @@ def review_lead_required(view):
     return protected
 
 
+def owner_required(view):
+    @wraps(view)
+    def protected(*args, **kwargs):
+        conn = _auth_db()
+        try:
+            allowed, reason = owner_access(
+                conn, session.get("authenticated_reviewer_id"),
+                session.get("reviewer_key"),
+            )
+        finally:
+            conn.close()
+        if allowed:
+            return view(*args, **kwargs)
+        if reason == "role_migration_required":
+            return {"error": "Reviewer role migration is required"}, 503
+        if reason == "authentication_required":
+            return {"error": "Verified reviewer sign-in is required"}, 401
+        return {"error": "Owner access is required"}, 403
+    return protected
+
+
 @app.route("/admin")
 @review_lead_required
 def pilot_admin_page():
-    return render_template("pilot_admin.html")
+    conn = _auth_db()
+    try:
+        is_owner, _reason = owner_access(
+            conn, session.get("authenticated_reviewer_id"), session.get("reviewer_key")
+        )
+    finally:
+        conn.close()
+    return render_template("pilot_admin.html", is_owner=is_owner)
 
 
 @app.route("/api/admin/pilot-summary")
@@ -4819,6 +4847,114 @@ def pilot_admin_summary():
         return jsonify(build_pilot_summary(conn))
     finally:
         conn.close()
+
+
+@app.route("/admin/reviewers")
+@owner_required
+def pilot_reviewer_management_page():
+    return render_template("pilot_reviewer_management.html", csrf_token=session.get("auth_csrf"))
+
+
+@app.route("/api/admin/reviewers")
+@owner_required
+def pilot_reviewers_api():
+    rows = query_db("""
+        SELECT r.id,r.display_name,r.role,r.email_verified_at IS NOT NULL,
+               COUNT(o.id),MAX(o.observed_at)
+        FROM community_reviewers r
+        LEFT JOIN stop_observations o ON o.reviewer_id=r.id AND o.source='community_review'
+        GROUP BY r.id ORDER BY r.id
+    """)
+    return jsonify({"reviewers": [{
+        "reviewer_id": row[0], "display_name": row[1] or "Community Volunteer",
+        "role": row[2], "verified": bool(row[3]), "contribution_count": row[4],
+        "last_contribution_at": row[5],
+    } for row in rows]})
+
+
+@app.route("/api/admin/reviewers/<int:reviewer_id>/role", methods=["POST"])
+@owner_required
+def pilot_reviewer_role_update(reviewer_id):
+    data = request.get_json(silent=True) or request.form
+    if data.get("csrf_token") != session.get("auth_csrf"):
+        return {"error": "Invalid request token"}, 400
+    role = data.get("role")
+    if role not in ("reviewer", "review_lead"):
+        return {"error": "Web role changes are limited to reviewer and review lead"}, 400
+    conn = _auth_db()
+    try:
+        target = conn.execute(
+            "SELECT role FROM community_reviewers WHERE id=?", (reviewer_id,)
+        ).fetchone()
+        if not target:
+            return {"error": "Reviewer not found"}, 404
+        if target[0] == "owner":
+            return {"error": "Owner roles can only be changed by an operator"}, 403
+        conn.execute("UPDATE community_reviewers SET role=? WHERE id=?", (role, reviewer_id))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"success": True, "role": role}
+
+
+FEEDBACK_CATEGORIES = {"confusing", "stop_location", "review_question", "broken", "other"}
+
+
+@app.route("/feedback")
+def pilot_feedback_page():
+    csrf = secrets.token_urlsafe(24)
+    session["feedback_csrf"] = csrf
+    page_path = request.args.get("page", "")[:300]
+    if (not page_path.startswith("/") or page_path.startswith("//")
+            or any(ord(ch) < 32 for ch in page_path)):
+        page_path = ""
+    return render_template(
+        "feedback.html", csrf_token=csrf,
+        stop_id=request.args.get("stop_id", ""),
+        page_path=page_path,
+    )
+
+
+@app.route("/api/feedback", methods=["POST"])
+def pilot_feedback_submit():
+    data = request.get_json(silent=True) or request.form
+    if data.get("csrf_token") != session.get("feedback_csrf"):
+        return {"error": "Invalid request token"}, 400
+    category = str(data.get("category", ""))
+    message = str(data.get("message", "")).strip()
+    if category not in FEEDBACK_CATEGORIES:
+        return {"error": "Choose a valid feedback category"}, 400
+    if not message or len(message) > 2000 or any(
+        ord(ch) < 32 and ch not in "\n\r\t" for ch in message
+    ):
+        return {"error": "Message must be 1 to 2000 readable characters"}, 400
+    page_path = str(data.get("page_path", "")).strip()
+    if (len(page_path) > 300 or (page_path and (
+            not page_path.startswith("/") or page_path.startswith("//")
+            or any(ord(ch) < 32 for ch in page_path)))):
+        return {"error": "Page context is invalid"}, 400
+    raw_stop = str(data.get("stop_id", "")).strip()
+    stop_id = None
+    if raw_stop:
+        try:
+            stop_id = int(raw_stop)
+        except ValueError:
+            return {"error": "Stop ID is invalid"}, 400
+        if not query_db("SELECT 1 FROM physical_stops WHERE id=?", (stop_id,)):
+            return {"error": "Stop was not found"}, 400
+    reviewer_id = None
+    authenticated_id = session.get("authenticated_reviewer_id")
+    reviewer_key = session.get("reviewer_key")
+    if authenticated_id and reviewer_key and query_db(
+        "SELECT 1 FROM community_reviewers WHERE id=? AND reviewer_key=? AND email_verified_at IS NOT NULL",
+        (authenticated_id, reviewer_key),
+    ):
+        reviewer_id = authenticated_id
+    query_db("""INSERT INTO pilot_feedback
+        (category,message,physical_stop_id,page_path,reviewer_id)
+        VALUES (?,?,?,?,?)""", (category, message, stop_id, page_path or None, reviewer_id))
+    session.pop("feedback_csrf", None)
+    return {"success": True, "message": "Thank you for helping improve the pilot."}
 
 
 def _reviewer_email_status():

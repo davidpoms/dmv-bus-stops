@@ -404,14 +404,16 @@ reviewer identifiers are not migrated by this feature.
 
 ### Pilot review-lead dashboard
 
-`community_reviewers.role` is constrained to `reviewer` or `review_lead` and
+`community_reviewers.role` is constrained to `reviewer`, `review_lead`, or `owner` and
 defaults to `reviewer`. `/admin` and `/api/admin/pilot-summary` share one
 server-side authorization check: the session must contain the verified reviewer
 ID and matching reviewer key, the database row must remain email verified, and
-its role must be `review_lead`. Anonymous reviewer keys and ordinary verified
+its role must be `review_lead` or `owner`. Anonymous reviewer keys and ordinary verified
 reviewers are denied. There is no public role-escalation endpoint.
 
-The dashboard is read-only. It summarizes submitted `community_review`
+The dashboard is read-only. Owners additionally have a narrow CSRF-protected page
+that changes only `reviewer` and `review_lead` roles; owner assignment and demotion
+remain operator-only. It summarizes submitted `community_review`
 observations, active-stop coverage using exactly
 `stop_gtfs_status.current_gtfs=1`, separate geography dimensions, route/mode
 activity, consensus progress, conflicts, unknown amenity status, integrity
@@ -442,6 +444,12 @@ python scripts/active/set_reviewer_role.py --db <explicit-db> \
 
 The repository production path additionally requires
 `--allow-production-database`. Demotion uses `--role reviewer`.
+
+`pilot_feedback` is the append-only general pilot feedback record. It stores a
+validated category and message, optional physical stop and page path, optional
+authenticated reviewer ID, and timestamp. It deliberately has no email, IP, browser
+fingerprint, session, or authentication fields. `/feedback` issues a dedicated CSRF
+token even for anonymous submissions. No edit, resolve, or delete route exists.
 
 `GET /api/reviewer/email-auth-health` reports only availability, backend name,
 secure-cookie status, and required configuration names. It never returns SMTP

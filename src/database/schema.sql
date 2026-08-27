@@ -196,13 +196,29 @@ CREATE TABLE IF NOT EXISTS community_reviewers (
     email_verified_at TIMESTAMP,
     claimed_at TIMESTAMP,
     role TEXT NOT NULL DEFAULT 'reviewer' CHECK (
-        role IN ('reviewer', 'review_lead')
+        role IN ('reviewer', 'review_lead', 'owner')
     ),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_community_reviewers_verified_email
 ON community_reviewers(email) WHERE email_verified_at IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS pilot_feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    category TEXT NOT NULL CHECK (category IN (
+        'confusing','stop_location','review_question','broken','other'
+    )),
+    message TEXT NOT NULL,
+    physical_stop_id INTEGER,
+    page_path TEXT,
+    reviewer_id INTEGER,
+    submitted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(physical_stop_id) REFERENCES physical_stops(id),
+    FOREIGN KEY(reviewer_id) REFERENCES community_reviewers(id)
+);
+CREATE INDEX IF NOT EXISTS idx_pilot_feedback_submitted
+ON pilot_feedback(submitted_at DESC);
 
 CREATE TABLE IF NOT EXISTS reviewer_login_tokens (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

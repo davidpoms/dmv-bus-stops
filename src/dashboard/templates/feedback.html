@@ -1,0 +1,28 @@
+<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Send feedback</title><link rel="stylesheet" href="/static/dashboard.css"></head><body>
+<main class="panel"><h1>Send feedback or report a problem</h1>
+<p>Tell the pilot team what was confusing or did not work. Do not include private personal information.</p>
+<form id="feedbackForm">
+<input type="hidden" id="csrf" value="{{ csrf_token }}">
+<input type="hidden" id="stopId" value="{{ stop_id|e }}">
+<input type="hidden" id="pagePath" value="{{ page_path|e }}">
+<label for="category">What kind of feedback is this?</label>
+<select id="category" required>
+<option value="">Choose one</option><option value="confusing">Something is confusing</option>
+<option value="stop_location">A stop or location looks wrong</option>
+<option value="review_question">A review question is unclear</option>
+<option value="broken">A page or feature is broken</option><option value="other">Other feedback</option>
+</select>
+<label for="message">What happened?</label>
+<textarea id="message" maxlength="2000" rows="7" required></textarea>
+<button class="dashboard-button" type="submit">Send feedback</button>
+</form><p id="status" role="status"></p><p><a id="returnLink" href="/dashboard">Return to dashboard</a></p></main>
+<script>
+const prior=document.getElementById("pagePath").value;
+if(prior.startsWith("/")) document.getElementById("returnLink").href=prior;
+document.getElementById("feedbackForm").addEventListener("submit",async(event)=>{
+ event.preventDefault();const response=await fetch("/api/feedback",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({category:document.getElementById("category").value,message:document.getElementById("message").value,stop_id:document.getElementById("stopId").value,page_path:prior,csrf_token:document.getElementById("csrf").value})});
+ const result=await response.json();document.getElementById("status").textContent=result.message||result.error;
+ if(response.ok) document.getElementById("feedbackForm").hidden=true;
+});
+</script></body></html>

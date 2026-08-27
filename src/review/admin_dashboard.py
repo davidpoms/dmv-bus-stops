@@ -6,7 +6,7 @@ import statistics
 from datetime import datetime, timedelta, timezone
 
 
-ROLES = ("reviewer", "review_lead")
+ROLES = ("reviewer", "review_lead", "owner")
 
 
 def review_lead_access(conn, authenticated_reviewer_id, reviewer_key):
@@ -25,9 +25,20 @@ def review_lead_access(conn, authenticated_reviewer_id, reviewer_key):
     ).fetchone()
     if not row or row[0] != reviewer_key or not row[1]:
         return False, "authentication_required"
-    if row[2] != "review_lead":
+    if row[2] not in ("review_lead", "owner"):
         return False, "review_lead_required"
     return True, None
+
+
+def owner_access(conn, authenticated_reviewer_id, reviewer_key):
+    allowed, reason = review_lead_access(conn, authenticated_reviewer_id, reviewer_key)
+    if not allowed:
+        return False, reason
+    role = conn.execute(
+        "SELECT role FROM community_reviewers WHERE id=? AND reviewer_key=?",
+        (authenticated_reviewer_id, reviewer_key),
+    ).fetchone()
+    return (True, None) if role and role[0] == "owner" else (False, "owner_required")
 
 
 def _scalar(conn, sql, params=()):
@@ -324,6 +335,30 @@ def build_pilot_summary(conn, now=None, recent_limit=25):
             (recent_limit,),
         )
     ]
+    feedback_exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='pilot_feedback'"
+    ).fetchone()
+    feedback = []
+    if feedback_exists:
+        feedback = [
+            {
+                "category": row[0], "message": row[1], "physical_stop_id": row[2],
+                "stop_name": row[3], "page_path": row[4], "submitted_at": row[5],
+                "reviewer_display_name": row[6] or "Anonymous volunteer",
+                "stop_url": f"/stop/{row[2]}" if row[2] is not None else None,
+            }
+            for row in conn.execute("""
+                SELECT f.category,f.message,f.physical_stop_id,p.primary_name,
+                       f.page_path,f.submitted_at,r.display_name
+                FROM pilot_feedback f
+                LEFT JOIN physical_stops p ON p.id=f.physical_stop_id
+                LEFT JOIN community_reviewers r ON r.id=f.reviewer_id
+                ORDER BY datetime(f.submitted_at) DESC,f.id DESC LIMIT 50
+            """)
+        ]
+    role_counts = {role: count for role, count in conn.execute(
+        "SELECT role,COUNT(*) FROM community_reviewers GROUP BY role"
+    )}
     return {
         "generated_at": now.isoformat(),
         "definitions": {
@@ -346,6 +381,16 @@ def build_pilot_summary(conn, now=None, recent_limit=25):
         "quality": quality,
         "needs_attention": attention,
         "recent_reviews": recent,
+        "pilot_operations": {
+            "feedback_count": _scalar(conn, "SELECT COUNT(*) FROM pilot_feedback")
+                if feedback_exists else 0,
+            "recent_feedback": feedback,
+            "verified_reviewers": _scalar(
+                conn, "SELECT COUNT(*) FROM community_reviewers WHERE email_verified_at IS NOT NULL"
+            ),
+            "review_leads": role_counts.get("review_lead", 0),
+            "owners": role_counts.get("owner", 0),
+        },
         "privacy": {
             "included": ["display name", "contribution counts", "review timestamps",
                          "route and geography activity"],

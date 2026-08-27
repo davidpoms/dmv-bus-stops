@@ -159,11 +159,9 @@ private email, public display-name intent, dated observations, imagery provenanc
 photo uploads, and stewardship without ownership. This is adequate as a concise pilot
 notice; link the handbook during onboarding rather than drafting a legal policy here.
 
-`review_feedback` and `community_requests` tables exist but have no coherent current
-general-feedback route/UI. The legacy community-action path is not a substitute.
-Before inviting volunteers, designate a monitored email or issue-form URL and add one
-link after an owner is chosen. A compact review-lead dashboard now provides
-read-only pilot visibility, but it is not a feedback intake system.
+The append-only `pilot_feedback` route now accepts minimal anonymous or signed-in
+feedback without IP, session, or email collection. Review leads and owners see a
+read-only queue; the monitored support contact remains configuration-driven.
 
 Existing database data can measure assignments created/completed, scenario, campaign,
 observations, reviewers, verified-email claims, repeat reviewers, distinct reviewed

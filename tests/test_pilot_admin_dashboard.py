@@ -30,6 +30,8 @@ class PilotAdminDashboardTests(unittest.TestCase):
             CREATE TABLE community_reviewers(
               id INTEGER PRIMARY KEY,reviewer_key TEXT UNIQUE,display_name TEXT,
               email TEXT,email_verified_at TEXT,role TEXT NOT NULL DEFAULT 'reviewer');
+            CREATE TABLE pilot_feedback(id INTEGER PRIMARY KEY,category TEXT,message TEXT,
+              physical_stop_id INTEGER,page_path TEXT,reviewer_id INTEGER,submitted_at TEXT);
             CREATE TABLE physical_stops(id INTEGER PRIMARY KEY,primary_name TEXT);
             CREATE TABLE stop_gtfs_status(physical_stop_id INTEGER,current_gtfs INTEGER);
             CREATE TABLE stop_jurisdiction(
@@ -60,6 +62,7 @@ class PilotAdminDashboardTests(unittest.TestCase):
                 (1, "lead", "Lead Person", "lead@example.com", "2026-01-01", "review_lead"),
                 (2, "reviewer", "", "reviewer@example.com", "2026-01-01", "reviewer"),
                 (3, "anon", None, None, None, "reviewer"),
+                (4, "owner", "Pilot Owner", "owner@example.com", "2026-01-01", "owner"),
             ],
         )
         conn.executemany("INSERT INTO physical_stops VALUES (?,?)",
@@ -122,6 +125,7 @@ class PilotAdminDashboardTests(unittest.TestCase):
         with self.client.session_transaction() as session:
             session["authenticated_reviewer_id"] = reviewer_id
             session["reviewer_key"] = reviewer_key
+            session["auth_csrf"] = "admin-csrf"
 
     def test_authorization_is_server_side_for_page_and_api(self):
         for path in ("/admin", "/api/admin/pilot-summary"):
@@ -137,6 +141,8 @@ class PilotAdminDashboardTests(unittest.TestCase):
         self.login(1, "lead")
         self.assertEqual(200, self.client.get("/admin").status_code)
         self.assertEqual(200, self.client.get("/api/admin/pilot-summary").status_code)
+        self.login(4, "owner")
+        self.assertEqual(200, self.client.get("/admin").status_code)
 
     def test_profile_admin_link_uses_the_same_server_authorization(self):
         self.login(2, "reviewer")
@@ -175,7 +181,7 @@ class PilotAdminDashboardTests(unittest.TestCase):
         self.assertEqual(200, response.status_code)
         data = response.get_json()
         self.assertEqual({
-            "total_reviewers": 3, "active_reviewers_7d": 2,
+            "total_reviewers": 4, "active_reviewers_7d": 2,
             "active_reviewers_30d": 2, "reviews_total": 4,
             "reviews_7d": 2, "reviews_30d": 3,
             "median_reviews_per_contributor": 2.0,
@@ -200,6 +206,75 @@ class PilotAdminDashboardTests(unittest.TestCase):
                         '"source_key":', '"email_verified_at":'):
             self.assertNotIn(private, body)
         self.assertEqual(before, hashlib.sha256(self.db.read_bytes()).hexdigest())
+
+    def test_feedback_anonymous_authenticated_validation_and_admin_visibility(self):
+        anonymous = self.client.get("/feedback?stop_id=1&page=/stop/1")
+        self.assertEqual(200, anonymous.status_code)
+        with self.client.session_transaction() as current:
+            csrf = current["feedback_csrf"]
+        response = self.client.post("/api/feedback", json={
+            "csrf_token": csrf, "category": "stop_location", "message": "Pin looks wrong",
+            "stop_id": 1, "page_path": "/stop/1",
+        })
+        self.assertEqual(200, response.status_code)
+        self.client.get("/feedback")
+        with self.client.session_transaction() as current:
+            csrf = current["feedback_csrf"]
+            current["authenticated_reviewer_id"] = 2
+            current["reviewer_key"] = "reviewer"
+        self.assertEqual(200, self.client.post("/api/feedback", json={
+            "csrf_token": csrf, "category": "confusing", "message": "Question unclear",
+            "page_path": "/review/3",
+        }).status_code)
+        self.client.get("/feedback")
+        with self.client.session_transaction() as current:
+            csrf = current["feedback_csrf"]
+        for payload in (
+            {"category": "bad", "message": "hello"},
+            {"category": "other", "message": ""},
+            {"category": "other", "message": "x" * 2001},
+            {"category": "other", "message": "bad\x00text"},
+        ):
+            with self.subTest(payload=payload):
+                self.assertEqual(400, self.client.post(
+                    "/api/feedback", json={**payload, "csrf_token": csrf}
+                ).status_code)
+        conn = sqlite3.connect(self.db)
+        rows = conn.execute("SELECT reviewer_id,physical_stop_id,page_path FROM pilot_feedback ORDER BY id").fetchall()
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(pilot_feedback)")}
+        conn.close()
+        self.assertEqual([(None, 1, "/stop/1"), (2, None, "/review/3")], rows)
+        self.assertFalse({"ip", "session_id", "email"} & columns)
+        self.login(1, "lead")
+        data = self.client.get("/api/admin/pilot-summary").get_json()
+        self.assertEqual(2, data["pilot_operations"]["feedback_count"])
+        self.assertNotIn("reviewer@example.com", json.dumps(data))
+
+    def test_owner_role_management_is_narrow_and_csrf_protected(self):
+        self.login(1, "lead")
+        self.assertEqual(403, self.client.get("/api/admin/reviewers").status_code)
+        self.assertEqual(403, self.client.post(
+            "/api/admin/reviewers/2/role", json={"role": "review_lead", "csrf_token": "admin-csrf"}
+        ).status_code)
+        self.login(4, "owner")
+        listing = self.client.get("/api/admin/reviewers")
+        self.assertEqual(200, listing.status_code)
+        self.assertNotIn("@example.com", listing.get_data(as_text=True))
+        self.assertEqual(400, self.client.post(
+            "/api/admin/reviewers/2/role", json={"role": "review_lead"}
+        ).status_code)
+        self.assertEqual(200, self.client.post(
+            "/api/admin/reviewers/2/role", json={"role": "review_lead", "csrf_token": "admin-csrf"}
+        ).status_code)
+        self.assertEqual(200, self.client.post(
+            "/api/admin/reviewers/2/role", json={"role": "reviewer", "csrf_token": "admin-csrf"}
+        ).status_code)
+        self.assertEqual(400, self.client.post(
+            "/api/admin/reviewers/2/role", json={"role": "owner", "csrf_token": "admin-csrf"}
+        ).status_code)
+        self.assertEqual(403, self.client.post(
+            "/api/admin/reviewers/4/role", json={"role": "reviewer", "csrf_token": "admin-csrf"}
+        ).status_code)
 
     def test_metric_window_definitions_use_observation_timestamps(self):
         conn = sqlite3.connect(self.db)
@@ -246,15 +321,16 @@ class ReviewerRoleMigrationAndCommandTests(unittest.TestCase):
         self.assertEqual((7, "keep", "reviewer"), conn.execute(
             "SELECT id,reviewer_key,role FROM community_reviewers"
         ).fetchone())
-        with self.assertRaises(sqlite3.IntegrityError):
-            conn.execute("UPDATE community_reviewers SET role='owner' WHERE id=7")
+        conn.execute("UPDATE community_reviewers SET role='owner' WHERE id=7")
+        self.assertEqual("owner", conn.execute("SELECT role FROM community_reviewers WHERE id=7").fetchone()[0])
+        conn.execute("UPDATE community_reviewers SET role='reviewer' WHERE id=7")
         with self.assertRaises(sqlite3.IntegrityError):
             conn.execute("UPDATE community_reviewers SET role=NULL WHERE id=7")
         conn.close()
         schema = (ROOT / "src" / "database" / "schema.sql").read_text(
             encoding="utf-8"
         )
-        self.assertIn("role IN ('reviewer', 'review_lead')", schema)
+        self.assertIn("role IN ('reviewer', 'review_lead', 'owner')", schema)
 
     def test_role_command_promotes_demotes_and_rejects_invalid_input(self):
         self.assertEqual(0, self.run_migration().returncode)
@@ -262,6 +338,8 @@ class ReviewerRoleMigrationAndCommandTests(unittest.TestCase):
         self.assertEqual("review_lead", set_reviewer_role(
             conn, 7, "review_lead"
         )["after"])
+        self.assertEqual("reviewer", set_reviewer_role(conn, 7, "reviewer")["after"])
+        self.assertEqual("owner", set_reviewer_role(conn, 7, "owner")["after"])
         self.assertEqual("reviewer", set_reviewer_role(conn, 7, "reviewer")["after"])
         with self.assertRaises(ValueError):
             set_reviewer_role(conn, 99, "review_lead")

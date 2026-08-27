@@ -149,6 +149,10 @@ Choosing to steward a stop means an interest in helping keep its community
 record current. It does not give ownership of the stop or authority to enter
 property, maintain facilities, or act for a transit agency.
 
+Use **Send feedback / Report a problem** to report confusing instructions, an
+incorrect stop location, an unclear question, or a broken feature. Feedback does
+not require sign-in and does not record your IP address or session identifier.
+
 ## Safety and privacy
 
 - Stay in a safe, lawful public location and do not interfere with riders,

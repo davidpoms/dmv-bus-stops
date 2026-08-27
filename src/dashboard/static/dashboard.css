@@ -857,3 +857,25 @@ td, th {
 .amenity-comparison-row span {
     line-height: 1.5;
 }
+.table-scroll {
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+form textarea,
+form select,
+form input {
+    box-sizing: border-box;
+    max-width: 100%;
+}
+
+@media (max-width: 600px) {
+    form textarea,
+    form select,
+    form input,
+    form button,
+    .dashboard-button {
+        width: 100%;
+        min-height: 44px;
+    }
+}

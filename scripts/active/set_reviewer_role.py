@@ -14,7 +14,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 DEFAULT_PRODUCTION_DB = (ROOT / "src" / "database" / "dmv_bus_stops.db").resolve()
-ROLES = ("reviewer", "review_lead")
+ROLES = ("reviewer", "review_lead", "owner")
 
 
 def set_reviewer_role(conn, reviewer_id, role):

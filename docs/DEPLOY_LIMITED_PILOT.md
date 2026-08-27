@@ -39,7 +39,7 @@ Required:
 FLASK_SECRET_KEY=<persistent random value, at least 32 characters>
 DMV_BUS_STOPS_DB=C:\absolute\persistent\path\dmv_bus_stops.db
 SESSION_COOKIE_SECURE=1
-PILOT_SUPPORT_CONTACT=<monitored email address or support URL>
+PILOT_SUPPORT_CONTACT=mdcdsatransit@gmail.com
 PILOT_BIND_HOST=127.0.0.1
 PILOT_BIND_PORT=8080
 LOG_LEVEL=INFO
@@ -90,6 +90,14 @@ python scripts/active/set_reviewer_role.py `
 
 There is no web role editor. Confirm the database and reviewer ID first. Use
 `--role reviewer` to remove access.
+
+For the 10–20 person pilot, bootstrap exactly the intended owner with the same
+operator-only command and `--role owner`. Owners inherit the read-only dashboard and
+may use `/admin/reviewers` only to move accounts between `reviewer` and `review_lead`.
+The browser cannot assign or demote owners, reveal email, or edit contributions.
+Volunteers can submit append-only feedback at `/feedback`; review leads and owners see
+the privacy-safe queue on `/admin`. The monitored contact is
+`mdcdsatransit@gmail.com`, supplied through `PILOT_SUPPORT_CONTACT`.
 
 For an existing PythonAnywhere pilot database, preserve all contribution and account
 history with this deployment sequence:

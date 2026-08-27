@@ -20,12 +20,14 @@
 <p><a href="/dashboard">← Dashboard</a></p>
 <h1>Pilot review lead</h1>
 <p class="muted">Read-only activity, coverage, and evidence-quality signals. Conflict identifies useful follow-up, not volunteer error.</p>
+{% if is_owner %}<p><a href="/admin/reviewers">Manage pilot review leads</a></p>{% endif %}
 <div id="adminStatus">Loading pilot summary…</div>
 <section class="admin-section"><h2>Pilot activity</h2><div id="activity" class="admin-grid"></div></section>
 <section class="admin-section"><h2>Coverage</h2><div id="coverage" class="admin-grid"></div><div id="geography"></div><div id="routes"></div></section>
 <section class="admin-section"><h2>Review quality and consensus</h2><div id="quality" class="admin-grid"></div></section>
 <section class="admin-section"><h2>Needs attention</h2><div id="attention" class="admin-grid"></div><div id="attentionLinks"></div></section>
 <section class="admin-section"><h2>Recent contributions</h2><div id="recent"></div></section>
+<section class="admin-section"><h2>Volunteer feedback</h2><div id="feedback"></div></section>
 <section class="admin-section"><h2>Metric definitions</h2><ul id="definitions"></ul></section>
 </main>
 <script>
@@ -69,6 +71,8 @@ async function load(){
  const links=document.getElementById("attentionLinks");Object.entries(data.needs_attention.examples).forEach(([kind,rows])=>{const h=document.createElement("h3");h.textContent=(labels[kind]||kind).replaceAll("_"," ");links.appendChild(h);if(!rows.length){const p=document.createElement("p");p.textContent="None currently.";links.appendChild(p);}rows.forEach(row=>{const p=document.createElement("p"),a=document.createElement("a");a.href=row.stop_url;a.textContent=`${row.stop_name||"Bus Stop"} (Stop ${row.physical_stop_id})`;p.appendChild(a);links.appendChild(p);});});
  const recentRows=data.recent_reviews.map(row=>({stop:`${row.stop_name||"Bus Stop"} (${row.physical_stop_id})`,stop_url:row.stop_url,geography:[row.geography.municipality,row.geography.county,row.geography.state].filter(Boolean).join(", "),review_mode:row.review_mode,observed_at:row.observed_at,reviewer_display_name:row.reviewer_display_name,status:`Bench: ${row.bench_status||"unknown"}; shelter: ${row.shelter_status||"unknown"}${row.active_stop?"":"; historical inactive/retired stop"}`}));
  document.getElementById("recent").appendChild(table("",[["Stop","stop","stop_url"],["Geography","geography"],["Mode","review_mode"],["Submitted","observed_at"],["Reviewer","reviewer_display_name"],["Current summary","status"]],recentRows));
+ const feedbackRows=data.pilot_operations.recent_feedback.map(row=>({category:row.category,message:row.message,stop:row.physical_stop_id?`${row.stop_name||"Bus Stop"} (${row.physical_stop_id})`:"Not linked to a stop",stop_url:row.stop_url,page_path:row.page_path||"Not provided",submitted_at:row.submitted_at,reviewer_display_name:row.reviewer_display_name}));
+ document.getElementById("feedback").appendChild(table("",[["Category","category"],["Message","message"],["Stop","stop","stop_url"],["Page","page_path"],["Submitted","submitted_at"],["Reviewer","reviewer_display_name"]],feedbackRows));
  const defs=document.getElementById("definitions");Object.entries(data.definitions).forEach(([key,value])=>{const li=document.createElement("li");li.textContent=`${key.replaceAll("_"," ")}: ${value}`;defs.appendChild(li);});
 }
 load();
