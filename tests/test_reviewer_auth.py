@@ -11,6 +11,8 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
+import requests
+
 from src.api import app as review_api
 from src.review import assignment_router
 from src.review.auth import (
@@ -170,6 +172,34 @@ class ReviewerAuthTests(unittest.TestCase):
         ).fetchone()[0])
         conn.close()
 
+    def test_resend_failure_keeps_public_response_private(self):
+        client = review_api.app.test_client()
+        with client.session_transaction() as session:
+            session["auth_csrf"] = "csrf"
+        secret = "re_private_test_key"
+        recipient = "private-recipient@example.com"
+        with patch.dict(review_api.app.config, {
+            "TESTING": False, "REVIEWER_EMAIL_SENDER": None
+        }), patch.dict(os.environ, {
+            "REVIEWER_EMAIL_BACKEND": "resend",
+            "REVIEWER_EMAIL_FROM": "DMV Bus Stops <login@dmvbusstop.org>",
+            "RESEND_API_KEY": secret,
+            "REVIEWER_AUTH_DEV_MODE": "",
+        }, clear=False), patch(
+            "src.review.email_delivery.requests.post",
+            side_effect=requests.Timeout("provider timeout"),
+        ), self.assertLogs(review_api.app.logger, level="WARNING") as captured:
+            response = client.post("/reviewer/sign-in?source=private-token", json={
+                "email": recipient, "csrf_token": "csrf"
+            })
+        body = response.get_data(as_text=True)
+        logs = "\n".join(captured.output)
+        self.assertEqual(503, response.status_code)
+        for rendered in (body, logs):
+            self.assertNotIn(secret, rendered)
+            self.assertNotIn(recipient, rendered)
+            self.assertNotIn("private-token", rendered)
+
     def test_email_and_source_rate_limits_are_persistent_and_private(self):
         sender = lambda email, link, minutes: None
         client = review_api.app.test_client()
@@ -303,6 +333,23 @@ class ReviewerAuthTests(unittest.TestCase):
         payload = response.get_json()
         self.assertNotIn("SMTP_PASSWORD", payload["required_configuration"])
         self.assertNotIn("password", response.get_data(as_text=True).lower())
+
+    def test_health_reports_resend_without_secret_value(self):
+        secret = "re_private_health_key"
+        with patch.dict(os.environ, {
+            "REVIEWER_EMAIL_BACKEND": "resend",
+            "REVIEWER_EMAIL_FROM": "DMV Bus Stops <login@dmvbusstop.org>",
+            "RESEND_API_KEY": secret,
+            "REVIEWER_AUTH_DEV_MODE": "",
+        }, clear=False), patch.dict(review_api.app.config, {
+            "TESTING": False, "REVIEWER_EMAIL_SENDER": None,
+        }):
+            response = review_api.app.test_client().get("/api/reviewer/email-auth-health")
+        payload = response.get_json()
+        self.assertTrue(payload["available"])
+        self.assertEqual("resend", payload["backend"])
+        self.assertIn("RESEND_API_KEY", payload["required_configuration"])
+        self.assertNotIn(secret, response.get_data(as_text=True))
 
     def test_unconfigured_login_ui_keeps_anonymous_review_available(self):
         client = review_api.app.test_client()

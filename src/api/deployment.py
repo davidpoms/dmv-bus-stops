@@ -33,12 +33,12 @@ def validate_pilot_environment(env=None):
         errors.append("PILOT_SUPPORT_CONTACT must name the monitored pilot contact")
 
     email_backend = env.get("REVIEWER_EMAIL_BACKEND", "").strip().lower()
-    if email_backend and email_backend != "smtp":
-        errors.append("REVIEWER_EMAIL_BACKEND must be unset or smtp")
-    if email_backend == "smtp":
+    if email_backend and email_backend not in ("smtp", "resend"):
+        errors.append("REVIEWER_EMAIL_BACKEND must be unset, smtp, or resend")
+    if email_backend in ("smtp", "resend"):
         try:
-            from src.review.email_delivery import smtp_sender_from_env
-            smtp_sender_from_env(env)
+            from src.review.email_delivery import email_sender_from_env
+            email_sender_from_env(env)
         except Exception as exc:
             errors.append(f"email login configuration is incomplete: {exc}")
 

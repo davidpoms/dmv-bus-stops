@@ -31,7 +31,7 @@ def main():
     app.logger.info(
         "pilot_start database=%s bind=%s:%s secure_cookie=true email_login=%s",
         database, host, port,
-        os.environ.get("REVIEWER_EMAIL_BACKEND", "").lower() == "smtp",
+        os.environ.get("REVIEWER_EMAIL_BACKEND", "").lower() in ("smtp", "resend"),
     )
     serve(app, host=host, port=port, threads=4)
 

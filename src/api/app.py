@@ -42,7 +42,8 @@ from src.review.auth import (
     normalize_email, supersede_login_tokens,
 )
 from src.review.email_delivery import (
-    EmailConfigurationError, email_delivery_status, smtp_sender_from_env,
+    EmailConfigurationError, email_delivery_status, email_required_configuration,
+    email_sender_from_env,
 )
 from src.amenities.status_synthesis import geography_status_rows
 from src.amenities.review_priority import refresh_after_community_mutation
@@ -4794,9 +4795,7 @@ def reviewer_email_auth_health():
         "secure_cookie": bool(app.config.get("SESSION_COOKIE_SECURE")),
         "required_configuration": [
             "FLASK_SECRET_KEY", "DMV_BUS_STOPS_DB", "SESSION_COOKIE_SECURE",
-            "REVIEWER_EMAIL_BACKEND", "REVIEWER_EMAIL_FROM", "SMTP_HOST",
-            "SMTP_PORT", "SMTP_USE_TLS",
-        ],
+        ] + email_required_configuration(),
     }
 
 
@@ -4810,7 +4809,7 @@ def _send_reviewer_magic_link(email, link, expires_minutes):
             (email, link, expires_minutes)
         )
         return
-    smtp_sender_from_env()(email, link, expires_minutes)
+    email_sender_from_env()(email, link, expires_minutes)
 
 
 @app.route("/reviewer/sign-in", methods=["GET", "POST"])

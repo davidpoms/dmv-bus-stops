@@ -21,7 +21,8 @@ The operator must supply:
 - an absolute path to the authoritative post-V2 SQLite database;
 - a generated persistent secret stored outside Git;
 - a monitored support email address or URL;
-- SMTP credentials and a verified sender only if email login is advertised.
+- a verified sender and either Resend API credentials or SMTP credentials only if
+  email login is advertised.
 
 Do not expose Waitress directly to the public internet. Its default pilot bind is
 `127.0.0.1:8080`; route HTTPS traffic to that listener through the selected trusted
@@ -50,10 +51,20 @@ Generate the secret outside Git:
 python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
-Keep `REVIEWER_AUTH_DEV_MODE` unset. Anonymous review works without SMTP. If email
-login is offered, additionally supply the complete `REVIEWER_EMAIL_BACKEND=smtp`,
-sender, host, port, TLS choice, and paired username/password documented in
-`.env.example`. Partial or invalid SMTP configuration prevents pilot startup.
+Keep `REVIEWER_AUTH_DEV_MODE` unset. Anonymous review works without an email
+provider. On a free PythonAnywhere account, configure the HTTPS backend (after
+verifying the sender domain in Resend):
+
+```text
+REVIEWER_EMAIL_BACKEND=resend
+REVIEWER_EMAIL_FROM=DMV Bus Stops <login@dmvbusstop.org>
+RESEND_API_KEY=<secret>
+```
+
+The API key belongs only in deployment-owned environment configuration. The Resend
+backend does not require any `SMTP_*` value. On a host that permits SMTP, the
+existing `REVIEWER_EMAIL_BACKEND=smtp` configuration remains supported as documented
+in `.env.example`. Partial or invalid configuration prevents pilot startup.
 
 ## Install, migrate, and start
 
@@ -91,7 +102,9 @@ from src.api.app import app as application
 Use PythonAnywhere's HTTPS URL and keep `SESSION_COOKIE_SECURE=1`. Reload through
 the PythonAnywhere web-app control after code, dependency, environment, or schema
 changes. The operator must still supply persistent storage, secret, support contact,
-backup retention, and optional SMTP credentials.
+backup retention, and optional Resend or SMTP credentials. PythonAnywhere must be
+able to reach `https://api.resend.com`; delivery fails closed if its outbound HTTPS
+proxy or Resend is unavailable.
 
 For restart: stop inbound traffic, stop the supervised Waitress process cleanly,
 verify the configured database path, deploy/install the reviewed release, run only

@@ -370,10 +370,15 @@ Run `python scripts/active/create_review_tables.py` before deployment. Set a
 strong `FLASK_SECRET_KEY`, `DMV_BUS_STOPS_DB`, and `SESSION_COOKIE_SECURE=1`
 under HTTPS. Email delivery uses the provider-neutral callable
 `(recipient, verification_url, expires_minutes)`. Tests may inject
-`REVIEWER_EMAIL_SENDER`; production can select the standard-library SMTP adapter
-with `REVIEWER_EMAIL_BACKEND=smtp`, `REVIEWER_EMAIL_FROM`, `SMTP_HOST`,
-`SMTP_PORT`, `SMTP_USE_TLS`, and optional paired `SMTP_USERNAME` / `SMTP_PASSWORD`.
-No provider is mandatory and no credentials belong in the repository.
+`REVIEWER_EMAIL_SENDER`; production can select either the Resend HTTPS adapter with
+`REVIEWER_EMAIL_BACKEND=resend`, `REVIEWER_EMAIL_FROM`, and `RESEND_API_KEY`, or the
+standard-library SMTP adapter with `REVIEWER_EMAIL_BACKEND=smtp`,
+`REVIEWER_EMAIL_FROM`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USE_TLS`, and optional paired
+`SMTP_USERNAME` / `SMTP_PASSWORD`. No provider is mandatory and no credentials
+belong in the repository. The HTTPS adapter posts the same plain-text message to
+Resend's `/emails` endpoint with a ten-second timeout and requires a 2xx response
+containing a nonempty provider message ID. Provider errors are reduced to a fixed,
+non-sensitive application error; there is no SDK or request-loop retry.
 `SMTP_USE_TLS=1` means STARTTLS on the configured connection; TLS negotiation
 completes before optional authentication, and failure does not downgrade.
 `SMTP_USE_TLS=0` is intended only when transport security is supplied by the
@@ -399,7 +404,8 @@ reviewer identifiers are not migrated by this feature.
 
 `GET /api/reviewer/email-auth-health` reports only availability, backend name,
 secure-cookie status, and required configuration names. It never returns SMTP
-credentials or secrets. Rotating `FLASK_SECRET_KEY` invalidates sessions and
+credentials, API keys, or secret values. Configuration names may include
+`RESEND_API_KEY` when that backend is selected. Rotating `FLASK_SECRET_KEY` invalidates sessions and
 makes earlier HMAC rate-limit buckets unreachable; durable reviewer history is
 unchanged.
 

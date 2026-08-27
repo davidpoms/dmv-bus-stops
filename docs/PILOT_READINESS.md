@@ -17,7 +17,8 @@ that history.
 | `FLASK_SECRET_KEY` | required in all served environments | No fallback. Non-test requests return 503 until configured. |
 | `DMV_BUS_STOPS_DB` | optional locally; required explicitly in production/operations | Defaults to repository `src/database/dmv_bus_stops.db`. |
 | `SESSION_COOKIE_SECURE` | required production choice | Defaults `0`; set `1` only with HTTPS. Cookies are HttpOnly, SameSite=Lax, with a 30-day permanent-session lifetime. |
-| `REVIEWER_EMAIL_BACKEND` | required for production email login | Must equal `smtp`; otherwise email login reports unavailable while anonymous review remains available. |
+| `REVIEWER_EMAIL_BACKEND` | required for production email login | Accepts `resend` (HTTPS) or `smtp`; otherwise email login reports unavailable while anonymous review remains available. |
+| `RESEND_API_KEY` | required when Resend is enabled | Stored only in deployment configuration. Missing keys and provider/network failures fail closed. No SMTP values are required. |
 | `REVIEWER_EMAIL_FROM`, `SMTP_HOST`, `SMTP_PORT` | required when SMTP is enabled | Missing/invalid values fail closed with a generic 503 login response. |
 | `SMTP_USE_TLS` | optional SMTP setting | Defaults `1` for STARTTLS; only `0` or `1` accepted. No silent downgrade. |
 | `SMTP_USERNAME`, `SMTP_PASSWORD` | optional paired SMTP credentials | Either both or neither; an incomplete pair is rejected. |
@@ -30,9 +31,9 @@ The repository already depends on `python-dotenv`. `src.api.app` now loads the
 repository-root `.env` before importing assignment/database consumers. Production
 still fails without an explicit secret; `.env` provides no insecure fallback.
 
-For Resend, use its dashboard-provided SMTP host, port, username, password, and a
-verified sender/domain. Map them to the provider-neutral SMTP variables in
-`.env.example`; do not guess or commit provider credentials.
+For a free PythonAnywhere deployment, use the Resend HTTPS backend with a verified
+sender/domain and deployment-owned `RESEND_API_KEY`. Hosts that permit SMTP can keep
+using the provider-neutral SMTP variables. Do not guess or commit credentials.
 
 ## HTTPS, proxy, and server deployment
 

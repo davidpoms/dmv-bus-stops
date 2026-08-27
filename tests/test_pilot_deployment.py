@@ -44,6 +44,21 @@ class PilotDeploymentTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "email login configuration"):
                 validate_pilot_environment(environment)
 
+    def test_resend_requires_only_resend_configuration(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[1] / ".tmp") as raw:
+            database = Path(raw) / "pilot.db"
+            sqlite3.connect(database).close()
+            environment = self.valid_environment(database)
+            environment.update({
+                "REVIEWER_EMAIL_BACKEND": "resend",
+                "REVIEWER_EMAIL_FROM": "DMV Bus Stops <login@dmvbusstop.org>",
+                "RESEND_API_KEY": "re_test_secret",
+            })
+            self.assertEqual(database.resolve(), validate_pilot_environment(environment))
+            environment.pop("RESEND_API_KEY")
+            with self.assertRaisesRegex(RuntimeError, "email login configuration"):
+                validate_pilot_environment(environment)
+
     def test_backup_is_verified_preserves_rows_and_refuses_overwrite(self):
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[1] / ".tmp") as raw:
             root = Path(raw)
