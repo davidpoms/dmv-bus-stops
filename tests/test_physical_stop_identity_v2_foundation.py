@@ -173,6 +173,23 @@ class ResetGuardTests(unittest.TestCase):
         for table in ("bus_stops", "physical_stops", "stop_amenity_evidence"):
             self.assertEqual(1, conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
 
+    def test_reset_refuses_database_after_v2_cutover_has_started(self):
+        conn = sqlite3.connect(":memory:")
+        self.addCleanup(conn.close)
+        conn.executescript("""
+          CREATE TABLE community_reviewers(id INTEGER PRIMARY KEY);
+          INSERT INTO community_reviewers VALUES(1);
+          CREATE TABLE physical_stop_v2_cutover_state(
+            id INTEGER PRIMARY KEY, status TEXT NOT NULL
+          );
+          INSERT INTO physical_stop_v2_cutover_state VALUES(1,'complete');
+        """)
+        with self.assertRaisesRegex(RuntimeError, "history are durable"):
+            reset_test_contributions(conn, confirmation=CONFIRMATION)
+        self.assertEqual(1, conn.execute(
+            "SELECT COUNT(*) FROM community_reviewers"
+        ).fetchone()[0])
+
 
 if __name__ == "__main__":
     unittest.main()

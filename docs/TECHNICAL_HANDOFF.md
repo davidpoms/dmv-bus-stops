@@ -23,20 +23,18 @@ Operational rules:
 4. Apply only the required migration/rebuild to production.
 5. Recompute the production hash and validate again.
 
-Physical Stop V2 uses `scripts/active/migrate_physical_stops_v2.py`, as documented
-in `docs/physical-stop-identity-v2.md`. Review a fresh-copy JSON report, preserve a
-byte-verified rollback copy, and obtain separate production approval before using
-its production-only override. Proposal gates, integrity checks, and the second-run
-identity no-op check are mandatory.
+Physical Stop V2 was applied to production with
+`scripts/active/migrate_physical_stops_v2.py`; its persistent lifecycle and lineage
+state are authoritative. The migration orchestrator remains useful for provenance
+and idempotency checks, but it is not a routine maintenance command.
 
-Production authorization is decided at the V2 orchestration boundary and explicitly
-propagated only to the nested pre-volunteer contribution reset. Direct reset execution
-still requires its own default-database override. The atomic checkpoint report is the
-source of truth after a failure. During this pre-volunteer migration window, any
-failure before `status=complete` requires restoring the independently hashed rollback
-copy before retrying, rather than resuming the partially committed database. Stop
-application access first; after restoration, verify the SHA, SQLite integrity, and
-foreign keys, fix and review the cause, and restart only from the clean baseline.
+The nested contribution reset existed only inside the first pre-volunteer cutover.
+The standalone reset now refuses any database where V2 cutover state exists. After
+cutover, all reviewer and contribution records are durable. Recovery must stop
+application access, restore the newest independently hashed backup that includes
+durable contributions, verify its SHA, SQLite integrity, and foreign keys, and then
+replay only reviewed, contribution-preserving migrations. Never restore the pre-V2
+baseline or use the disposable reset as normal recovery.
 
 Some older producers still accept their database as a positional argument or
 Python parameter instead of reading `DMV_BUS_STOPS_DB`. Check each entry point;
@@ -53,11 +51,11 @@ Physical Stop Identity V2 makes that identity persistent. Routine refreshes prod
 a reconciliation plan and preserve IDs; the old connected-component builder is
 bootstrap-only. Lifecycle tables retain retired identities and successor lineage.
 Geography is recomputed from coordinates, while evidence attribution is versioned
-separately from raw claims. The automatic proposal is reproducible through
+separately from raw claims. The applied automatic proposal is reproducible through
 `scripts/diagnostics/generate_physical_stop_v2_manifest.py`; its reviewed cardinality
 gate is 384 parents and 791 child groups. Proposal generation is read-only and is not
-permission to migrate production. A full temporary migration orchestrator and the
-remaining compatibility rebuild contracts are still required.
+permission to alter authoritative production identities. The explicit-database
+orchestrator and compatibility rebuild contracts are covered by the cutover tests.
 
 Versioned facility context is preserved separately in `gtfs_feed_snapshots` and
 `gtfs_stop_structure`. Import an explicit ZIP against a database copy with

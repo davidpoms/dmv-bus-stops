@@ -1,8 +1,8 @@
 # Physical Stop Identity v2 handoff
 
 V2 defines a physical stop as one passenger boarding/waiting location. The
-production migration remains deferred; current `physical_stop_id` values have not
-changed.
+production cutover is complete; the persistent identity registry, lifecycle state,
+and predecessor/successor lineage are authoritative.
 
 ## Persistent identity foundation
 
@@ -23,10 +23,9 @@ canonical coordinates; unavailable dimensions remain null rather than being copi
 Evidence attribution is stored separately from raw evidence, and ambiguous spatial
 evidence may remain unresolved.
 
-Current reviewer/community content is disposable owner-created test data for the
-one-time V2 cutover only. Its reset is explicit and confirmed, not part of routine
-reconciliation. After the V2 baseline, reviewer identities and contribution history
-are durable and future changes must use lineage and explicit disposition.
+Reviewer identities and contribution history are durable. The one-time disposable
+test-data reset was confined to the initial cutover and now refuses databases with
+V2 cutover state. Future changes must use lineage and explicit disposition.
 
 ## Deterministic automatic proposal
 
@@ -103,10 +102,11 @@ generator.
 
 ## Derived rebuild inventory and order
 
-After a future temporary identity migration, use this dependency order:
+The production cutover used this dependency order; use it only for reviewed copy
+rehearsals and contribution-preserving maintenance:
 
 1. validate proposal/version/hash and apply identity lineage;
-2. explicitly reset disposable pre-pilot contributions;
+2. during the first pre-volunteer cutover only, reset disposable contributions;
 3. recompute child geography and evidence attribution;
 4. rebuild `stop_gtfs_status`;
 5. rebuild opportunity assessments and rider percentile;
@@ -137,10 +137,10 @@ Current rebuild-path inventory:
 | `project_priorities` | no current command | compatibility library only | **incomplete** |
 | reporting/project exports | partial commands | mixed | **incomplete** |
 
-The remaining cutover blocker is a single reviewed, explicit-database migration and
-rebuild orchestrator covering the identity apply plus every row above. It is
-deliberately outside this foundation commit; maintainers must not assemble a
-production cutover ad hoc from the individual calls.
+The explicit-database orchestrator now covers the cutover-compatible rebuild path.
+The compatibility outputs marked incomplete above remain non-authoritative legacy
+or reporting paths; do not assemble an ad hoc production identity migration from
+individual calls.
 
 ## Cutover orchestrator
 
@@ -156,8 +156,8 @@ The command refuses the repository production database unless the unmistakable
 `--allow-production-database` override is supplied. That override is reserved for a
 separately reviewed production operation. The orchestrator makes this target-safety
 decision once and explicitly propagates the authorization to its nested disposable-
-contribution reset. The reset command retains its independent
-`--allow-default-database` guard when invoked directly; path existence, an environment
+contribution reset during the first cutover. The reset command now refuses any
+database with V2 cutover state when invoked directly; path existence, an environment
 variable, or a nested call alone never implies authorization. Before first mutation it regenerates and
 gates proposal version `physical-stop-v2-proposal-1`, 384 predecessors, 791
 children, the five manual exceptions, and canonical SHA
@@ -179,7 +179,9 @@ checks are mandatory.
 
 A second `--apply` verifies identity lineage as a no-op and reruns only idempotent
 derived rebuilds. Partial event state aborts. Rollback means restoring the byte-
-verified pre-cutover copy, never reversing lineage with ad hoc SQL.
+verified pre-cutover copy during the original cutover window, never reversing lineage
+with ad hoc SQL. After durable contributions exist, recovery uses the newest verified
+post-cutover backup that contains them.
 
 The JSON report is an atomic, durable phase checkpoint, not merely an end-of-run
 summary. It records the target, starting SHA, proposal identity/counts, current and
@@ -207,14 +209,12 @@ Transaction and recovery boundaries are intentionally explicit:
 | Derived rebuilds | supported producers commit independently; not wrapped in one unsafe global transaction |
 | Final invariants | read-only integrity, FK, lineage, active, and retired-derived validation |
 
-Because committed phases can precede a later failure, the supported pre-volunteer
-policy is conservative: after any failure before `status=complete`, preserve the
-failed database/report for diagnosis, restore the independently hashed pre-cutover
-copy, fix the cause, and restart from that clean baseline. Do not resume a partial
-cutover in place. Automatic file rollback is intentionally absent because replacing
-SQLite files while connections may be open is unsafe. Once real volunteer history
-exists, reconciliation must preserve that history through persistent lineage and
-must never use this baseline reset.
+Because committed phases can precede a later failure, the original pre-volunteer
+cutover policy required restoring the independently hashed pre-cutover copy rather
+than resuming in place. That is historical cutover guidance, not current recovery.
+Now that durable history exists, stop application access and restore the newest
+verified post-cutover backup containing that history; verify SHA, integrity, and
+foreign keys before service resumes. Never use the baseline reset.
 
 Retired `/stops/<id>` requests return HTTP 410 with lineage and successor links;
 `/stop/<id>` renders the same explanation. A predecessor is never silently aliased.

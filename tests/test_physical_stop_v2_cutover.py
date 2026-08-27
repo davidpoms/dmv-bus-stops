@@ -186,7 +186,8 @@ class ProductionSafetyTests(unittest.TestCase):
                         database_path=self.database)
                 reset_module.reset_test_contributions(
                     conn, confirmation=reset_module.CONFIRMATION,
-                    database_path=self.database, allow_default=True)
+                    database_path=self.database, allow_default=True,
+                    _cutover_authorization=reset_module._CUTOVER_AUTHORIZATION)
         self.assertEqual(0, self.reviewer_count())
 
     def test_identity_checkpoint_survives_failure_and_requires_rollback(self):

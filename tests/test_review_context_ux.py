@@ -176,6 +176,12 @@ class ReviewContextUxTests(unittest.TestCase):
         page = (ROOT / "src/dashboard/templates/review.html").read_text(encoding="utf-8")
         self.assertIn('selectedMode === "remote"', page)
 
+    def test_duplicate_submission_has_a_browser_completion_state(self):
+        page = (ROOT / "src/dashboard/templates/review.html").read_text(encoding="utf-8")
+        self.assertIn("response.status === 409", page)
+        self.assertIn('result.error === "Review already submitted"', page)
+        self.assertIn("Review already submitted", page)
+
 
 if __name__ == "__main__":
     unittest.main()

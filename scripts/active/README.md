@@ -30,7 +30,7 @@ before an approved mutation.
 | `rebuild_stop_amenity_status.py` | canonical shelter/bench synthesis rebuild | mutates explicit/selected DB |
 | `rebuild_stop_routes_clean.py` | specialized route repair | destructive selected-DB rebuild with backup; not routine |
 | `replace_ddot_shelter_evidence.py` | atomic DDOT evidence replacement | preflight default; `--apply` mutates explicit/selected DB |
-| `reset_v2_test_contributions.py --db <copy> --confirm "RESET DISPOSABLE V2 TEST CONTRIBUTIONS"` | one-time pre-pilot test-data reset | destructive and narrow; refuses the default DB unless separately authorized |
+| `reset_v2_test_contributions.py --db <copy> --confirm "RESET DISPOSABLE V2 TEST CONTRIBUTIONS"` | historical first-cutover test-data reset | destructive and narrow; refuses databases where V2 cutover state exists |
 
 `src/processing/build_physical_stops.py` is bootstrap-only. It requires
 `--bootstrap-empty-database` and refuses a populated identity registry.

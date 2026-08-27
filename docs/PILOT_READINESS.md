@@ -4,14 +4,11 @@ This audit targets a supervised 3–5 person volunteer pilot. It does not approv
 a public production launch or change data, scoring, evidence, review routing, or
 physical-stop identity.
 
-Before real volunteer contributions begin, complete or explicitly defer the V2
-identity baseline. Current owner-created review data may be reset only through the
-narrow confirmed cutover command. After that baseline, reviewer accounts and all
-contribution history are durable and normal reconciliation cannot truncate them.
-
-The V2 cutover now has a supported explicit-database orchestrator. Production
-cutover remains an operational gate until the fresh-copy rehearsal report is
-reviewed and the production window and byte-verified rollback are approved.
+The Physical-stop identity V2 production cutover is complete and authoritative.
+Reviewer accounts, assignments, observations, consensus, and related contribution
+history are now durable. The pre-volunteer reset command refuses a database once
+the V2 cutover has started; normal reconciliation and derived rebuilds must preserve
+that history.
 
 ## Configuration inventory
 
@@ -73,7 +70,10 @@ Remove-Item Env:DMV_BUS_STOPS_DB
 ```
 
 First validate every mutation against a temporary copy. A hash proves byte-level
-change/no-change; it does not replace row-count and invariant checks.
+change/no-change; it does not replace row-count and invariant checks. Recovery after
+volunteer contributions means restoring a current, verified backup and preserving
+all durable history—not returning to the pre-V2 database or rerunning the disposable
+contribution reset.
 
 ## Repository and filesystem classification
 
@@ -206,7 +206,7 @@ third-party analytics are unnecessary.
 | Feedback mechanism | Operational requirement | Operational requirement | choose monitored contact and link it | operations/docs |
 | Error handling | Caution | Caution | supervised rollout; improve later | code/deferred |
 | Serving direction | Ready | Ready | explain occasional multiple headings | documentation |
-| Physical-stop identity migration | Not a blocker | Not a deployment blocker | defer repair; flag examples | data/deferred |
+| Physical-stop V2 baseline | Ready | Ready | preserve lifecycle/lineage and durable history | data |
 | Local evidence gaps | Not a blocker | Not a blocker | communicate uncertainty | data |
 | Observation sparsity | Not a blocker | Not a blocker | pilot purpose is collection | data |
 | Admin layer | Not a blocker | Not a pilot prerequisite | manual triage for small pilot | deferred |
@@ -215,9 +215,9 @@ third-party analytics are unnecessary.
 | Geographic continuity | Not a blocker | Not a deployment blocker | choose bounded pilot area/tasks | operations |
 | Pilot observability | Ready | Ready | prepare read-only queries | operations |
 
-Physical-stop identity is a **pilot caution**, not a blocker: display provenance is
-safe, contradictions remain visible, and the pilot is evidence collection rather
-than identity migration. Avoid presenting a contradictory stop as a single known curb.
+Physical-stop V2 is the authoritative baseline. Remaining quarantined evidence and
+explicit manual exceptions are pilot cautions, not migration blockers: provenance is
+preserved and uncertainty must remain visible.
 
 The admin layer is post-pilot. Account merge/recovery exceptions, moderation,
 conflict/source inspection, feedback triage, stewardship, and assignment management
@@ -238,7 +238,8 @@ Before inviting volunteers:
 7. Choose a bounded pilot geography/task set and brief volunteers on uncertainty and
    occasional contradictory serving directions.
 
-Post-pilot backlog: physical-stop lineage/splitting, active-script DB-target cleanup,
-retiring legacy routes/templates, browser-friendly auth error pages, feedback triage,
+Post-pilot backlog: resolving explicit V2 manual exceptions and quarantined evidence,
+active-script DB-target cleanup, retiring legacy routes/templates, browser-friendly
+auth error pages, feedback triage,
 minimal client-error/abandonment observability if justified, and admin workflows based
 on actual pilot needs.

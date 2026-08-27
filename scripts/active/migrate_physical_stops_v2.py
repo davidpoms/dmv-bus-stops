@@ -16,7 +16,9 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.active.reset_v2_test_contributions import CONFIRMATION, TABLES, reset_test_contributions
+from scripts.active.reset_v2_test_contributions import (
+    CONFIRMATION, TABLES, _CUTOVER_AUTHORIZATION, reset_test_contributions,
+)
 from src.amenities.review_priority import rebuild_review_priority
 from src.amenities.status_synthesis import rebuild_stop_amenity_status
 from src.assessment.calculate_recommendation_confidence import calculate_confidence
@@ -411,7 +413,8 @@ def run(path, *, apply=False, reset_contributions=True, allow_production=False,
                 if reset_contributions:
                     report["contribution_reset_deleted"] = reset_test_contributions(
                         conn, confirmation=CONFIRMATION, database_path=target,
-                        allow_default=allow_production)
+                        allow_default=allow_production,
+                        _cutover_authorization=_CUTOVER_AUTHORIZATION)
                     checkpoint(report, report_path, "test_contributions_reset")
                     update_persistent_checkpoint(conn, "running", "test_contributions_reset")
                 else:

@@ -1,7 +1,8 @@
 """ONE-TIME PRE-VOLUNTEER reset of disposable test contributions for V2 cutover.
 
-This is not a routine migration or reconciliation strategy. After real volunteer
-work begins, reviewer accounts and contribution history are durable.
+This is not a routine migration or reconciliation strategy. It refuses databases
+where the V2 cutover has started. After that point, reviewer accounts and
+contribution history are durable.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ DEFAULT_DATABASE = Path(os.environ.get(
     "DMV_BUS_STOPS_DB", ROOT / "src" / "database" / "dmv_bus_stops.db"
 ))
 CONFIRMATION = "RESET DISPOSABLE V2 TEST CONTRIBUTIONS"
+_CUTOVER_AUTHORIZATION = object()
 
 # Child-to-parent order. This list is deliberately narrow and audited.
 TABLES = (
@@ -32,7 +34,7 @@ TABLES = (
 
 
 def reset_test_contributions(conn, *, confirmation, allow_default=False,
-                             database_path=None):
+                             database_path=None, _cutover_authorization=None):
     if confirmation != CONFIRMATION:
         raise ValueError(f"confirmation must exactly equal: {CONFIRMATION}")
     if database_path is not None:
@@ -42,6 +44,16 @@ def reset_test_contributions(conn, *, confirmation, allow_default=False,
     existing = {row[0] for row in conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table'"
     )}
+    if ("physical_stop_v2_cutover_state" in existing
+            and _cutover_authorization is not _CUTOVER_AUTHORIZATION):
+        state = conn.execute(
+            "SELECT status FROM physical_stop_v2_cutover_state WHERE id=1"
+        ).fetchone()
+        if state is not None:
+            raise RuntimeError(
+                "contribution reset is unavailable after V2 cutover has started; "
+                "reviewer accounts and contribution history are durable"
+            )
     counts = {table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
               for table in TABLES if table in existing}
     with conn:
@@ -53,7 +65,8 @@ def reset_test_contributions(conn, *, confirmation, allow_default=False,
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="ONE-TIME PRE-VOLUNTEER destructive reset of test contributions only."
+        description=("ONE-TIME PRE-VOLUNTEER destructive reset of test contributions "
+                     "only; unavailable after V2 cutover starts.")
     )
     parser.add_argument("--db", type=Path, default=DEFAULT_DATABASE)
     parser.add_argument("--confirm", required=True)
