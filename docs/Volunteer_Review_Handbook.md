@@ -1,190 +1,158 @@
-# Volunteer Review Handbook
+# How to review a bus stop
 
-Thank you for helping build a trustworthy community record of bus-stop waiting
-conditions across the DMV. You are not being asked to make a construction or
-agency decision. You are adding a dated observation that can fill a gap, test an
-older record, or describe something a conventional dataset does not capture.
+Thank you for contributing a careful, dated observation of a bus-stop waiting
+area. The goal is not to reach a particular conclusion. Record what you can see,
+use **Unsure** when you cannot tell, and skip any review you cannot complete
+safely.
 
-## Why your observation matters
+## 1. Choose a stop
 
-Bus-stop amenities change. A bench can be installed, removed, damaged, or made
-harder to use. Construction can change the waiting area. Street View can remain
-unchanged for years. Local inventories can omit a feature or disagree with one
-another.
+The dashboard offers several ways to begin:
 
-A careful review can:
+- **Review a seating opportunity** selects a current stop where a review may be
+  useful. The score orders the work; it does not decide which stops qualify for
+  improvements.
+- **My Routes** selects stops served by routes you chose on **Choose My Routes**.
+- **Near Me** selects a nearby stop after you provide a location.
+- The map or a stop page lets you choose a particular stop directly.
 
-- confirm or challenge evidence that only suggests a bench or shelter is present
-- resolve disagreement among sources
-- provide evidence where public datasets are silent
-- distinguish “seating exists” from “the seating is comfortable and usable”
-- document accessibility, weather exposure, and how riders use the waiting area
-- add context newer than available Street View imagery
-- contribute toward community consensus
-- help decide what kind of follow-up review would be useful
+Every path uses the same survey. The page may emphasize questions related to
+the reason the stop was selected, but you can answer all visible questions.
 
-Each assignment-backed review appends a new observation. It does not erase an
-older observation from the same reviewer or stop. One review is a dated piece of
-evidence; repeated reviews can show whether reported conditions persist or
-change. The system preserves that history, but it does not yet perform automatic
-change detection.
+## 2. Confirm that you have the right boarding location
 
-## Choose how you want to review
+Before reviewing, check the displayed stop name and location. Open **View stop
+details** if you need more context.
 
-### Review a seating opportunity
+Pay special attention to **Serving direction**. It means the direction a bus
+travels from that boarding location, not the route destination, street name, or
+direction the Street View camera faces. Nearby stops, opposite sides of a road,
+or separate terminal bays may look similar while serving different directions
+and having different amenities.
 
-The system chooses a current stop where an observation would be useful, ordered
-by the broad seating-opportunity ranking. Every active stop is represented in
-that opportunity universe; the score orders stops and is not a pass/fail gate.
+If more than one serving direction is shown, use the exact location, sign,
+routes, and direction together. Multiple directions can be legitimate. If you
+cannot confidently match the place you are viewing to the displayed stop, skip
+it rather than reviewing a nearby sibling or opposite-direction stop.
 
-### My Route
+A retired stop cannot receive a new review. Its stop page links to every current
+successor; choose the successor that matches the location you can observe.
 
-Choose routes you know or ride. The selected stop comes from those routes, not
-from the seating-opportunity review rotation.
+## 3. Choose the review method
 
-### Near Me
+Choose the method that describes your evidence:
 
-Choose a stop near your supplied location. Location is used for selection; it
-does not turn the review into a seating-opportunity assignment.
+- **In person** means you are at the stop.
+- **Remote — I used a visual source such as Google Street View** means you are
+  reviewing imagery rather than visiting.
 
-### Map or direct stop page
+For a remote review, enter the imagery month and year displayed by the source.
+If you cannot determine it, check the option saying so. The imagery date is when
+the pictured condition existed; the submission date is when you completed the
+review. They are not interchangeable.
 
-Choose a particular stop yourself.
+Street View's camera heading is only a viewing orientation. Never use it to
+replace or infer the stop's serving direction.
 
-On the review page, two short explanations keep these ideas separate:
+## 4. Record shelter and seating
 
-- **Why you're reviewing this stop** describes the path that brought you there.
-- **What would be useful to check** describes the evidence gap at that stop.
+Answer from the stop's actual waiting area, not from a nearby stop.
 
-All paths use the same survey. Some questions are emphasized because they are
-especially useful, but other ordinary observation questions remain available.
+- Say whether a shelter is visible. If it is, describe how much weather
+  protection it appears to provide.
+- Select every seating type you can see, including shelter seating, a separate
+  bench, individual seats, or leaning/perch seating.
+- Record apparent limitations such as dividers, a narrow seat, or leaning-only
+  support.
+- Choose **None** only when you can see the relevant waiting area well enough to
+  observe that no seating is present. Otherwise choose **Unsure**.
 
-## Start with what you can actually observe
+Do not treat a map symbol, a nearby amenity, or silence in an inventory as proof
+that a bench or shelter is absent. WMATA Rider Tools can help with transit and
+stop context, but WMATA data shown here is not authority for current bench or
+shelter presence. Local inventory evidence and earlier community observations
+are clues; your task is still to report what your source visibly supports.
 
-Use **Unsure** when the image or field conditions do not support a reliable
-answer. A cautious unknown is more valuable than a confident guess. In notes,
-describe the visible fact before offering an interpretation.
+## 5. Describe the waiting environment
 
-For example, “three divided seats inside the shelter” is more useful than “bad
-bench.” “Grass strip next to a narrow sidewalk; utility pole beside boarding
-area” is more useful than “bench impossible.”
+The survey asks about weather exposure and the overall waiting environment.
+Choose the option that best matches what is visible, or **Unsure**.
 
-## Presence and comfort are different questions
+In-person reviewers may also describe their relationship to the stop, when they
+use it, apparent rider activity, and whether riders appear to avoid the existing
+facilities. Do not infer why a person stands somewhere. Select **Unsure** unless
+the behavior is reasonably clear from your observation.
 
-A shelter may contain seating, and a standalone bench may exist without a
-shelter. Record what is actually visible.
+## 6. Report visible access and space, cautiously
 
-Then consider whether seating has observable limitations:
+The survey asks whether the path appears clear, whether pass-through space
+appears to remain if seating were added, and whether an unpaved surface appears
+likely to need a pad. These are preliminary visual observations only.
 
-- narrow, small, or leaning/perch seating
-- seat dividers that limit shared use
-- damaged or visibly poor condition
-- a waiting environment that appears uncomfortable or inadequate
-- riders visibly avoiding the available shelter or seating
+They do not determine engineering feasibility, ADA compliance, ownership,
+permission, utility clearance, permitting, or construction readiness. If a
+slope, pole, narrow sidewalk, obstruction, or surface is difficult to assess,
+describe the visible fact in notes and choose **Unsure**. Do not make a technical
+approval decision.
 
-Presence does not prove comfort. A comfort problem does not mean seating is
-absent. The project keeps these concepts separate.
+## 7. Use the existing evidence without turning it into a guess
 
-## What to look for
+The review page may summarize public records and past community observations.
+Read the wording carefully:
 
-### Shelter and seating
+- **Confirmed present** or **confirmed absent** reflects sufficiently consistent
+  community observations, not a guarantee that conditions have never changed.
+- **Likely present** or **likely absent** means the evidence suggests a result but
+  current verification is still useful.
+- **Sources disagree** means positive and negative evidence both exist.
+- **Not enough information** means the condition is unknown.
 
-- Is a shelter visible?
-- What kinds of seating are available?
-- Are there apparent seating limitations?
-- How well does the shelter appear to protect riders from weather?
+Evidence that suggests a condition is not the same as your own observation.
+Do not copy a displayed status into the survey when you cannot independently see
+the condition. Absence of evidence is not evidence of absence.
 
-### Waiting environment
+## 8. Add useful notes
 
-- Does the area appear protected, partly exposed, or exposed?
-- Does the overall waiting environment appear good, fair, poor, or unclear?
-- In person, do riders appear to avoid existing facilities?
+Notes are optional. Use them for visible details the choices do not capture:
+an obstructed image, construction, damage, a feature outside the usual camera
+view, or the reason you selected **Unsure**.
 
-### Accessibility and space
+Prefer a factual description such as "narrow sidewalk with a utility pole beside
+the boarding area" over a conclusion such as "a bench is impossible." Do not
+include names, faces, contact details, or other sensitive information about
+riders.
 
-- Is there an apparent clear path for people using mobility devices?
-- Are fixed objects, slopes, or narrow space visible?
-- If seating were added, does pass-through space appear to remain?
-- Does an unpaved location appear likely to need a pad?
+## 9. Submit and continue
 
-These are preliminary visual observations. They identify questions for later
-review; they do not answer them conclusively.
+Review your answers and select **Submit Review**. The new observation is appended
+to the stop's dated history; it does not overwrite an earlier review. The stop's
+evidence summary and suggested next task may refresh. One observation may leave
+a condition uncertain, and that is normal.
 
-## Street View and in-person reviews
+After submission, you can view the updated stop record, review another stop,
+return to your profile, or go back to the dashboard. Route reviewers can continue
+with another stop on one of their selected routes.
 
-Choose the review method that accurately describes your evidence:
+## Optional profile and stewardship
 
-- **Street View** for Google Street View imagery
-- **Other remote visual** for another visual source
-- **In person** when you visited the stop
-- **Legacy remote** only for compatibility with older reviews
+You may review anonymously. If email sign-in is offered, a one-time email link
+can keep your profile and review history together across browsers or devices.
+Your email is not displayed with public observations.
 
-For Street View, record the imagery month and year separately. `observed_at` is
-when your review was submitted; the imagery month is when the pictured condition
-was captured. A review submitted today from 2023 imagery is evidence about what
-was visible in 2023. If the imagery date cannot be determined, explicitly mark
-it unknown.
+Choosing to steward a stop means an interest in helping keep its community
+record current. It does not give ownership of the stop or authority to enter
+property, maintain facilities, or act for a transit agency.
 
-The project does not currently accept or host reviewer photo uploads.
+## Safety and privacy
 
-## What preliminary clearance means
+- Stay in a safe, lawful public location and do not interfere with riders,
+  traffic, or transit operations.
+- Never enter private property or take a risky position to answer a question.
+- The site does not accept photo uploads. Do not take unnecessary photos of
+  identifiable people.
+- Do not put personal or sensitive information in notes.
+- **Unsure**, skipping a question, or leaving a stop is always better than an
+  unsafe observation or unsupported claim.
 
-You may record whether pass-through space appears clear or constrained and
-whether a pad may be needed. You are **not** determining:
-
-- engineering or construction feasibility
-- ADA compliance
-- property ownership or right-of-way authority
-- permitting approval
-- underground or overhead utility clearance
-- whether an agency should install an improvement
-
-If conditions are ambiguous, record the visible constraint and choose Unsure.
-
-## Notes and uncertainty
-
-Notes are most useful when they add observable details not captured by the
-structured choices. Helpful notes can identify image obstruction, construction,
-damage, a feature outside the normal camera view, or why an answer is uncertain.
-
-Avoid identifying individual riders or adding sensitive personal information.
-
-## Stewarding a stop
-
-Stewarding a stop means helping maintain a current community record of its
-waiting conditions over time. It is ongoing civic observation, not ownership of
-the stop and not authority to act on public or private property.
-
-You may review anonymously. Optional **Sign in with email** uses a short-lived,
-one-time link to preserve the same profile, display name, review history, and
-stewarded stops across browsers or devices. Email is private account information
-and is not shown with public observations. Signing out removes the authenticated
-browser session; it does not delete review history. The link expires after 20
-minutes and works once. Site operators must configure
-email delivery before cross-device sign-in is available in production.
-
-The current system can record a reviewer’s stewardship relationship or interest
-and associate reviews with a reviewer profile. It does not yet provide automated
-recurring reminders, photo hosting, formal agency escalation, or ownership and
-permission workflows.
-
-Stewardship is useful because conditions can change through maintenance,
-construction, damage, new amenities, or removal. A later observation can add
-temporal context without deleting the earlier record.
-
-## What happens after submission
-
-The observation is appended to history and linked to its assignment. The system
-recalculates consensus and refreshes the affected stop’s canonical amenity
-status, amenity review priority, seating opportunity, review queue entry, and
-deterministic rank. It does not rebuild all stops for each submission.
-
-Community consensus requires multiple usable observations with sufficient
-agreement. Your individual review contributes evidence; it does not automatically
-turn a likely result into a confirmed result.
-
-## The standard for a good review
-
-A good review is specific, cautious, and honest about what cannot be seen. The
-goal is not to produce a particular recommendation. It is to leave the next
-reviewer, analyst, or community partner with better evidence than they had before.
+For help, use the support contact displayed on the site or ask your pilot
+coordinator.
