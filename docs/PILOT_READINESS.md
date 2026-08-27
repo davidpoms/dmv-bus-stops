@@ -41,16 +41,14 @@ verified sender/domain. Map them to the provider-neutral SMTP variables in
 - `HttpOnly=True`, `SameSite=Lax`, permanent session lifetime 30 days.
 - Login rate limiting uses `request.remote_addr`; arbitrary
   `X-Forwarded-For` is intentionally ignored.
-- No nginx, Caddy, Apache, ProxyFix, gunicorn, waitress, or other production WSGI
-  configuration is currently committed.
+- Waitress is the supported limited-pilot WSGI server. It binds to localhost by
+  default and must sit behind operator-managed HTTPS termination.
 - If a trusted proxy is introduced, trusted address translation must be configured
   at the WSGI/proxy boundary, with an explicit trusted-hop count.
 - `python -m src.api.app` is Flask's local development server only.
 
-A production WSGI server and HTTPS termination are deployment blockers, not choices
-made by this housekeeping branch. For the current Windows environment, Waitress is
-the simplest Windows-native candidate; a Linux deployment could instead use
-Gunicorn. Select and test one rather than committing both speculative paths.
+Host provisioning, process supervision, DNS, and HTTPS termination remain external
+deployment responsibilities. See `DEPLOY_LIMITED_PILOT.md`.
 
 ## Database safety
 
@@ -194,7 +192,7 @@ third-party analytics are unnecessary.
 | Resend/email login | No if anonymous | Only if email login is advertised | verify sender and configure SMTP | deployment |
 | Anonymous review | Ready | Ready | smoke test | deployment |
 | Profile recovery | No | Conditional | SMTP plus second-device test | deployment |
-| Production WSGI server | No for local supervision | Blocker | select/test server | deployment |
+| Production WSGI server | Ready | Ready | install requirements and run supported Waitress entry point | code/deployment |
 | HTTPS termination | No for local supervision | Blocker | configure/test HTTPS | deployment |
 | Persistent `FLASK_SECRET_KEY` | Required locally and remotely | Blocker | configure persistent secret | deployment |
 | Explicit `DMV_BUS_STOPS_DB` | Recommended for a local copy | Blocker | configure absolute deployment path | deployment |
@@ -203,7 +201,7 @@ third-party analytics are unnecessary.
 | Link integrity | Ready | Ready after deployed smoke test | smoke test deployed base URL | code/deployment |
 | Language consistency | Ready | Ready | onboarding review | documentation |
 | Privacy notice | Ready | Ready | include handbook in onboarding | documentation |
-| Feedback mechanism | Operational requirement | Operational requirement | choose monitored contact and link it | operations/docs |
+| Feedback mechanism | Configured pathway | Configured pathway | supply monitored `PILOT_SUPPORT_CONTACT` | operations |
 | Error handling | Caution | Caution | supervised rollout; improve later | code/deferred |
 | Serving direction | Ready | Ready | explain occasional multiple headings | documentation |
 | Physical-stop V2 baseline | Ready | Ready | preserve lifecycle/lineage and durable history | data |

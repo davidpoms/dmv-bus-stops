@@ -66,6 +66,11 @@ app.config.update(
 )
 
 
+@app.context_processor
+def pilot_template_configuration():
+    return {"pilot_support_contact": os.environ.get("PILOT_SUPPORT_CONTACT", "").strip()}
+
+
 @app.before_request
 def require_deployment_secret():
     if not app.secret_key and not app.testing:
@@ -73,6 +78,18 @@ def require_deployment_secret():
             "error": "FLASK_SECRET_KEY must be configured before serving requests",
             "code": "server_configuration_required",
         }, 503
+
+
+@app.after_request
+def log_operational_failure(response):
+    if response.status_code >= 400 and (
+        request.path == "/review/submit" or request.path.startswith("/reviewer/")
+    ):
+        app.logger.warning(
+            "pilot_request_failed method=%s path=%s status=%s",
+            request.method, request.path, response.status_code,
+        )
+    return response
 
 DATABASE_PATH = Path(
     os.environ.get(
@@ -665,9 +682,9 @@ def get_road_index():
         )
 
 
-    except Exception as e:
+    except Exception:
 
-        print("Road centerlines index build failed:", e)
+        app.logger.exception("road_centerline_index_build_failed")
 
 
         class EmptyRoadIndex:
@@ -1573,9 +1590,6 @@ GROUP BY ps.id
     )
 
 
-    print("DEBUG STOP DETAIL ROW:", row)
-    print("DEBUG TYPES:", type(row[1]), type(row[2]))
-
     road = get_road_index().nearest_road(
         row[2],
         row[1]
@@ -1603,12 +1617,6 @@ GROUP BY ps.id
     )
 
     reviewer_id, reviewer_key = get_or_create_reviewer(
-        reviewer_key
-    )
-
-    print(
-        "REVIEWER:",
-        reviewer_id,
         reviewer_key
     )
 
@@ -2851,18 +2859,6 @@ def review_assignment(stop_id):
     )
 
 
-    print(
-        "ASSIGNMENT DEBUG:",
-        "DB=", DATABASE_PATH,
-        "request_stop_id=", stop_id,
-        "session_reviewer_id=", reviewer_id,
-        "assignment_reviewer_id=", assignment_reviewer_id,
-        "assignment_id=", assignment_id,
-        "assignment_row=", assignment[0],
-        "existing_review=", existing_review
-    )
-
-
     return jsonify(
         {
             "assignment_id":
@@ -2948,11 +2944,6 @@ def community_reviews(stop_id):
 def submit_review():
 
     data = request.json
-
-    print(
-        "SUBMIT DATA:",
-        data
-    )
 
 
     # Preserve the original multi-select seating values before
@@ -3369,6 +3360,11 @@ def submit_review():
         WHERE id=?
         """,
         (assignment_id,)
+    )
+
+    app.logger.info(
+        "review_completed stop_id=%s assignment_id=%s reviewer_id=%s",
+        stop_id, assignment_id, reviewer_id,
     )
 
 

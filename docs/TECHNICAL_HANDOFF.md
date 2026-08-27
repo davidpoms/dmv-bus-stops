@@ -402,6 +402,15 @@ secure-cookie status, and required configuration names. It never returns SMTP
 credentials or secrets. Rotating `FLASK_SECRET_KEY` invalidates sessions and
 makes earlier HMAC rate-limit buckets unreachable; durable reviewer history is
 unchanged.
+
+The supported limited-pilot process is `python -m scripts.active.serve_pilot`,
+which runs Waitress after validating the secret, absolute database path, secure
+cookie setting, support contact, development-auth state, and optional SMTP. It
+binds to localhost by default; HTTPS termination and process supervision are
+operator-managed. Backup, restore, restart, logging, and smoke-test procedures are
+in `docs/DEPLOY_LIMITED_PILOT.md`.
+
+The prospective observation schema stores
 `assignment_id`, `streetview_imagery_month`, `weather_exposure`, and
 `riders_avoid_facilities` alongside presence, type, condition, comfort,
 accessibility, clearance, notes, and stewardship-interest fields.

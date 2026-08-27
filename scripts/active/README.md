@@ -7,6 +7,7 @@ before an approved mutation.
 
 | Command | Purpose | Effect / safe use |
 |---|---|---|
+| `backup_database.py --source <db> --output <backup> [--manifest <json>]` | online verified SQLite backup | reads source; creates new backup and optional manifest; refuses overwrite |
 | `build_gtfs_stop_map.py` | rebuild GTFS-to-stop mappings | mutates selected DB; reviewed source refresh only |
 | `import_gtfs_stop_structure.py <feed.zip> --feed-id <id>` | preserve immutable GTFS stop/facility metadata | metadata-only import; idempotent by feed ID and ZIP SHA-256 |
 | `build_gtfs_stop_status.py` | rebuild canonical active-stop status | mutates selected DB and creates a local backup |
@@ -31,6 +32,7 @@ before an approved mutation.
 | `rebuild_stop_routes_clean.py` | specialized route repair | destructive selected-DB rebuild with backup; not routine |
 | `replace_ddot_shelter_evidence.py` | atomic DDOT evidence replacement | preflight default; `--apply` mutates explicit/selected DB |
 | `reset_v2_test_contributions.py --db <copy> --confirm "RESET DISPOSABLE V2 TEST CONTRIBUTIONS"` | historical first-cutover test-data reset | destructive and narrow; refuses databases where V2 cutover state exists |
+| `python -m scripts.active.serve_pilot` | limited-pilot Waitress runner | validates production environment and serves behind operator-managed HTTPS |
 
 `src/processing/build_physical_stops.py` is bootstrap-only. It requires
 `--bootstrap-empty-database` and refuses a populated identity registry.

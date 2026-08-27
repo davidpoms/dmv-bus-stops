@@ -21,6 +21,8 @@ Supporting references:
   it. Future work should be documented only after scope is approved.
 - [Local development](LOCAL_DEVELOPMENT.md) provides the repeatable `.env` setup
   and local-only startup/test commands.
+- [Limited-pilot deployment](DEPLOY_LIMITED_PILOT.md) defines production environment,
+  Waitress startup, backup/restore, logging, and smoke-test operations.
 - [Small-pilot readiness audit](PILOT_READINESS.md) records deployment blockers,
   repository housekeeping decisions, and the supervised-pilot checklist.
 - [`scripts/active`](../scripts/active/README.md) inventories supported mutating

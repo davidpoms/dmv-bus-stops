@@ -125,8 +125,9 @@ python -m src.api.app
 ```
 
 This uses Flask's development server and is not a production deployment command.
-Production requires a separate WSGI-server decision, HTTPS, secure cookies, and
-deployment-managed secrets.
+The supported limited-pilot runner is Waitress behind operator-managed HTTPS. See
+[Deploying the limited volunteer pilot](docs/DEPLOY_LIMITED_PILOT.md) for required
+environment, backup, startup/restart, and smoke-test procedures.
 
 By default it uses `src/database/dmv_bus_stops.db`. To run against a copy or a
 separate deployment database, set `DMV_BUS_STOPS_DB` to that path before starting
