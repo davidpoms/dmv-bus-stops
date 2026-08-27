@@ -1518,6 +1518,11 @@ async function loadCommunityProfileCard(){
             "communityProfileCard"
         );
 
+    const signInLink =
+        document.getElementById(
+            "reviewerSignInLink"
+        );
+
 
     if(!card){
         return;
@@ -1536,10 +1541,14 @@ async function loadCommunityProfileCard(){
             await response.json();
 
 
-        if(data.has_profile){
+        if(data.signed_in){
 
             card.style.display =
                 "block";
+
+            if(signInLink){
+                signInLink.style.display = "none";
+            }
 
 
             const name =

@@ -1,198 +1,125 @@
 <!DOCTYPE html>
-<html>
-
-<head>
-
-<title>Community Profile</title>
-
-<link rel="stylesheet" href="/static/dashboard.css">
-
-</head>
-
-
-<body>
-
-<div class="panel" id="accountStatus">
-<a href="/reviewer/sign-in">Sign in with email to save this profile across devices</a>
-</div>
-
-<h1>
-Community Profile
-</h1>
-
+<html><head><title>Your Reviewer Profile</title>
+<link rel="stylesheet" href="/static/dashboard.css"></head><body>
+<h1>Your reviewer profile</h1>
+<div class="panel" id="accountStatus">Loading your profile...</div>
 
 <div class="panel volunteer-card">
-
-<h2 id="name">
-Loading...
-</h2>
-
-
-<div id="stats">
-Loading...
+<h2 id="profileName">Community Volunteer</h2>
+<form id="displayNameForm" hidden>
+<label for="displayName">Display name</label>
+<input id="displayName" name="display_name" maxlength="80" required>
+<button type="submit" class="dashboard-button">Update display name</button>
+<span id="displayNameStatus" role="status"></span>
+</form>
+<p><a href="/dashboard">Return to dashboard</a></p>
 </div>
 
-
-<h3>
-Stops you steward
-</h3>
-
-
-<div id="stewardedStops">
-Loading...
+<div class="panel volunteer-card">
+<h2>Your routes</h2>
+<p>Save routes you ride or know, then review a stop along one of those routes.</p>
+<p><a href="/review/routes" class="dashboard-button">Set or update favorite routes</a></p>
+<p><a href="/review/start?mode=route" class="dashboard-button">Start route-based review</a></p>
 </div>
 
-
+<div class="panel volunteer-card">
+<h2>Your review activity</h2>
+<div id="stats">Loading activity...</div>
+<p><a href="/review/start?mode=opportunity" class="dashboard-button">Continue reviewing</a></p>
 </div>
 
-
+<div class="panel volunteer-card">
+<h2>Stops you steward</h2>
+<p>Stewardship means contributing observations over time. It does not imply ownership
+or authority over a stop.</p>
+<div id="stewardedStops">Loading stewarded stops...</div>
+<p><a href="/dashboard#map">Find a stop to steward</a></p>
+</div>
 
 <script>
+let profileData = null;
 
-async function loadProfile(){
-
-    const response =
-        await fetch(
-            "/api/reviewer/profile"
-        );
-
-
-    const data =
-        await response.json();
-
-    document.getElementById("accountStatus").innerHTML = data.signed_in
-        ? `<strong>Signed in as ${data.display_name || "Community Volunteer"}</strong><br>
-           <span>${data.email}</span> <small>(private account email)</small><br>
-           <button type="button" id="signOutButton">Sign out</button>`
-        : `<p>Save your profile and review history across devices.</p>
-           <a href="/reviewer/sign-in">Sign in with email</a>`;
-    document.getElementById("signOutButton")?.addEventListener("click", async () => {
-        await fetch("/reviewer/sign-out", {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({csrf_token: data.csrf_token})
-        });
-        window.location.reload();
-    });
-
-
-    document
-    .getElementById("name")
-    .innerText =
-        data.display_name
-        || "Community Volunteer";
-
-
-    document.getElementById("stats").innerHTML = `
-
-        <div class="evidence-card">
-
-        <strong>
-        Reviews completed:
-        </strong>
-        ${data.stats.reviews_completed}
-
-        <br><br>
-
-        <strong>
-        Stops validated:
-        </strong>
-        ${data.stats.stops_reviewed}
-
-        <br><br>
-
-        <strong>
-        Rider exposure represented:
-        </strong>
-        ${Number(
-            data.stats.ridership_impacted || 0
-        ).toLocaleString()}
-
-        weekday boardings
-
-        <br><br>
-
-        <strong>
-        Routes covered:
-        </strong>
-        ${
-            (data.stats.routes_covered || []).length
-            ? (data.stats.routes_covered || []).join(", ")
-            : "None yet"
-        }
-
-        <br><br>
-
-        <strong>
-        Stewarded stops:
-        </strong>
-        ${data.stats.stewarded_stops}
-
-        </div>
-
-    `;
-
-
-    const container =
-        document.getElementById(
-            "stewardedStops"
-        );
-
-
-    const stewardedStops =
-        data.stewarded_stops || [];
-
-
-    if(
-        stewardedStops.length === 0
-    ){
-
-        container.innerHTML =
-            "You have not stewarded any stops yet.";
-
-        return;
-
-    }
-
-
-    container.innerHTML =
-        stewardedStops.map(
-            stop => `
-
-            <div class="evidence-card">
-
-            <strong>
-            ${stop.name || "Bus Stop"}
-            </strong>
-
-            <br>
-
-            Stop ID:
-            ${stop.stop_id}
-
-            <br><br>
-
-            <a
-            href="/stop/${stop.stop_id}"
-            class="stop-review-button">
-
-            View Stop
-
-            </a>
-
-            </div>
-
-            `
-        ).join("");
-
+function addStat(container, label, value) {
+    const row = document.createElement("p");
+    const strong = document.createElement("strong");
+    strong.textContent = `${label}: `;
+    row.append(strong, document.createTextNode(value));
+    container.appendChild(row);
 }
 
+function renderStewardedStops(stops) {
+    const container = document.getElementById("stewardedStops");
+    container.replaceChildren();
+    if (!stops.length) {
+        container.textContent = "You are not stewarding any stops yet.";
+        return;
+    }
+    stops.forEach((stop) => {
+        const card = document.createElement("div");
+        card.className = "evidence-card";
+        const name = document.createElement("strong");
+        name.textContent = stop.name || "Bus Stop";
+        const link = document.createElement("a");
+        link.href = `/stop/${encodeURIComponent(stop.stop_id)}`;
+        link.textContent = "View stop";
+        card.append(name, document.createElement("br"), link);
+        container.appendChild(card);
+    });
+}
+
+async function loadProfile() {
+    const response = await fetch("/api/reviewer/profile");
+    profileData = await response.json();
+    const name = profileData.display_name || "Community Volunteer";
+    document.getElementById("profileName").textContent = name;
+    const account = document.getElementById("accountStatus");
+    const form = document.getElementById("displayNameForm");
+    if (profileData.signed_in) {
+        account.replaceChildren();
+        const signedIn = document.createElement("strong");
+        signedIn.textContent = `Signed in as ${name}`;
+        const signOut = document.createElement("button");
+        signOut.type = "button";
+        signOut.textContent = "Sign out";
+        signOut.addEventListener("click", async () => {
+            await fetch("/reviewer/sign-out", {
+                method: "POST", headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({csrf_token: profileData.csrf_token})
+            });
+            window.location.assign("/dashboard");
+        });
+        account.append(signedIn, document.createElement("br"), signOut);
+        form.hidden = false;
+        document.getElementById("displayName").value = name;
+    } else {
+        account.innerHTML = '<p>Save your profile and review history across devices.</p>' +
+            '<a href="/reviewer/sign-in">Sign in with email</a>';
+    }
+    const stats = document.getElementById("stats");
+    stats.replaceChildren();
+    addStat(stats, "Reviews completed", profileData.stats.reviews_completed);
+    addStat(stats, "Stops reviewed", profileData.stats.stops_reviewed);
+    addStat(stats, "Route-based rider exposure represented",
+        Number(profileData.stats.ridership_impacted || 0).toLocaleString());
+    addStat(stats, "Routes covered", (profileData.stats.routes_covered || []).join(", ") || "None yet");
+    addStat(stats, "Stops stewarded", profileData.stats.stewarded_stops);
+    renderStewardedStops(profileData.stewarded_stops || []);
+}
+
+document.getElementById("displayNameForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const response = await fetch("/api/reviewer/profile", {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+            display_name: document.getElementById("displayName").value,
+            csrf_token: profileData.csrf_token
+        })
+    });
+    const result = await response.json();
+    document.getElementById("displayNameStatus").textContent =
+        response.ok ? "Display name updated." : result.error;
+    if (response.ok) document.getElementById("profileName").textContent = result.display_name;
+});
 
 loadProfile();
-
-</script>
-
-
-</body>
-
-</html>
+</script></body></html>

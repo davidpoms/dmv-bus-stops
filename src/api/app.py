@@ -4975,12 +4975,45 @@ def reviewer_profile_page():
 
 
 
-@app.route("/api/reviewer/profile")
+@app.route("/api/reviewer/profile", methods=["GET", "POST"])
 def reviewer_profile_api():
 
     reviewer_key = session.get(
         "reviewer_key"
     )
+
+    if request.method == "POST":
+        authenticated_id = session.get("authenticated_reviewer_id")
+        if not reviewer_key or not authenticated_id:
+            return {"error": "Sign in to update your profile."}, 401
+        data = request.get_json(silent=True) or request.form
+        if data.get("csrf_token") != session.get("auth_csrf"):
+            return {"error": "Invalid request token"}, 400
+        display_name = data.get("display_name")
+        if not isinstance(display_name, str):
+            return {"error": "Display name is required."}, 400
+        display_name = display_name.strip()
+        if not display_name:
+            return {"error": "Display name cannot be blank."}, 400
+        if len(display_name) > 80 or any(ord(character) < 32 for character in display_name):
+            return {"error": "Display name must be 80 characters or fewer."}, 400
+        conn = sqlite3.connect(DATABASE_PATH)
+        try:
+            cursor = conn.execute(
+                """
+                UPDATE community_reviewers
+                SET display_name=?
+                WHERE id=? AND reviewer_key=?
+                """,
+                (display_name, authenticated_id, reviewer_key),
+            )
+            updated = cursor.rowcount
+            conn.commit()
+        finally:
+            conn.close()
+        if updated != 1:
+            return {"error": "Signed-in reviewer profile was not found."}, 403
+        return {"success": True, "display_name": display_name}
 
     reviewer_id, reviewer_key = get_or_create_reviewer(
         reviewer_key

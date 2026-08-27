@@ -49,10 +49,23 @@ class ReviewerAuthTests(unittest.TestCase):
         CREATE TABLE stop_observations(id INTEGER PRIMARY KEY,physical_stop_id INTEGER,
           reviewer_id INTEGER);
         CREATE TABLE community_stewardships(reviewer_id INTEGER,stop_id INTEGER);
+        CREATE TABLE community_reviewer_routes(reviewer_id INTEGER,route_id TEXT);
+        CREATE TABLE physical_stops(id INTEGER PRIMARY KEY,primary_name TEXT,state TEXT,
+          county TEXT,municipality TEXT);
+        CREATE TABLE physical_stop_members(physical_stop_id INTEGER,bus_stop_id INTEGER);
+        CREATE TABLE stop_routes(stop_id INTEGER,route_id INTEGER);
+        CREATE TABLE routes(id INTEGER PRIMARY KEY,route_id TEXT,route_name TEXT);
+        CREATE TABLE stop_improvement_impact(physical_stop_id INTEGER,daily_route_exposure REAL);
         INSERT INTO community_reviewers(id,reviewer_key,display_name) VALUES(42,'anon','Alex');
         INSERT INTO stop_review_assignments VALUES(7,1,42,'direct','completed');
         INSERT INTO stop_observations VALUES(9,1,42);
         INSERT INTO community_stewardships VALUES(42,1);
+        INSERT INTO community_reviewer_routes VALUES(42,'R1');
+        INSERT INTO physical_stops VALUES(1,'Main Street Stop','VA','Example County','Example City');
+        INSERT INTO physical_stop_members VALUES(1,10);
+        INSERT INTO stop_routes VALUES(10,5);
+        INSERT INTO routes VALUES(5,'R1','Route One');
+        INSERT INTO stop_improvement_impact VALUES(1,120);
         """)
         conn.commit(); conn.close()
         self.patches = [
@@ -153,6 +166,109 @@ class ReviewerAuthTests(unittest.TestCase):
             response = client.get("/test-route")
         self.assertEqual(503, response.status_code)
         self.assertEqual("server_configuration_required", response.get_json()["code"])
+
+    def test_dashboard_and_profile_navigation_distinguish_signed_in_state(self):
+        client = review_api.app.test_client()
+        dashboard = client.get("/dashboard").get_data(as_text=True)
+        profile = client.get("/reviewer/profile").get_data(as_text=True)
+        dashboard_script = (ROOT / "src/dashboard/static/dashboard.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Sign in to your reviewer profile", dashboard)
+        self.assertIn("My reviewer profile", dashboard)
+        self.assertIn('style="display:none;"', dashboard)
+        self.assertIn("if(data.signed_in)", dashboard_script)
+        self.assertIn("Set or update favorite routes", profile)
+        self.assertIn('/review/start?mode=route', profile)
+        self.assertIn("Continue reviewing", profile)
+        self.assertIn("Stops you steward", profile)
+        self.assertIn("does not imply ownership", profile)
+        self.assertNotIn("data.email", profile)
+        self.assertNotIn('href="/admin"', profile)
+
+    def test_profile_api_lists_saved_routes_activity_and_stewardship_privately(self):
+        client = review_api.app.test_client()
+        with client.session_transaction() as current:
+            current["reviewer_key"] = "anon"
+            current["authenticated_reviewer_id"] = 42
+            current["auth_csrf"] = "profile-csrf"
+        profile = client.get("/api/reviewer/profile").get_json()
+        routes = client.get("/reviewer/routes").get_json()
+        self.assertTrue(profile["signed_in"])
+        self.assertEqual(1, profile["stats"]["reviews_completed"])
+        self.assertEqual("Main Street Stop", profile["stewarded_stops"][0]["name"])
+        self.assertEqual(["R1"], routes["selected"])
+        anonymous = review_api.app.test_client().get("/api/reviewer/status").get_json()
+        self.assertNotIn("email", anonymous)
+
+    def test_display_name_update_is_session_owned_and_preserves_history(self):
+        client = review_api.app.test_client()
+        with client.session_transaction() as current:
+            current["reviewer_key"] = "anon"
+            current["authenticated_reviewer_id"] = 42
+            current["auth_csrf"] = "profile-csrf"
+        conn = sqlite3.connect(self.db)
+        before = (
+            conn.execute("SELECT id FROM community_reviewers WHERE reviewer_key='anon'").fetchone()[0],
+            conn.execute("SELECT COUNT(*) FROM stop_review_assignments WHERE reviewer_id=42").fetchone()[0],
+            conn.execute("SELECT COUNT(*) FROM stop_observations WHERE reviewer_id=42").fetchone()[0],
+        )
+        conn.close()
+        response = client.post("/api/reviewer/profile", json={
+            "display_name": "  Updated Volunteer  ", "csrf_token": "profile-csrf",
+            "reviewer_id": 999,
+        })
+        self.assertEqual(200, response.status_code)
+        self.assertEqual("Updated Volunteer", response.get_json()["display_name"])
+        conn = sqlite3.connect(self.db)
+        after = (
+            conn.execute("SELECT id FROM community_reviewers WHERE reviewer_key='anon'").fetchone()[0],
+            conn.execute("SELECT COUNT(*) FROM stop_review_assignments WHERE reviewer_id=42").fetchone()[0],
+            conn.execute("SELECT COUNT(*) FROM stop_observations WHERE reviewer_id=42").fetchone()[0],
+        )
+        self.assertEqual("Updated Volunteer", conn.execute(
+            "SELECT display_name FROM community_reviewers WHERE id=42"
+        ).fetchone()[0])
+        conn.close()
+        self.assertEqual(before, after)
+
+    def test_reviewer_cannot_edit_another_profile(self):
+        conn = sqlite3.connect(self.db)
+        conn.execute(
+            "INSERT INTO community_reviewers(id,reviewer_key,display_name,email,email_verified_at) "
+            "VALUES(50,'other','Other Volunteer','other@example.org','2026-01-01')"
+        )
+        conn.commit(); conn.close()
+        client = review_api.app.test_client()
+        with client.session_transaction() as current:
+            current["reviewer_key"] = "anon"
+            current["authenticated_reviewer_id"] = 50
+            current["auth_csrf"] = "profile-csrf"
+        response = client.post("/api/reviewer/profile", json={
+            "display_name": "Intruder", "csrf_token": "profile-csrf"
+        })
+        self.assertEqual(403, response.status_code)
+        conn = sqlite3.connect(self.db)
+        self.assertEqual([("Alex",), ("Other Volunteer",)], conn.execute(
+            "SELECT display_name FROM community_reviewers WHERE id IN (42,50) ORDER BY id"
+        ).fetchall())
+        conn.close()
+
+    def test_display_name_validation_and_sign_out_remain_safe(self):
+        client = review_api.app.test_client()
+        with client.session_transaction() as current:
+            current["reviewer_key"] = "anon"
+            current["authenticated_reviewer_id"] = 42
+            current["auth_csrf"] = "profile-csrf"
+        for name in ("", " " * 3, "x" * 81):
+            with self.subTest(name_length=len(name)):
+                self.assertEqual(400, client.post("/api/reviewer/profile", json={
+                    "display_name": name, "csrf_token": "profile-csrf"
+                }).status_code)
+        self.assertEqual(200, client.post("/reviewer/sign-out", json={
+            "csrf_token": "profile-csrf"
+        }).status_code)
+        self.assertFalse(client.get("/api/reviewer/status").get_json()["has_profile"])
 
     def test_missing_mail_sender_fails_without_exposing_token(self):
         client = review_api.app.test_client()
