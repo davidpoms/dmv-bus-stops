@@ -241,3 +241,18 @@ active-script DB-target cleanup, retiring legacy routes/templates, browser-frien
 auth error pages, feedback triage,
 minimal client-error/abandonment observability if justified, and admin workflows based
 on actual pilot needs.
+
+## Rider exposure pilot rehearsal — September 2026
+
+The optional dashboard exposure layer is suitable as a route-demand proxy for the
+10–20-person pilot, provided volunteers see the source-period/route-level explanation.
+It reuses the canonical score with no route-count bonus, defaults Off, and caps both
+exposure map modes at 100 stops. By route explicitly reports when it shows a subset.
+Seating exposure sorting preserves unknown/verification versus absent/improvement
+workflows. No migration or production write is required.
+
+See [the exposure definition and exact source fields](TECHNICAL_HANDOFF.md#dashboard-exposure-layer-september-2026)
+and [the fresh-copy audit](rider-exposure-audit.md). Missing route ridership and the
+lack of observed stop boardings limit interpretation; this is not an agency ranking
+or an estimate of unique people. Existing deployment readiness requirements above
+still apply independently.

@@ -23,7 +23,7 @@ class PilotAdminDashboardTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db = Path(self.temp_dir.name) / "admin.db"
-        self.now = datetime(2026, 8, 27, 12, tzinfo=timezone.utc)
+        self.now = datetime.now(timezone.utc)
         conn = sqlite3.connect(self.db)
         conn.executescript(
             """

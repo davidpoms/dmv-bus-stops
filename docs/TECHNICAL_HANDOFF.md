@@ -181,6 +181,79 @@ separate from the seating-opportunity score described below.
 
 ## 6. Rider exposure
 
+### Dashboard exposure layer (September 2026)
+
+The dashboard exposes the existing metric; **no additional route-count multiplier**
+or competing priority score is introduced. Numeric `exposure_score` is
+`opportunity_assessments.combined_route_weekday_boardings`. Higher source ridership
+raises exposure; adding route memberships alone does not add points. Multiple routes
+already contribute their distinct route ridership in the canonical producer below.
+This is an impact/exposure aid, not an official agency priority ranking.
+
+Exact presentation inputs:
+
+| Purpose | Tables and fields |
+|---|---|
+| Active population | `stop_gtfs_status.physical_stop_id`, `current_gtfs=1` only |
+| Identity/location | `physical_stops.id`, `primary_name`, `latitude`, `longitude` |
+| Ridership source | `ridership_snapshots.route_id`, `period`, `weekday_boardings`; latest global period and MAX per distinct route |
+| Existing score | `opportunity_assessments.physical_stop_id`, `combined_route_weekday_boardings`; existing stored `rider_exposure_percentile` is the pipeline reference |
+| Canonical serving routes | `physical_stop_members.physical_stop_id`, `bus_stop_id` → `stop_routes.stop_id`, `route_id` → `routes.id`, `route_id`, `route_name` |
+| Current amenities | `stop_amenity_status.physical_stop_id`, `amenity_type`, `derived_status` |
+| Seating workflow | `seating_improvement_opportunities.physical_stop_id`, `opportunity_rank`, `bench_status`, `workflow_state` and existing public serialization |
+
+`src/scoring/exposure_map.py` recomputes empirical percentiles in standard Python
+over the currently active physical-stop population, using the existing scoring
+helper. This excludes stale inactive assessment rows even before a derived refresh.
+Ties share their cumulative percentile; ties in ranking break by ascending physical
+stop ID. Zero/missing quantities retain zero in the percentile denominator but are
+shown as **Unavailable**, never as measured low demand. Positive values use the
+existing volunteer thresholds: Very High >=90; High >=75 and <90; Moderate >=40
+and <75; Lower <40. Unrounded percentiles determine bands. The map's usable scores
+are not normalized a second time or multiplied by route count.
+
+`GET /map/exposure?mode=highest` returns at most 100 mappable active stops with
+positive exposure. `mode=route&route=<canonical ID>` returns at most the top 100
+active stops for that route, including unavailable exposure last. Both modes report
+total matches, missing coordinates, truncation, source period, route context and a
+route selector derived only from current stops. Route memberships are DISTINCT by
+physical stop and canonical route ID. `stop_routes` has no service calendar or route
+activity flag: “active routes” here means canonical serving routes attached to
+current stops, not a claim about service operating today. No additional identity,
+`route_served`, legacy WMATA status, or lifecycle criterion gates active stops.
+
+Exposure is Off by default. Highest exposure and By route share the existing
+Leaflet map, with sized circles, textual bands, accurate source-period labels,
+connection context, synthesized bench/shelter states, and stop/review links.
+Normal map filters apply in Off mode; exposure has its own route selector. Stale
+responses cannot overwrite a newer mode. Connection labels are Ordinary stop (1),
+Connection point (2), Significant connection (3–4), Major transfer point (5+).
+Zero routes is explicitly “No mapped routes.”
+
+`GET /seating-opportunities?sort=rider_exposure` adds exposure ordering and keeps
+the default opportunity ordering otherwise. Every request independently applies
+`current_gtfs=1`, including its summary counts. Added exposure bands and route
+counts do not change amenity synthesis or workflow: unknown bench remains a
+verification opportunity; likely/confirmed absent remains an improvement/clearance
+opportunity. Conflicting evidence remains conflicting. WMATA inventory is not read
+as current amenity evidence by this layer.
+
+Limitations: the `weekday_boardings` values are source-period weekday totals, not
+daily averages; do not divide by calendar weekdays or label them as stop boardings.
+Import code can stamp import date into `period`, so it is labeled “source period,”
+not a guaranteed observation month. Route totals repeat at multiple stops, may
+overlap between routes, and cannot identify unique riders or actual transfer
+activity. Do not sum stop exposures into a people count. Unmatched route IDs can
+understate exposure, and materialized assessments need the existing pipeline
+refresh when route/ridership inputs change. No new refresh writes, migrations,
+indexes, heavy dependencies, or production mutations are required.
+
+The layer uses three bulk reads and in-memory sorting for approximately 7,000
+stops, rather than a query per marker. Each response renders at most 100 circles.
+Rehearsal audit and interpretation findings: [rider-exposure-audit.md](rider-exposure-audit.md).
+Reproduce the read-only audit with
+`python -m scripts.diagnostics.audit_rider_exposure --db <fresh-copy> --output <json>`.
+
 Current producer flow:
 
 ```text

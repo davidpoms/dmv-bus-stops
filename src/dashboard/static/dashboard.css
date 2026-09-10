@@ -879,3 +879,20 @@ form input {
         min-height: 44px;
     }
 }
+/* Scoped rider-exposure controls and popups. */
+.exposure-controls { margin: 12px 0; }
+.map-filter-card, .bench-candidate-card { box-sizing: border-box; max-width: calc(100% - 20px); }
+.bench-candidate-card .pipeline-table-container { max-width: 100%; overflow-x: auto; }
+.exposure-controls select, #benchCandidateSort { max-width: 100%; min-height: 44px; }
+.exposure-controls p { max-width: 70ch; overflow-wrap: anywhere; }
+.exposure-popup { overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+    .exposure-controls label, .exposure-controls select, #benchCandidateSort { display: block; width: 100%; }
+    .exposure-controls [hidden] { display: none; }
+    .map-filter-card, .bench-candidate-card { display: block; padding: 12px; }
+    .dashboard-map-card { display: block; box-sizing: border-box; max-width: calc(100% - 20px); padding: 12px; }
+    .dashboard-map-card .map-filter-card { width: 100%; max-width: 100%; margin: 10px 0; }
+    .dashboard-map-card .filter-group { min-width: 0; max-width: 100%; }
+    .dashboard-map-card .review-option { min-width: 0; box-sizing: border-box; overflow-wrap: anywhere; }
+    .dashboard-map-card select { box-sizing: border-box; max-width: 100%; }
+}

@@ -2,6 +2,7 @@
 <html>
 
 <head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
 
 <title>
 DMV Bus Stop Improvement Dashboard
@@ -55,7 +56,7 @@ Sign in to your reviewer profile
 
 
 
-<div class="card volunteer-card">
+<div class="card volunteer-card dashboard-map-card">
 
 <h2>
 How do you want to help?
@@ -239,6 +240,19 @@ Apply Filters
 </div>
 
 
+<div class="exposure-controls">
+<label for="exposureMode">Rider exposure</label>
+<select id="exposureMode"><option value="off">Off</option><option value="highest">Highest exposure</option><option value="route">By route</option></select>
+<label for="exposureRoute" id="exposureRouteLabel" hidden>Exposure route</label>
+<select id="exposureRoute" hidden><option value="">Choose a route</option></select>
+<p>Highlights stops where more riders may be affected, using combined route weekday
+boardings, not observed stop boardings or unique people. Each distinct route contributes
+according to its ridership. Normal map filters apply when exposure is Off.</p>
+<p id="exposureLegend" hidden>Exposure: Very High (90th percentile and above), High (75th to below 90th),
+Moderate (40th to below 75th), Lower (below 40th). Larger circles indicate higher exposure.
+Unavailable means no usable ridership data.</p>
+<p id="exposureStatus" role="status" aria-live="polite"></p>
+</div>
 <div id="map" aria-label="Browse bus stops on the map"></div>
 
 </div>
@@ -256,6 +270,8 @@ Every active stop is evaluated. Explore what current evidence suggests and what
 kind of observation would be useful next.
 </p>
 <div id="benchCandidateMetrics">Loading seating opportunities...</div>
+<label for="benchCandidateSort">Sort seating opportunities</label>
+<select id="benchCandidateSort" onchange="loadBenchCandidates()"><option value="opportunity">Opportunity priority</option><option value="rider_exposure">Rider exposure</option></select>
 <input id="benchCandidateSearch" placeholder="Search seating opportunities..." onkeyup="filterBenchCandidates()" />
 <div class="pipeline-table-container">
 <table id="benchCandidateTable">
@@ -343,6 +359,7 @@ Loading pipeline...
 
 
 <script src="/static/dashboard.js"></script>
+<script src="/static/exposure_map.js"></script>
 
 <p class="pilot-support">
 Having trouble with a review? Contact pilot support:

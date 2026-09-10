@@ -35,6 +35,7 @@ L.tileLayer(
 
 
 let markers = [];
+let mapRequestVersion = 0;
 
 
 function loadEvidence(stopId) {
@@ -94,7 +95,11 @@ function loadEvidence(stopId) {
 
 
 function loadStops() {
-
+    if (document.getElementById("exposureMode")?.value !== "off" &&
+        document.getElementById("exposureMode")) {
+        return loadExposureMap();
+    }
+    const requestVersion = ++mapRequestVersion;
 
     markers.forEach(
         marker => map.removeLayer(marker)
@@ -202,7 +207,7 @@ function loadStops() {
 
     .then(
         data => {
-
+        if (requestVersion !== mapRequestVersion) return;
         console.log(
             "Features returned:",
             data.features.length
@@ -1588,6 +1593,7 @@ window.addEventListener(
 );
 
 let benchCandidateRows = [];
+let benchCandidateRequestVersion = 0;
 
 function humanizeBenchCandidateValue(value) {
     return String(value || "unknown")
@@ -1613,9 +1619,8 @@ function renderBenchCandidates(rows) {
                 constrained_or_special_review: "Review possible constraints",
                 no_current_action: "No current review needed"})
                 [candidate.workflow_state] || "Review current conditions"}</td>
-            <td>${candidate.rider_exposure_percentile >= 90 ? "Very high" :
-                candidate.rider_exposure_percentile >= 75 ? "High" :
-                candidate.rider_exposure_percentile >= 40 ? "Moderate" : "Lower"}</td>
+            <td>${candidate.exposure_band || "Unavailable"}<br>
+                <small>${candidate.active_route_count ?? 0} routes</small></td>
         </tr>`).join("") : `<tr><td colspan="5">No matching opportunities.</td></tr>`;
 }
 
@@ -1628,9 +1633,12 @@ function filterBenchCandidates() {
 
 async function loadBenchCandidates() {
     if (!document.getElementById("benchCandidateBody")) return;
+    const version = ++benchCandidateRequestVersion;
     try {
-        const response = await fetch("/seating-opportunities");
+        const sort = document.getElementById("benchCandidateSort")?.value || "opportunity";
+        const response = await fetch(`/seating-opportunities?sort=${encodeURIComponent(sort)}`);
         const data = await response.json();
+        if (version !== benchCandidateRequestVersion) return;
         benchCandidateRows = data.opportunities || [];
         const summary = data.summary || {};
         document.getElementById("benchCandidateMetrics").innerHTML = `
@@ -1638,8 +1646,9 @@ async function loadBenchCandidates() {
             <strong>${summary.bench_absent || 0}</strong> bench likely or confirmed absent &middot;
             <strong>${summary.bench_likely_present || 0}</strong> bench likely present &middot;
             <strong>${summary.bench_presence_unknown || 0}</strong> presence needs verification`;
-        renderBenchCandidates(benchCandidateRows);
+        filterBenchCandidates();
     } catch (error) {
+        if (version !== benchCandidateRequestVersion) return;
         document.getElementById("benchCandidateBody").innerHTML =
             `<tr><td colspan="5">Seating opportunities are unavailable.</td></tr>`;
     }

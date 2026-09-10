@@ -2672,7 +2672,9 @@ def seating_opportunities():
         "AND name='seating_improvement_opportunities'"
     ):
         return jsonify({"summary": {}, "opportunities": []})
-    clauses, params = [], []
+    clauses, params = ["EXISTS (SELECT 1 FROM stop_gtfs_status s WHERE "
+                       "s.physical_stop_id=seating_improvement_opportunities.physical_stop_id "
+                       "AND s.current_gtfs=1)"], []
     for column in ("state", "county", "municipality", "bench_status",
                    "adequacy_status", "clearance_status", "workflow_state",
                    "strongest_need_signal"):
@@ -2686,6 +2688,16 @@ def seating_opportunities():
         + " ORDER BY opportunity_rank", tuple(params)
     )
     opportunities = [serialize_seating_opportunity(row) for row in rows]
+    from contextlib import closing
+    from src.scoring.exposure_map import exposure_rows
+    with closing(sqlite3.connect(f"file:{DATABASE_PATH.as_posix()}?mode=ro", uri=True)) as exposure_conn:
+        exposure = {r["physical_stop_id"]: r for r in exposure_rows(exposure_conn)}
+    for item in opportunities:
+        context = exposure[item["physical_stop_id"]]
+        for key in ("exposure_score", "exposure_band", "active_route_count", "connection_class"):
+            item[key] = context[key]
+    if request.args.get("sort") == "rider_exposure":
+        opportunities.sort(key=lambda r: (-(r["exposure_score"] or 0), r["physical_stop_id"]))
     summary = {
         "total_active_stops": len(opportunities),
         "bench_absent": sum(x["bench_status"] in ("likely_no", "confirmed_no") for x in opportunities),
@@ -3970,6 +3982,24 @@ def geography_dc_wards():
     return jsonify(
         [row[0] for row in rows]
     )
+
+
+@app.route("/map/exposure")
+def rider_exposure_map():
+    from contextlib import closing
+    from src.scoring.exposure_map import map_payload
+
+    mode = request.args.get("mode", "highest")
+    if mode not in ("highest", "route"):
+        return jsonify({"error": "Unknown exposure mode"}), 400
+    try:
+        limit = int(request.args.get("limit", 100))
+    except ValueError:
+        return jsonify({"error": "Limit must be an integer"}), 400
+    with closing(sqlite3.connect(
+        f"file:{DATABASE_PATH.as_posix()}?mode=ro", uri=True
+    )) as conn:
+        return jsonify(map_payload(conn, mode, request.args.get("route"), limit))
 
 
 @app.route("/map/stops")

@@ -1,0 +1,7 @@
+warning: in the working copy of 'docs/PILOT_READINESS.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/TECHNICAL_HANDOFF.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/api/app.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/dashboard/static/dashboard.css', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/dashboard/static/dashboard.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/dashboard/templates/dashboard.html', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/test_pilot_admin_dashboard.py', LF will be replaced by CRLF the next time Git touches it
