@@ -1,5 +1,8 @@
 # Rider exposure fresh-copy audit — 2026-09-10
 
+This records the initial map sprint. For the later daily-display and jurisdiction
+refinement, see [the jurisdiction audit](rider-exposure-jurisdiction-audit.md).
+
 Source: repository production database `src/database/dmv_bus_stops.db`; a fresh
 verified SQLite online backup was created at 17:02 UTC and all development
 rehearsals used `.tmp/rider-exposure/rehearsal.db`. No remote production host

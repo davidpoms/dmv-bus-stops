@@ -2689,13 +2689,22 @@ def seating_opportunities():
     )
     opportunities = [serialize_seating_opportunity(row) for row in rows]
     from contextlib import closing
-    from src.scoring.exposure_map import exposure_rows
+    from src.scoring.exposure_map import exposure_rows, compare_rows
     with closing(sqlite3.connect(f"file:{DATABASE_PATH.as_posix()}?mode=ro", uri=True)) as exposure_conn:
         exposure = {r["physical_stop_id"]: r for r in exposure_rows(exposure_conn)}
+    try:
+        compared, comparison = compare_rows(list(exposure.values()), request.args.get("geography_type"),
+                                            request.args.get("geography_value"))
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    exposure = {r["physical_stop_id"]: r for r in compared}
+    opportunities = [r for r in opportunities if r["physical_stop_id"] in exposure]
     for item in opportunities:
         context = exposure[item["physical_stop_id"]]
-        for key in ("exposure_score", "exposure_band", "active_route_count", "connection_class"):
-            item[key] = context[key]
+        for key in ("exposure_score", "exposure_band", "active_route_count", "connection_class",
+                    "rank", "regional_band", "jurisdiction_rank", "jurisdiction_population",
+                    "jurisdiction_usable_population", "jurisdiction_percentile", "jurisdiction_band"):
+            item[key] = context.get(key)
     if request.args.get("sort") == "rider_exposure":
         opportunities.sort(key=lambda r: (-(r["exposure_score"] or 0), r["physical_stop_id"]))
     summary = {
@@ -2715,7 +2724,7 @@ def seating_opportunities():
                                    "collect_clearance_observation", "planning_review",
                                    "constrained_or_special_review", "no_current_action")},
     }
-    return jsonify({"summary": summary, "opportunities": opportunities})
+    return jsonify({"summary": summary, "opportunities": opportunities, "comparison": comparison})
 
 
 
@@ -3999,7 +4008,11 @@ def rider_exposure_map():
     with closing(sqlite3.connect(
         f"file:{DATABASE_PATH.as_posix()}?mode=ro", uri=True
     )) as conn:
-        return jsonify(map_payload(conn, mode, request.args.get("route"), limit))
+        try:
+            return jsonify(map_payload(conn, mode, request.args.get("route"), limit,
+                                       request.args.get("geography_type"), request.args.get("geography_value")))
+        except ValueError as error:
+            return jsonify({"error": str(error)}), 400
 
 
 @app.route("/map/stops")

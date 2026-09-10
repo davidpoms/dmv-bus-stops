@@ -1,8 +1,12 @@
 """
 Load WMATA Metrobus ridership data.
 
-Handles WMATA tab-delimited export format and
-stores daily and monthly ridership metrics.
+Handles WMATA tab-delimited export format and stores day-type aggregates unchanged.
+The retained wmata_ridership.csv has monthly totals by day type, NOT daily averages:
+Weekday + Saturday + Sunday reconciles to Monthly Total (within rounding).
+The export does not retain month/filter or holiday day-count metadata. This loader
+stamps the import date into period; consumers must not call it a verified service
+month. See docs/rider-exposure-jurisdiction-audit.md for the provenance audit.
 """
 
 import csv

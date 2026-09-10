@@ -243,14 +243,21 @@ Apply Filters
 <div class="exposure-controls">
 <label for="exposureMode">Rider exposure</label>
 <select id="exposureMode"><option value="off">Off</option><option value="highest">Highest exposure</option><option value="route">By route</option></select>
+<div id="exposureDetails" hidden>
+<label for="exposureGeographyType">Compare within</label>
+<select id="exposureGeographyType"><option value="">Entire DMV</option></select>
+<label for="exposureGeographyValue" id="exposureGeographyLabel" hidden>Jurisdiction</label>
+<select id="exposureGeographyValue" hidden><option value="">Choose a jurisdiction</option></select>
 <label for="exposureRoute" id="exposureRouteLabel" hidden>Exposure route</label>
 <select id="exposureRoute" hidden><option value="">Choose a route</option></select>
-<p>Highlights stops where more riders may be affected, using combined route weekday
-boardings, not observed stop boardings or unique people. Each distinct route contributes
+<p>Highlights stops where more riders may be affected. Daily estimates use the routes'
+monthly weekday boardings divided by calendar weekdays in the recorded month;
+they are not observed stop boardings or unique people. Each distinct route contributes
 according to its ridership. Normal map filters apply when exposure is Off.</p>
 <p id="exposureLegend" hidden>Exposure: Very High (90th percentile and above), High (75th to below 90th),
 Moderate (40th to below 75th), Lower (below 40th). Larger circles indicate higher exposure.
 Unavailable means no usable ridership data.</p>
+</div>
 <p id="exposureStatus" role="status" aria-live="polite"></p>
 </div>
 <div id="map" aria-label="Browse bus stops on the map"></div>
@@ -272,6 +279,15 @@ kind of observation would be useful next.
 <div id="benchCandidateMetrics">Loading seating opportunities...</div>
 <label for="benchCandidateSort">Sort seating opportunities</label>
 <select id="benchCandidateSort" onchange="loadBenchCandidates()"><option value="opportunity">Opportunity priority</option><option value="rider_exposure">Rider exposure</option></select>
+<div class="exposure-controls">
+<label for="seatingGeographyType">Compare seating opportunities within</label>
+<select id="seatingGeographyType"><option value="">Entire DMV</option></select>
+<label for="seatingGeographyValue" id="seatingGeographyLabel" hidden>Jurisdiction</label>
+<select id="seatingGeographyValue" hidden><option value="">Choose a jurisdiction</option></select>
+<label for="seatingBenchStatus">Bench evidence</label>
+<select id="seatingBenchStatus" onchange="loadBenchCandidates()"><option value="">All bench states</option><option value="likely_no">Likely absent</option><option value="confirmed_no">Confirmed absent</option><option value="unknown">Unknown — needs verification</option><option value="conflicting">Sources disagree</option></select>
+<p id="seatingExposureContext" role="status"></p>
+</div>
 <input id="benchCandidateSearch" placeholder="Search seating opportunities..." onkeyup="filterBenchCandidates()" />
 <div class="pipeline-table-container">
 <table id="benchCandidateTable">

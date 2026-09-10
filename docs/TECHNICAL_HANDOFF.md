@@ -238,9 +238,10 @@ verification opportunity; likely/confirmed absent remains an improvement/clearan
 opportunity. Conflicting evidence remains conflicting. WMATA inventory is not read
 as current amenity evidence by this layer.
 
-Limitations: the `weekday_boardings` values are source-period weekday totals, not
-daily averages; do not divide by calendar weekdays or label them as stop boardings.
-Import code can stamp import date into `period`, so it is labeled “source period,”
+Limitations: the `weekday_boardings` values are monthly weekday totals, not
+daily averages. The daily display now uses the existing project's calendar-weekday
+normalization, explicitly labeled an estimate; the raw exposure score is unchanged.
+Import code can stamp import date into `period`, so the UI says “recorded month,”
 not a guaranteed observation month. Route totals repeat at multiple stops, may
 overlap between routes, and cannot identify unique riders or actual transfer
 activity. Do not sum stop exposures into a people count. Unmatched route IDs can
@@ -248,11 +249,76 @@ understate exposure, and materialized assessments need the existing pipeline
 refresh when route/ridership inputs change. No new refresh writes, migrations,
 indexes, heavy dependencies, or production mutations are required.
 
-The layer uses three bulk reads and in-memory sorting for approximately 7,000
+The layer uses bulk reads and in-memory sorting for approximately 7,000
 stops, rather than a query per marker. Each response renders at most 100 circles.
 Rehearsal audit and interpretation findings: [rider-exposure-audit.md](rider-exposure-audit.md).
 Reproduce the read-only audit with
 `python -m scripts.diagnostics.audit_rider_exposure --db <fresh-copy> --output <json>`.
+
+### Daily display and jurisdiction comparison refinement
+
+The raw source is `data/raw/ridership/wmata_ridership.csv`: `Weekday`, `Saturday`,
+`Sunday`, and `Monthly Total`. `src/ingestion/load_ridership.py` removes commas and
+copies `Weekday` unchanged into `ridership_snapshots.weekday_boardings`. All 126
+retained rows match the snapshots exactly, and all reconcile the three day-type
+values to Monthly Total within one boarding (rounding). These are monthly
+day-type totals, not average daily values or a five-day total. The loader's former
+“daily and monthly” comment was inaccurate and is corrected.
+
+`src/assessment/create_opportunity_assessments.py` takes the latest global period,
+MAX per distinct serving route, and SUM into the canonical raw exposure. No raw
+arithmetic, assessment, or priority pipeline changed. Display-only `ridership_value`
+is raw exposure divided by the number of Monday–Friday calendar dates in the month
+recorded in `period` (23 for `2026-07-31`), following the existing API helper
+`latest_ridership_weekdays()` and impact producer. **Never divide by five.**
+Popup label: **Estimated combined average weekday route boardings**. The popup
+states the divisor and that this is not observed boarding activity at this stop.
+Formatting rounds to whole boardings, with separators; neither “riders/day” nor
+unique-person language is used. By route retains all serving-route contributions.
+
+This conversion is a calendar-weekday proxy, not a verified WMATA service-day
+average. The retained export lacks month/filter metadata and holiday/service-day
+counts. The import log is dated August 1 while the snapshots record July 31; the
+loader normally stamps import date, so original observation dates cannot be
+independently recovered from this export. A missing/invalid period makes the daily
+display unavailable without erasing the raw exposure. Do not apply a holiday
+adjustment or silently relabel the measure as an agency average.
+
+Both `/map/exposure` and `/seating-opportunities` accept paired `geography_type`
+and `geography_value` parameters. Allowed types are `state`, `county`,
+`municipality`, `dc_ward`, `dc_anc`, mapped to the existing fields of
+`stop_jurisdiction` joined on `stop_id`. Types and values must occur among active
+stops; invalid/missing pairs return HTTP 400. Request text is never used as an SQL
+identifier. Blank parameters select Entire DMV. Dimensions remain independent:
+no implicit state/county/municipality hierarchy, DC exclusion rule, or inferred
+assignment is introduced. Equivalent numeric ward labels (`1` and `1.0`) are
+normalized to `1` for presentation only. Other labels retain existing names.
+
+Entire DMV preserves its existing ranking, percentile denominator and bands.
+For a jurisdiction, the comparison population is **only active stops in that
+jurisdiction with positive usable exposure**. Its cumulative percentile is
+`100 * count(usable values <= this value) / usable jurisdiction population`.
+Ties share a percentile; deterministic ordinal ranks break ties by physical stop
+ID. Regional fields are retained as `regional_rank`, `regional_percentile`,
+`regional_band`; jurisdiction fields explicitly report rank, percentile, band,
+total active population and usable population. `exposure_score` and the daily
+display value stay identical across comparisons. Filtering by route or bench
+status, and capping markers, happen after jurisdiction comparison; they never
+redefine its denominator.
+
+Bands retain 90/75/40 boundaries. With fewer than **20 usable stops**, suppress
+local percentiles and show “Small comparison group,” rank #X of Y usable stops,
+and the separate DMV band. Twenty limits empirical steps to at most five percentage
+points; it is a presentation threshold, not a statistical confidence guarantee.
+All-zero/unavailable groups remain selectable; unknown exposure remains Unavailable.
+
+Map comparison controls appear only while exposure is enabled. Seating has its
+own independent geography and bench-evidence selectors, with exposure sorting and
+comparison context. Bench filters do not collapse unknown into absence or change
+existing workflows. Jurisdiction-relative exposure is a comparison aid, not an
+official agency priority ranking. No write, migration or added runtime dependency
+is required. Full coverage, group-size and top-10 audits are in
+[rider-exposure-jurisdiction-audit.md](rider-exposure-jurisdiction-audit.md).
 
 Current producer flow:
 

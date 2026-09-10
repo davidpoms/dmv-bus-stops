@@ -256,3 +256,12 @@ and [the fresh-copy audit](rider-exposure-audit.md). Missing route ridership and
 lack of observed stop boardings limit interpretation; this is not an agency ranking
 or an estimate of unique people. Existing deployment readiness requirements above
 still apply independently.
+
+The jurisdiction refinement adds independent state/county/municipality/ward/ANC
+comparisons, shown only when exposure is enabled, and equivalent geography/bench
+filters for seating opportunities. Groups with fewer than 20 usable stops show
+ranks without local percentile bands. The daily display is explicitly an estimate:
+monthly weekday totals divided by calendar weekdays in the recorded month, not
+an observed stop boarding count or verified agency service-day average. The raw
+exposure score and Entire DMV ordering are unchanged. See the
+[refinement provenance, coverage and top-10 audit](rider-exposure-jurisdiction-audit.md).

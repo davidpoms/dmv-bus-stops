@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from src.api import app as api
-from src.scoring.exposure_map import exposure_band, exposure_rows, map_payload
+from src.scoring.exposure_map import exposure_band, exposure_rows, map_payload, weekday_divisor, DAILY_LABEL
 from src.assessment.generate_seating_improvement_opportunities import SCHEMA_SQL
 
 
@@ -25,6 +25,7 @@ class RiderExposureTests(unittest.TestCase):
             CREATE TABLE opportunity_assessments(physical_stop_id INTEGER PRIMARY KEY,combined_route_weekday_boardings REAL);
             CREATE TABLE stop_amenity_status(physical_stop_id INTEGER,amenity_type TEXT,derived_status TEXT);
             CREATE TABLE ridership_snapshots(period TEXT);
+            CREATE TABLE stop_jurisdiction(stop_id INTEGER PRIMARY KEY,state TEXT,county TEXT,municipality TEXT,dc_ward TEXT,dc_anc TEXT);
             INSERT INTO ridership_snapshots VALUES ('2026-07-31');
             INSERT INTO routes VALUES (1,'A','Route A'),(2,'B','Route B'),(3,'OLD','Historical only');
         """)
@@ -36,6 +37,10 @@ class RiderExposureTests(unittest.TestCase):
             self.conn.execute("INSERT INTO physical_stop_members VALUES (?,?)", (i, i))
             self.conn.execute("INSERT INTO stop_routes VALUES (?,?)", (i, 1 if i < 106 else 3))
             self.conn.execute("INSERT INTO opportunity_assessments VALUES (?,?)", (i, i * 100))
+            self.conn.execute("INSERT INTO stop_jurisdiction VALUES (?,?,?,?,?,?)",
+                              (i, 'VA' if i % 3 == 0 else 'MD', 'Example' if i <= 60 else 'Other',
+                               'Tiny' if i <= 3 else None, '1.0' if i == 1 else '1' if i == 2 else None,
+                               '1A' if i <= 25 else None))
         self.conn.executescript("""
             INSERT INTO stop_routes VALUES (1,1),(1,2),(2,2);
             INSERT INTO physical_stop_members VALUES (1,1001);
@@ -111,10 +116,67 @@ class RiderExposureTests(unittest.TestCase):
         allowed = {'physical_stop_id', 'stop_name', 'latitude', 'longitude', 'exposure_score',
                    'exposure_percentile', 'exposure_band', 'ridership_value', 'ridership_label',
                    'active_route_count', 'active_routes', 'connection_class', 'bench_status',
-                   'shelter_status', 'rank'}
+                   'shelter_status', 'rank', 'weekday_divisor', 'geographies',
+                   'regional_rank', 'regional_percentile', 'regional_band'}
         self.assertEqual(allowed, set(data['stops'][0]))
         self.assertEqual(['likely_no', 'unknown'], [r['bench_status'] for r in data['stops']])
         self.assertEqual(before, self.path.read_bytes())
+
+    def test_daily_estimate_preserves_raw_score_and_uses_calendar_not_five_days(self):
+        self.assertEqual(23, weekday_divisor('2026-07-31'))
+        self.assertEqual(20, weekday_divisor('2026-02-28'))
+        self.assertIsNone(weekday_divisor(None))
+        self.assertIsNone(weekday_divisor('invalid'))
+        row = map_payload(self.conn, 'highest')['stops'][0]
+        self.assertEqual(10500, row['exposure_score'])
+        self.assertAlmostEqual(10500 / 23, row['ridership_value'])
+        self.assertEqual(DAILY_LABEL, row['ridership_label'])
+        source = (Path(__file__).parents[1] / 'src/dashboard/static/exposure_map.js').read_text()
+        self.assertIn('Not observed boarding activity at this stop', source)
+
+    def test_all_independent_geography_dimensions_and_parameter_validation(self):
+        for kind, value, expected in [('state','VA',set(range(3,106,3))-{3}),
+                                      ('county','Example',set(range(1,61))-{3}),
+                                      ('municipality','Tiny',{1,2}), ('dc_ward','1',{1,2}),
+                                      ('dc_anc','1A',set(range(1,26))-{3})]:
+            data = map_payload(self.conn, 'highest', geography_type=kind, geography_value=value)
+            self.assertEqual(expected, {r['physical_stop_id'] for r in data['stops']})
+        for params in ({'geography_type':'state'}, {'geography_value':'VA'},
+                       {'geography_type':'county','geography_value':'   '},
+                       {'geography_type':'state','geography_value':'absent'},
+                       {'geography_type':'state; DROP TABLE routes','geography_value':'VA'}):
+            self.assertEqual(400, self.client.get('/map/exposure', query_string=params).status_code)
+
+    def test_local_percentile_population_raw_invariance_ties_and_tiny_groups(self):
+        regional = {r['physical_stop_id']: r for r in exposure_rows(self.conn)}
+        data = map_payload(self.conn, 'highest', geography_type='county', geography_value='Example')
+        self.assertEqual(60, data['comparison']['population'])
+        self.assertEqual(59, data['comparison']['usable_population'])
+        rows = {r['physical_stop_id']: r for r in data['stops']}
+        self.assertEqual('Very High', rows[55]['exposure_band'])
+        self.assertEqual('Moderate', rows[55]['regional_band'])
+        self.assertEqual(regional[55]['exposure_score'], rows[55]['exposure_score'])
+        self.assertEqual(regional[55]['ridership_value'], rows[55]['ridership_value'])
+        self.assertEqual(rows[1]['jurisdiction_percentile'], rows[2]['jurisdiction_percentile'])
+        self.assertLess(rows[1]['rank'], rows[2]['rank'])
+        tiny = map_payload(self.conn, 'route', 'A', geography_type='municipality', geography_value='Tiny')
+        self.assertEqual(3, tiny['comparison']['population'])
+        self.assertEqual(2, tiny['comparison']['usable_population'])
+        self.assertTrue(tiny['comparison']['small_population'])
+        self.assertEqual(['Small comparison group','Small comparison group','Unavailable'], [r['exposure_band'] for r in tiny['stops']])
+        self.assertTrue(all(r['exposure_percentile'] is None for r in tiny['stops']))
+
+    def test_route_and_seating_geography_do_not_redefine_exposure_population(self):
+        data = map_payload(self.conn, 'route', 'B', geography_type='county', geography_value='Example')
+        self.assertEqual([1,2], [r['physical_stop_id'] for r in data['stops']])
+        self.assertEqual(59, data['comparison']['usable_population'])
+        self.assertEqual([200,200], [r['exposure_score'] for r in data['stops']])
+        data = self.client.get('/seating-opportunities', query_string={
+            'geography_type':'county','geography_value':'Example', 'sort':'rider_exposure','bench_status':'unknown'}).get_json()
+        self.assertEqual([2], [r['physical_stop_id'] for r in data['opportunities']])
+        self.assertEqual('verify_presence', data['opportunities'][0]['workflow_state'])
+        self.assertEqual(59, data['comparison']['usable_population'])
+        self.assertEqual(400, self.client.get('/seating-opportunities?geography_type=bogus&geography_value=x').status_code)
 
 
 if __name__ == '__main__':

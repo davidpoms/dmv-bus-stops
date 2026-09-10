@@ -1620,6 +1620,7 @@ function renderBenchCandidates(rows) {
                 no_current_action: "No current review needed"})
                 [candidate.workflow_state] || "Review current conditions"}</td>
             <td>${candidate.exposure_band || "Unavailable"}<br>
+                ${candidate.jurisdiction_rank ? `<small>Rank #${candidate.jurisdiction_rank} of ${candidate.jurisdiction_usable_population} with exposure</small><br>` : ""}
                 <small>${candidate.active_route_count ?? 0} routes</small></td>
         </tr>`).join("") : `<tr><td colspan="5">No matching opportunities.</td></tr>`;
 }
@@ -1634,12 +1635,25 @@ function filterBenchCandidates() {
 async function loadBenchCandidates() {
     if (!document.getElementById("benchCandidateBody")) return;
     const version = ++benchCandidateRequestVersion;
+    const geography = exposureGeographyParams("seating");
+    if (geography === null) {
+        benchCandidateRows = [];
+        renderBenchCandidates([]);
+        document.getElementById("benchCandidateMetrics").textContent = "Choose a jurisdiction.";
+        document.getElementById("seatingExposureContext").textContent = "";
+        return;
+    }
     try {
         const sort = document.getElementById("benchCandidateSort")?.value || "opportunity";
-        const response = await fetch(`/seating-opportunities?sort=${encodeURIComponent(sort)}`);
+        const params = new URLSearchParams({...geography, sort});
+        const bench = document.getElementById("seatingBenchStatus")?.value;
+        if (bench) params.set("bench_status", bench);
+        const response = await fetch(`/seating-opportunities?${params}`);
+        if (!response.ok) throw new Error("Seating opportunities unavailable");
         const data = await response.json();
         if (version !== benchCandidateRequestVersion) return;
         benchCandidateRows = data.opportunities || [];
+        document.getElementById("seatingExposureContext").textContent = exposureComparisonText(data.comparison);
         const summary = data.summary || {};
         document.getElementById("benchCandidateMetrics").innerHTML = `
             <strong>${summary.total_active_stops || 0}</strong> active stops &middot;
