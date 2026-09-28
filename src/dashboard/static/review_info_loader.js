@@ -55,8 +55,15 @@ document.addEventListener("DOMContentLoaded", async () => {
             <div class="panel review-stop-summary">
                 <h2>${info.name || "Bus stop"}</h2>
                 <p class="serving-heading"><strong>${headingLabels.length > 1 ? "Serving directions" : "Serving direction"}:</strong> ${headingLabels.length ? headingLabels.join(" · ") : "Not available"}</p>
+                <div class="review-reference-links">
+                    <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${info.lat},${info.lon}`)}" target="_blank" rel="noopener noreferrer" class="stop-review-button">Open in Google Maps</a>
+                    ${info.streetview_url ? `<a href="${info.streetview_url}" target="_blank" rel="noopener noreferrer" class="stop-review-button">Try Street View</a>` : ""}
+                    ${info.wmata_rider_tools_url ? `<a href="${info.wmata_rider_tools_url}" target="_blank" rel="noopener noreferrer" class="stop-review-button">Open WMATA Rider Tools</a>` : ""}
+                </div>
+                <p>Street View imagery may be unavailable. Use Google Maps to locate the stop, then review in person or with another visual source.</p>
                 <p>${[info.state, info.county, info.municipality].filter(Boolean).join(" · ")}</p>
 
+                <details><summary>Current evidence and review context</summary>
                 ${percentile !== null && percentile !== undefined ? `
                     <div class="rider-exposure-summary">
                         <strong>Rider exposure: ${exposureLabel(percentile)}</strong>
@@ -96,11 +103,13 @@ document.addEventListener("DOMContentLoaded", async () => {
                             Review method: ${reviewModeLabel(review.review_mode)}
                             ${review.streetview_imagery_month ? `<br>Imagery captured: ${review.streetview_imagery_month}` : ""}
                             ${review.preliminary_clearance ? `<br>Preliminary visual space observation: ${review.preliminary_clearance}` : ""}
+                            ${PhotoLinks.render(review.attachments)}
                             ${review.notes?.trim() ? `<br>Notes: ${review.notes}` : ""}
                         </div>`).join("") : `
                         <p>No community observations yet. Your review can create a dated record for this stop.</p>`}
                 </div>
 
+                </details>
                 <details>
                     <summary>Stop reference details</summary>
                     <p>Internal physical stop ID: ${info.stop_id}<br>
@@ -110,10 +119,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
                 <p><small>This is a preliminary visual check of the available waiting space.</small></p>
 
-                <div class="review-reference-links">
-                    ${info.streetview_url ? `<a href="${info.streetview_url}" target="_blank" rel="noopener noreferrer" class="stop-review-button">Open Google Street View</a>` : ""}
-                    ${info.wmata_rider_tools_url ? `<a href="${info.wmata_rider_tools_url}" target="_blank" rel="noopener noreferrer" class="stop-review-button">Open WMATA Rider Tools</a>` : ""}
-                </div>
+
             </div>`;
 
         document.dispatchEvent(new CustomEvent("review-context-loaded", {

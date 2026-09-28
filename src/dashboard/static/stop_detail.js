@@ -34,10 +34,6 @@ async function loadStopProfile() {
         const communityData =
             await communityResponse.json();
 
-        console.log("STOP DATA", stop);
-        console.log("REVIEW DATA", review);
-        console.log("COMMUNITY REVIEWS", communityData);
-
         document.getElementById("name").innerHTML =
             stop.location ||
             stop.stop_name ||
@@ -88,9 +84,8 @@ async function loadStopProfile() {
         }
 
         const boardings =
-            review.impact_summary?.estimated_weekday_boardings ||
-            review.daily_route_exposure ||
-            stop.daily_route_exposure ||
+            review.impact_summary?.estimated_weekday_boardings ??
+            review.ridership_exposure?.average_weekday_boardings ??
             null;
 
         const score =
@@ -103,7 +98,8 @@ async function loadStopProfile() {
         const streetview =
             stop.streetview_url ||
             review.streetview_url ||
-            "#";
+            null;
+        const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${stop.lat},${stop.lon}`)}`;
 
         const riderToolsUrl =
             stop.wmata_rider_tools_url ||
@@ -481,6 +477,7 @@ const latestCommunity =
                                 ? `<br>Preliminary visual space observation: ${reviewItem.preliminary_clearance}` : ""}
                         </div>
 
+                        ${PhotoLinks.render(reviewItem.attachments)}
                         ${
                             reviewItem.notes
                                 ? `
@@ -812,12 +809,20 @@ const latestCommunity =
 
                 <a
                     class="stop-review-button"
-                    href="${streetview}"
-                    target="_blank">
-
-                    Open Street View
-
+                    href="${mapsUrl}"
+                    target="_blank" rel="noopener noreferrer">
+                    Open in Google Maps
                 </a>
+
+                ${streetview ? `<br><br><a
+                    class="stop-review-button"
+                    href="${streetview}"
+                    target="_blank" rel="noopener noreferrer">
+
+                    Try Street View
+
+                </a>` : ""}
+                <p>Street View imagery may be unavailable. Use Google Maps to locate the stop, then review in person or with another visual source.</p>
 
                 ${
                     riderToolsUrl

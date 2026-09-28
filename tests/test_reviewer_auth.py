@@ -55,7 +55,7 @@ class ReviewerAuthTests(unittest.TestCase):
         CREATE TABLE physical_stop_members(physical_stop_id INTEGER,bus_stop_id INTEGER);
         CREATE TABLE stop_routes(stop_id INTEGER,route_id INTEGER);
         CREATE TABLE routes(id INTEGER PRIMARY KEY,route_id TEXT,route_name TEXT);
-        CREATE TABLE stop_improvement_impact(physical_stop_id INTEGER,daily_route_exposure REAL);
+        CREATE TABLE stop_improvement_impact(physical_stop_id INTEGER,daily_route_exposure REAL,average_weekday_boardings REAL);
         INSERT INTO community_reviewers(id,reviewer_key,display_name) VALUES(42,'anon','Alex');
         INSERT INTO stop_review_assignments VALUES(7,1,42,'direct','completed');
         INSERT INTO stop_observations VALUES(9,1,42);
@@ -65,7 +65,7 @@ class ReviewerAuthTests(unittest.TestCase):
         INSERT INTO physical_stop_members VALUES(1,10);
         INSERT INTO stop_routes VALUES(10,5);
         INSERT INTO routes VALUES(5,'R1','Route One');
-        INSERT INTO stop_improvement_impact VALUES(1,120);
+        INSERT INTO stop_improvement_impact VALUES(1,120,6);
         """)
         conn.commit(); conn.close()
         self.patches = [
@@ -196,6 +196,7 @@ class ReviewerAuthTests(unittest.TestCase):
         routes = client.get("/reviewer/routes").get_json()
         self.assertTrue(profile["signed_in"])
         self.assertEqual(1, profile["stats"]["reviews_completed"])
+        self.assertEqual(6, profile["stats"]["average_weekday_route_exposure_represented"])
         self.assertEqual("Main Street Stop", profile["stewarded_stops"][0]["name"])
         self.assertEqual(["R1"], routes["selected"])
         anonymous = review_api.app.test_client().get("/api/reviewer/status").get_json()
@@ -498,6 +499,27 @@ class ReviewerAuthTests(unittest.TestCase):
         self.assertTrue(conn.execute("SELECT 1 FROM sqlite_master WHERE name='reviewer_login_tokens'").fetchone())
         self.assertTrue(conn.execute("SELECT 1 FROM sqlite_master WHERE name='reviewer_auth_attempts'").fetchone())
         conn.close()
+
+
+    def test_profile_exposure_distinguishes_true_zero_from_missing_data(self):
+        client = review_api.app.test_client()
+        with client.session_transaction() as current:
+            current["reviewer_key"] = "anon"
+        conn = sqlite3.connect(self.db)
+        try:
+            conn.execute("UPDATE stop_improvement_impact SET average_weekday_boardings=0")
+            conn.commit()
+            stats = client.get("/api/reviewer/profile").json["stats"]
+            self.assertEqual(0, stats["average_weekday_route_exposure_represented"])
+            self.assertTrue(stats["route_exposure_coverage"]["complete"])
+            conn.execute("DELETE FROM stop_improvement_impact")
+            conn.commit()
+            stats = client.get("/api/reviewer/profile").json["stats"]
+            self.assertIsNone(stats["average_weekday_route_exposure_represented"])
+            self.assertEqual(1, stats["route_exposure_coverage"]["missing_stops"])
+            self.assertFalse(stats["route_exposure_coverage"]["complete"])
+        finally:
+            conn.close()
 
 
 if __name__ == "__main__": unittest.main()

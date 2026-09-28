@@ -200,10 +200,10 @@ class ServingDirectionTests(unittest.TestCase):
         review = (ROOT / "src/dashboard/static/review_info_loader.js").read_text(
             encoding="utf-8"
         )
-        self.assertIn('"streetview_display_heading": streetview_display_heading', api_source)
+        self.assertIn('"streetview_camera_heading": streetview_camera_heading', api_source)
         self.assertNotIn('"heading": heading', api_source)
-        self.assertNotIn('"serving_direction":', api_source)
-        self.assertIn('"serving_directions": serving_directions', api_source)
+        self.assertIn('"serving_direction":', api_source)
+        self.assertIn('"serving_directions": directions', api_source)
         self.assertIn("nearest-road orientation", documentation)
         self.assertIn("must never be substituted", documentation)
         self.assertIn("info.serving_directions", review)

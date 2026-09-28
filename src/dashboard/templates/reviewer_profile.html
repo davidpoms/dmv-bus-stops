@@ -1,5 +1,6 @@
 <!DOCTYPE html>
-<html><head><title>Your Reviewer Profile</title>
+<html><head>
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Your Reviewer Profile</title>
 <link rel="stylesheet" href="/static/dashboard.css"></head><body>
 <h1>Your reviewer profile</h1>
 <div class="panel" id="accountStatus">Loading your profile...</div>
@@ -25,6 +26,7 @@
 
 <div class="panel volunteer-card">
 <h2>Your review activity</h2>
+<p>Route-level ridership associated with reviewed stops, not unique riders or observed stop-level boardings. Uses current mappings, not snapshots at review time.</p>
 <div id="stats">Loading activity...</div>
 <p><a href="/review/start?mode=opportunity" class="dashboard-button">Continue reviewing</a></p>
 </div>
@@ -107,8 +109,15 @@ async function loadProfile() {
     stats.replaceChildren();
     addStat(stats, "Reviews completed", profileData.stats.reviews_completed);
     addStat(stats, "Stops reviewed", profileData.stats.stops_reviewed);
-    addStat(stats, "Route-based rider exposure represented",
-        Number(profileData.stats.ridership_impacted || 0).toLocaleString());
+    addStat(stats, "Estimated average weekday route exposure across reviewed stops",
+        profileData.stats.average_weekday_route_exposure_represented == null
+            ? "Not available"
+            : Number(profileData.stats.average_weekday_route_exposure_represented).toLocaleString());
+    const coverage = profileData.stats.route_exposure_coverage;
+    if (coverage) {
+        addStat(stats, coverage.complete ? "Exposure coverage" : "Incomplete exposure coverage",
+            `${coverage.stops_with_exposure} of ${coverage.reviewed_stops} reviewed stops have exposure data`);
+    }
     addStat(stats, "Routes covered", (profileData.stats.routes_covered || []).join(", ") || "None yet");
     addStat(stats, "Stops stewarded", profileData.stats.stewarded_stops);
     renderStewardedStops(profileData.stewarded_stops || []);

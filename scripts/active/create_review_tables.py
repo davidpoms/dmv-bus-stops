@@ -9,6 +9,7 @@ DB = Path(os.environ.get(
 ))
 
 conn = sqlite3.connect(DB)
+conn.execute("PRAGMA foreign_keys=ON")
 cur = conn.cursor()
 
 
@@ -158,6 +159,14 @@ if observation_table:
     ON stop_observations(assignment_id)
     """)
 
+
+if observation_table:
+    import sys
+    sys.path.insert(0, str(BASE_DIR))
+    from src.review.attachments import SCHEMA
+    cur.execute(SCHEMA)
+    cur.execute("CREATE INDEX IF NOT EXISTS observation_attachments_observation "
+                "ON observation_attachments(observation_id)")
 
 conn.commit()
 conn.close()

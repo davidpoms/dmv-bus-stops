@@ -5,14 +5,17 @@ location. It is orientation context for distinguishing paired curbside stops;
 it is not a route destination, trip headsign, vehicle bearing, or inferred road
 direction.
 
-The `/stops/<id>` field `streetview_display_heading` is different: it is a
-nearest-road orientation used to aim the Street View display. It is not transit
-evidence and must never be substituted for the canonical `serving_directions`
-records. The API does not expose a lossy singular
-`serving_direction` scalar. `serving_headings` remains only a backwards-compatible
-numeric projection; `serving_directions` is the canonical structured payload and
-preserves identity/provenance and multiple values. Volunteer and stop-detail
-direction labels use `serving_directions` exclusively.
+Both `/stops/<id>` and `/review/<id>/info` expose `serving_directions`
+with full member provenance. `serving_headings` is a compatibility projection.
+`serving_direction` is a structured record only when there is one unique heading;
+it is null for multiple directions or no trusted evidence. Frontends use the array
+so legitimate multiple headings must never be substituted with “Not available”.
+
+`streetview_camera_heading` is separate: bearing from the nearest-road viewpoint
+toward the stop coordinate, replacing the former nearest-road orientation.
+The URL requests that road viewpoint. Google may select a different panorama;
+without a panorama-location lookup, exact camera alignment cannot be guaranteed.
+When there is no road viewpoint or it coincides with the stop, heading is omitted.
 
 The application displays a WMATA heading only when the WMATA stop identifier
 is explicitly connected through `gtfs_stop_map` to a `bus_stops` member of the

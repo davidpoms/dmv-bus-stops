@@ -342,6 +342,67 @@ def get_serving_directions(stop_id):
     ))
 
 
+def review_attachments(observation_id):
+    from src.review.attachments import observation_attachments
+    conn = sqlite3.connect(DATABASE_PATH)
+    try:
+        return observation_attachments(conn, observation_id)
+    finally:
+        conn.close()
+
+
+def reviewer_weekday_exposure(reviewer_id):
+    """Current canonical exposure, once per historically completed physical stop."""
+    return reviewer_exposure_summary(reviewer_id)["average_weekday_route_exposure_represented"]
+
+
+def reviewer_exposure_summary(reviewer_id):
+    """Report coverage of the existing derived quantity, including genuine zeros."""
+    total, reviewed, covered = query_db("""
+        SELECT SUM(si.average_weekday_boardings), COUNT(*),
+               COUNT(si.average_weekday_boardings)
+        FROM (SELECT DISTINCT stop_id FROM stop_review_assignments
+              WHERE reviewer_id=? AND status='completed') reviewed
+        LEFT JOIN stop_improvement_impact si ON reviewed.stop_id=si.physical_stop_id
+    """, (reviewer_id,))[0]
+    return {
+        "average_weekday_route_exposure_represented":
+            round(total) if covered else (0 if not reviewed else None),
+        "route_exposure_coverage": {
+            "reviewed_stops": reviewed,
+            "stops_with_exposure": covered,
+            "missing_stops": reviewed - covered,
+            "complete": reviewed == covered,
+        },
+    }
+
+
+def serving_direction_payload(stop_id):
+    directions = get_serving_directions(stop_id)
+    unique = {d["heading_degrees"]: d for d in directions}
+    return {
+        "serving_directions": directions,
+        "serving_headings": list(unique),
+        "serving_direction": next(iter(unique.values())) if len(unique) == 1 else None,
+    }
+
+
+def streetview_for_stop(latitude, longitude):
+    """Aim from the estimated road viewpoint toward the stop, not along the road."""
+    road = get_road_index().nearest_road(longitude, latitude)
+    camera_heading = None
+    viewpoint_lat, viewpoint_lon = latitude, longitude
+    if road and road.get("road_lat") is not None and road.get("road_lon") is not None:
+        viewpoint_lat, viewpoint_lon = road["road_lat"], road["road_lon"]
+        from src.spatial.camera_heading import bearing_to_stop
+        camera_heading = bearing_to_stop(viewpoint_lat, viewpoint_lon, latitude, longitude)
+    url = ("https://www.google.com/maps/@?api=1&map_action=pano"
+           f"&viewpoint={viewpoint_lat},{viewpoint_lon}")
+    if camera_heading is not None:
+        url += f"&heading={camera_heading}"
+    return url, camera_heading
+
+
 def get_serving_headings(stop_id):
     """Compatibility projection of the validated serving-direction records."""
     return [item["heading_degrees"] for item in get_serving_directions(stop_id)]
@@ -780,27 +841,6 @@ VALUES
 
     conn.commit()
     conn.close()
-
-    streetview = get_road_index().nearest_road(
-        row[3],
-        row[2]
-    )
-
-
-    heading = 0
-
-    if streetview and streetview["heading"] is not None:
-        heading = streetview["heading"]
-
-
-    streetview_url = (
-        "https://www.google.com/maps/@?api=1"
-        "&map_action=pano"
-        f"&viewpoint={row[1]},{row[2]}"
-        f"&heading={heading}"
-        "&pitch=0"
-        "&fov=90"
-    )
 
     reviewer_id = None
 
@@ -1602,27 +1642,7 @@ GROUP BY ps.id
     )
 
 
-    road = get_road_index().nearest_road(
-        row[2],
-        row[1]
-    )
-
-
-    streetview_display_heading = 0
-
-    if road and road["heading"] is not None:
-        streetview_display_heading = road["heading"]
-
-
-    streetview_url = (
-        "https://www.google.com/maps/@?api=1"
-        "&map_action=pano"
-        f"&viewpoint={row[1]},{row[2]}"
-        f"&heading={streetview_display_heading}"
-        "&pitch=0"
-        "&fov=90"
-    )
-
+    streetview_url, streetview_camera_heading = streetview_for_stop(row[1], row[2])
 
     reviewer_key = session.get(
         "reviewer_key"
@@ -1757,9 +1777,10 @@ GROUP BY ps.id
                 row[6].split(",")
                 if row[5]
                 else [],
-            # Nearest-road camera orientation only. Transit direction is exposed
+            # Estimated road-to-stop camera bearing only. Transit direction is exposed
             # separately by the identity-linked serving_directions payload.
-            "streetview_display_heading": streetview_display_heading,
+            "streetview_camera_heading": streetview_camera_heading,
+            **serving_direction_payload(stop_id),
             "streetview_url": streetview_url,
 
 
@@ -2249,24 +2270,7 @@ def review_stop_info(stop_id):
 
 
 
-    streetview = get_road_index().nearest_road(
-        row[2],
-        row[3]
-    )
-
-    heading = None
-
-    if streetview and streetview["heading"] is not None:
-        heading = streetview["heading"]
-
-
-    streetview_url = (
-        "https://www.google.com/maps/@?"
-        f"api=1&map_action=pano"
-        f"&viewpoint={row[2]},{row[3]}"
-        f"&heading={heading or 0}"
-    )
-
+    streetview_url, streetview_camera_heading = streetview_for_stop(row[2], row[3])
 
     community_reviews = query_db(
         """
@@ -2372,8 +2376,7 @@ def review_stop_info(stop_id):
 
     amenity_evidence = get_current_amenity_evidence(stop_id)
     amenity_status = get_current_amenity_status(stop_id)
-    serving_directions = get_serving_directions(stop_id)
-    serving_headings = [item["heading_degrees"] for item in serving_directions]
+    serving_payload = serving_direction_payload(stop_id)
     amenity_review_priority = get_amenity_review_priority(stop_id)
     bench_candidate = get_bench_candidate(stop_id)
     seating_opportunity = get_seating_opportunity(stop_id)
@@ -2514,9 +2517,8 @@ def review_stop_info(stop_id):
                 if row[17]
                 else None,
 
-            "serving_headings": serving_headings,
-
-            "serving_directions": serving_directions,
+            **serving_payload,
+            "streetview_camera_heading": streetview_camera_heading,
 
             "streetview_url": streetview_url,
 
@@ -2559,6 +2561,7 @@ def review_stop_info(stop_id):
                         "review_mode": review[6],
                         "streetview_imagery_month": review[7],
                         "preliminary_clearance": review[8],
+                        "attachments": review_attachments(review[0]),
                         "concrete_pad_context": review[9],
                         "seating_limitation": review[10],
                         "waiting_environment": review[11],
@@ -2966,6 +2969,7 @@ def community_reviews(stop_id):
                         "review_mode": row[6],
                         "streetview_imagery_month": row[7],
                         "preliminary_clearance": row[8],
+                        "attachments": review_attachments(row[0]),
                     }
                     for row in reviews
                 ]
@@ -2977,6 +2981,12 @@ def community_reviews(stop_id):
 def submit_review():
 
     data = request.json
+    from src.review.attachments import validate_photo_url, attach_photo
+    try:
+        photo_url = validate_photo_url(data.get("photo_url"))
+    except ValueError as exc:
+        return {"error": str(exc)}, 400
+
 
 
     # Preserve the original multi-select seating values before
@@ -3084,11 +3094,6 @@ def submit_review():
             "error": "valid stop_id required"
         }, 400
 
-    # Historical assignments remain stored, but cannot be completed as new
-    # active work after the stop becomes non-current.
-    if not stop_is_current(stop_id):
-        return inactive_stop_response(stop_id)
-
     required_observation_columns = {
         "assignment_id",
         "weather_exposure",
@@ -3101,6 +3106,8 @@ def submit_review():
         required_observation_columns - observation_columns
     )
     if missing_observation_columns:
+        if not stop_is_current(stop_id):
+            return inactive_stop_response(stop_id)
         return {
             "error": "stop_observations schema migration is required",
             "code": "review_schema_migration_required",
@@ -3175,7 +3182,6 @@ def submit_review():
 
     assignment_reviewer_id = assignment[0][1]
     assignment_stop_id = assignment[0][2]
-    assignment_status = assignment[0][3]
 
 
     if assignment_stop_id != stop_id:
@@ -3194,206 +3200,153 @@ def submit_review():
         }, 403
 
 
-    if assignment_status == "completed":
+    # Serialize the identity check and insert. Replays never mutate saved evidence.
+    observation_conn = sqlite3.connect(DATABASE_PATH)
+    observation_conn.execute("PRAGMA foreign_keys=ON")
+    try:
+        with observation_conn:
+            observation_conn.execute("BEGIN IMMEDIATE")
+            locked_assignment = observation_conn.execute(
+                "SELECT reviewer_id, stop_id, status FROM stop_review_assignments WHERE id=?",
+                (assignment_id,),
+            ).fetchone()
+            if not locked_assignment or locked_assignment[:2] != (reviewer_id, stop_id):
+                return {"error": "Assignment ownership changed", "code": "assignment_mismatch"}, 409
+            already_completed = locked_assignment[2] == "completed"
+            existing_reviews = observation_conn.execute(
+                "SELECT id, reviewer_id, physical_stop_id FROM stop_observations "
+                "WHERE assignment_id=? AND source='community_review'", (assignment_id,)
+            ).fetchall()
+            if len(existing_reviews) > 1 or any(
+                row[1:] != (reviewer_id, stop_id) for row in existing_reviews
+            ):
+                return {"error": "Saved evidence does not uniquely match this assignment",
+                        "code": "assignment_observation_mismatch"}, 409
+            evidence_already_saved = bool(existing_reviews)
+            if evidence_already_saved:
+                observation_id = existing_reviews[0][0]
+            else:
+                if not stop_is_current(stop_id):
+                    return inactive_stop_response(stop_id)
+                if already_completed:
+                    return {"error": "Completed assignment has no matching saved evidence",
+                            "code": "assignment_observation_missing"}, 409
+                if photo_url and not observation_conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' "
+                    "AND name='observation_attachments'"
+                ).fetchone():
+                    return {"error": "Photo attachment schema migration is required",
+                            "code": "review_schema_migration_required",
+                            "migration": "scripts/active/create_review_tables.py"}, 503
+                observation_cursor = observation_conn.execute(
+                    """
+                    INSERT INTO stop_observations
+                (
+                    physical_stop_id,
+                    observer,
+                    shelter_present,
+                    bench_present,
+                    trash_present,
+                    bench_feasible,
+                    ada_clearance_possible,
+                    bench_type,
+                    bench_condition,
+                    shelter_type,
+                    rider_comfort_category,
+                    accessibility_status,
+                    hostile_design,
+                    notes,
+                    reviewer_id,
+                    confidence,
+                    source,
+                    review_mode,
+                    reviewer_relationship,
+                    rider_activity,
+                    usage_times,
+                    property_owner_outreach,
+                    steward_email,
+                    steward_candidate,
+                    concrete_pad_needed,
+                    streetview_imagery_month,
+                    assignment_id,
+                    weather_exposure,
+                    riders_avoid_facilities
+                )
 
-        return {
-            "error":
-                "Review already submitted"
-        }, 409
+                VALUES
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 
-
-    existing_review = query_db(
-        """
-        SELECT id
-        FROM stop_observations
-        WHERE assignment_id=?
-        AND source='community_review'
-        LIMIT 1
-        """,
-        (assignment_id,)
-    )
-
-
-    reviewer_id = assignment_reviewer_id
-
-
-    review_action = data.get(
-        "review_action",
-        "new"
-    )
-
-
-    if existing_review and review_action == "update":
-
-        query_db(
-            """
-            UPDATE stop_observations
-            SET
-                observer=?,
-                shelter_present=?,
-                bench_present=?,
-                trash_present=?,
-                bench_feasible=?,
-                concrete_pad_needed=?,
-                ada_clearance_possible=?,
-                bench_type=?,
-                bench_condition=?,
-                shelter_type=?,
-                rider_comfort_category=?,
-                accessibility_status=?,
-                hostile_design=?,
-                notes=?,
-                confidence=?,
-                review_mode=?,
-                reviewer_relationship=?,
-                rider_activity=?,
-                usage_times=?,
-                property_owner_outreach=?,
-                steward_email=?,
-                steward_candidate=?,
-                streetview_imagery_month=?,
-                weather_exposure=?,
-                riders_avoid_facilities=?,
-                observed_at=CURRENT_TIMESTAMP
-            WHERE id=?
-            """,
-            (
-                data.get("observer", ""),
-                data.get("shelter_present"),
-                data.get("bench_present"),
-                data.get("trash_present"),
-                data.get("bench_feasible"),
-                data.get("concrete_pad_needed"),
-                data.get("ada_clearance_possible"),
-                data.get("bench_type", ""),
-                data.get("bench_condition", ""),
-                data.get("shelter_type", ""),
-                data.get("rider_comfort_category", ""),
-                data.get("accessibility_status"),
-                data.get("hostile_design"),
-                data.get("notes"),
-                data.get("reviewer_confidence", "unknown"),
-                data.get("review_mode"),
-                data.get("reviewer_relationship"),
-                data.get("rider_activity"),
-                data.get("usage_times"),
-                data.get("property_owner_outreach", ""),
-                data.get("steward_email"),
-                data.get("steward_candidate", 0),
-                data.get("streetview_imagery_month"),
-                data.get("weather_exposure"),
-                data.get("riders_avoid_facilities"),
-                existing_review[0][0]
+                """,
+                (
+                    stop_id,
+                    data.get("observer", ""),
+                    data.get("shelter_present"),
+                    data.get("bench_present"),
+                    data.get("trash_present"),
+                    data.get("bench_feasible"),
+                    data.get("ada_clearance_possible"),
+                    data.get("bench_type", ""),
+                    data.get("bench_condition", ""),
+                    data.get("shelter_type", ""),
+                    data.get("rider_comfort_category", ""),
+                    data.get("accessibility_status"),
+                    data.get("hostile_design"),
+                    data.get("notes"),
+                    reviewer_id,
+                    data.get("reviewer_confidence", "unknown"),
+                    "community_review",
+                    data.get("review_mode"),
+                    data.get("reviewer_relationship"),
+                    data.get("rider_activity"),
+                    data.get("usage_times"),
+                    data.get("property_owner_outreach", ""),
+                    data.get("steward_email"),
+                    data.get("steward_candidate", 0),
+                    data.get("concrete_pad_needed"),
+                    data.get("streetview_imagery_month"),
+                    assignment_id,
+                    data.get("weather_exposure"),
+                    data.get("riders_avoid_facilities")
+                )
             )
-        )
 
 
-    if not (existing_review and review_action == "update"):
-
-        query_db(
-            """
-            INSERT INTO stop_observations
-        (
-            physical_stop_id,
-            observer,
-            shelter_present,
-            bench_present,
-            trash_present,
-            bench_feasible,
-            ada_clearance_possible,
-            bench_type,
-            bench_condition,
-            shelter_type,
-            rider_comfort_category,
-            accessibility_status,
-            hostile_design,
-            notes,
-            reviewer_id,
-            confidence,
-            source,
-            review_mode,
-            reviewer_relationship,
-            rider_activity,
-            usage_times,
-            property_owner_outreach,
-            steward_email,
-            steward_candidate,
-            concrete_pad_needed,
-            streetview_imagery_month,
-            assignment_id,
-            weather_exposure,
-            riders_avoid_facilities
-        )
-
-        VALUES
-        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-
-        """,
-        (
-            stop_id,
-            data.get("observer", ""),
-            data.get("shelter_present"),
-            data.get("bench_present"),
-            data.get("trash_present"),
-            data.get("bench_feasible"),
-            data.get("ada_clearance_possible"),
-            data.get("bench_type", ""),
-            data.get("bench_condition", ""),
-            data.get("shelter_type", ""),
-            data.get("rider_comfort_category", ""),
-            data.get("accessibility_status"),
-            data.get("hostile_design"),
-            data.get("notes"),
-            reviewer_id,
-            data.get("reviewer_confidence", "unknown"),
-            "community_review",
-            data.get("review_mode"),
-            data.get("reviewer_relationship"),
-            data.get("rider_activity"),
-            data.get("usage_times"),
-            data.get("property_owner_outreach", ""),
-            data.get("steward_email"),
-            data.get("steward_candidate", 0),
-            data.get("concrete_pad_needed"),
-            data.get("streetview_imagery_month"),
-            assignment_id,
-            data.get("weather_exposure"),
-            data.get("riders_avoid_facilities")
-        )
-    )
-
-
-    # Recalculate community consensus from saved observations.
-    consensus = calculate_stop_consensus(stop_id, DATABASE_PATH)
+                observation_id = observation_cursor.lastrowid
+                attach_photo(observation_conn, observation_id, photo_url)
+    finally:
+        observation_conn.close()
 
     refresh_conn = sqlite3.connect(DATABASE_PATH)
+    refresh_conn.row_factory = sqlite3.Row
     try:
-        try:
+        if already_completed:
+            saved_consensus = refresh_conn.execute(
+                "SELECT * FROM stop_consensus WHERE stop_id=?", (stop_id,)
+            ).fetchone()
+            consensus = dict(saved_consensus) if saved_consensus else None
+        else:
+            # Rebuild only from persisted observations, never the replacement payload.
+            consensus = calculate_stop_consensus(stop_id, DATABASE_PATH)
             refresh_after_community_mutation(refresh_conn, stop_id)
-        except Exception:
-            app.logger.exception(
-                "Community evidence saved but derived amenity refresh failed "
-                "for stop %s",
-                stop_id,
-            )
-            return {
-                "error": "Community evidence was saved, but derived status refresh failed",
-                "code": "derived_refresh_failed",
-                "stop_id": stop_id,
-            }, 500
+            with refresh_conn:
+                refresh_conn.execute(
+                    "UPDATE stop_review_assignments SET status='completed', "
+                    "completed_at=COALESCE(completed_at, CURRENT_TIMESTAMP) "
+                    "WHERE id=? AND reviewer_id=? AND stop_id=?",
+                    (assignment_id, reviewer_id, stop_id),
+                )
+    except Exception:
+        app.logger.exception("Saved review refresh failed for stop %s", stop_id)
+        return {
+            "error": "Your evidence was saved. Retry to finish processing this review.",
+            "code": "derived_refresh_failed",
+            "stop_id": stop_id,
+            "observation_id": observation_id,
+            "evidence_saved": True,
+            "retryable": True,
+        }, 500
     finally:
         refresh_conn.close()
-
-
-    query_db(
-        """
-        UPDATE stop_review_assignments
-        SET status='completed',
-            completed_at=CURRENT_TIMESTAMP
-        WHERE id=?
-        """,
-        (assignment_id,)
-    )
 
     app.logger.info(
         "review_completed stop_id=%s assignment_id=%s reviewer_id=%s",
@@ -3440,6 +3393,9 @@ def submit_review():
 
     return {
         "success": True,
+        "observation_id": observation_id,
+        "evidence_already_saved": evidence_already_saved,
+        "already_completed": already_completed,
         "stop_id": stop_id,
         "assignment_id": assignment_id,
         "reviewer_id": reviewer_id,
@@ -3486,38 +3442,7 @@ def submit_review():
                     (reviewer_id,)
                 )[0][0],
 
-            "total_route_boardings_represented":
-                round(
-                    query_db(
-                        """
-                        SELECT
-                            COALESCE(
-                                SUM(unique_stops.daily_route_exposure),
-                                0
-                            )
-
-                        FROM (
-
-                            SELECT DISTINCT
-                                sra.stop_id,
-                                si.daily_route_exposure
-
-                            FROM stop_review_assignments sra
-
-                            LEFT JOIN stop_improvement_impact si
-
-                            ON sra.stop_id =
-                               si.physical_stop_id
-
-                            WHERE sra.reviewer_id=?
-
-                            AND sra.status='completed'
-
-                        ) unique_stops
-                        """,
-                        (reviewer_id,)
-                    )[0][0]
-                ),
+            **reviewer_exposure_summary(reviewer_id),
 
             "routes_covered":
                 (
@@ -5322,36 +5247,7 @@ def reviewer_profile_api():
             )[0][0],
 
 
-        "ridership_impacted":
-            query_db(
-                """
-                SELECT
-                    COALESCE(
-                        SUM(unique_stops.daily_route_exposure),
-                        0
-                    )
-
-                FROM (
-
-                    SELECT DISTINCT
-                        sra.stop_id,
-                        si.daily_route_exposure
-
-                    FROM stop_review_assignments sra
-
-                    LEFT JOIN stop_improvement_impact si
-                    ON sra.stop_id =
-                       si.physical_stop_id
-
-                    WHERE sra.reviewer_id=?
-
-                    AND sra.status='completed'
-
-                ) unique_stops
-                """,
-                (reviewer_id,)
-            )[0][0],
-
+        **reviewer_exposure_summary(reviewer_id),
 
         "stewarded_stops":
 

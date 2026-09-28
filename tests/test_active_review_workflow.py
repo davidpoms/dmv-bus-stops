@@ -346,7 +346,7 @@ class ActiveReviewWorkflowTests(unittest.TestCase):
         self.assertEqual(200, history.status_code)
         self.assertEqual(1, len(history.get_json()["reviews"]))
 
-    def test_submission_persists_prospective_comfort_fields_and_assignment_history(self):
+    def prepare_submission(self):
         conn = sqlite3.connect(self.db)
         for name, declaration in (
             ("observer", "TEXT"), ("trash_present", "TEXT"),
@@ -387,6 +387,10 @@ class ActiveReviewWorkflowTests(unittest.TestCase):
         conn.close()
         with self.client.session_transaction() as session:
             session["reviewer_key"] = "reviewer"
+        return before
+
+    def test_submission_persists_prospective_comfort_fields_and_assignment_history(self):
+        before = self.prepare_submission()
         with patch.object(review_api, "calculate_stop_consensus", return_value={}), \
              patch.object(review_api, "refresh_after_community_mutation"):
             response = self.client.post("/review/submit", json={
@@ -398,6 +402,7 @@ class ActiveReviewWorkflowTests(unittest.TestCase):
                 "seating_type": ["full_bench"],
                 "seating_limitations": "dividers",
                 "waiting_environment_rating": "poor",
+                "photo_url": "https://example.org/stop-photos",
             })
         self.assertEqual(200, response.status_code, response.get_json())
         conn = sqlite3.connect(self.db)
@@ -415,8 +420,229 @@ class ActiveReviewWorkflowTests(unittest.TestCase):
         self.assertEqual((31, "older review", None, "street_view", None), older)
         history = self.client.get("/stops/1/community-reviews").get_json()["reviews"]
         submitted = next(item for item in history if item["id"] != 31)
+        self.assertEqual("https://example.org/stop-photos", submitted["attachments"][0]["external_url"])
+        self.assertEqual(5, response.get_json()["reviewer_stats"]["average_weekday_route_exposure_represented"])
+        self.assertEqual({"reviewed_stops": 2, "stops_with_exposure": 1,
+                          "missing_stops": 1, "complete": False},
+                         response.json["reviewer_stats"]["route_exposure_coverage"])
         self.assertEqual("remote", submitted["review_mode"])
         self.assertEqual("2025-05", submitted["streetview_imagery_month"])
+        # A partially completed assignment must not overwrite saved evidence/photos.
+        conn = sqlite3.connect(self.db)
+        conn.execute("UPDATE stop_review_assignments SET status='assigned' WHERE id=21")
+        conn.commit()
+        conn.close()
+        with patch.object(review_api, "calculate_stop_consensus", return_value={}), \
+             patch.object(review_api, "refresh_after_community_mutation"):
+            retry = self.client.post("/review/submit", json={
+                "stop_id": 1, "assignment_id": 21, "review_action": "update",
+                "photo_url": "https://example.org/replacement"})
+        self.assertEqual(200, retry.status_code)
+        self.assertTrue(retry.get_json()["evidence_already_saved"])
+        conn = sqlite3.connect(self.db)
+        self.assertEqual(1, conn.execute(
+            "SELECT COUNT(*) FROM stop_observations WHERE assignment_id=21").fetchone()[0])
+        self.assertEqual("https://example.org/stop-photos", conn.execute(
+            "SELECT external_url FROM observation_attachments").fetchone()[0])
+        conn.close()
+
+
+    def submit_photo_review(self, client=None, **changes):
+        payload = {"stop_id": 1, "assignment_id": 21,
+                   "photo_url": "https://example.org/original", "notes": "original"}
+        payload.update(changes)
+        return (client or self.client).post("/review/submit", json=payload)
+
+    def saved_review_state(self):
+        conn = sqlite3.connect(self.db)
+        try:
+            return (
+                conn.execute("SELECT * FROM stop_observations WHERE assignment_id=21").fetchall(),
+                conn.execute("SELECT * FROM observation_attachments").fetchall(),
+                conn.execute("SELECT status,completed_at FROM stop_review_assignments WHERE id=21").fetchone(),
+            )
+        finally:
+            conn.close()
+
+    def test_successful_retry_preserves_evidence_photo_and_completion_timestamp(self):
+        self.prepare_submission()
+        with patch.object(review_api, "calculate_stop_consensus", return_value={}), \
+             patch.object(review_api, "refresh_after_community_mutation"):
+            first = self.submit_photo_review()
+        self.assertEqual(200, first.status_code)
+        before = self.saved_review_state()
+        with patch.object(review_api, "calculate_stop_consensus") as consensus, \
+             patch.object(review_api, "refresh_after_community_mutation") as refresh:
+            exact_retry = self.submit_photo_review()
+            replacement = self.submit_photo_review(photo_url="https://example.org/replacement", notes="changed")
+        for response in (exact_retry, replacement):
+            self.assertEqual(200, response.status_code)
+            self.assertTrue(response.json["already_completed"])
+            self.assertTrue(response.json["evidence_already_saved"])
+            self.assertEqual(first.json["observation_id"], response.json["observation_id"])
+        consensus.assert_not_called()
+        refresh.assert_not_called()
+        self.assertEqual(before, self.saved_review_state())
+
+    def test_retry_recovers_after_consensus_or_derived_refresh_failure(self):
+        self.prepare_submission()
+        for failing_step in ("calculate_stop_consensus", "refresh_after_community_mutation"):
+            with self.subTest(failing_step=failing_step):
+                with patch.object(review_api, "calculate_stop_consensus", return_value={}), \
+                     patch.object(review_api, "refresh_after_community_mutation"), \
+                     patch.object(review_api, failing_step, side_effect=RuntimeError("refresh failed")):
+                    failed = self.submit_photo_review()
+                self.assertEqual(500, failed.status_code)
+                self.assertTrue(failed.json["evidence_saved"])
+                self.assertTrue(failed.json["retryable"])
+                before = self.saved_review_state()
+                self.assertEqual(("assigned", None), before[2])
+                with patch.object(review_api, "calculate_stop_consensus", return_value={}) as consensus, \
+                     patch.object(review_api, "refresh_after_community_mutation") as refresh:
+                    retry = self.submit_photo_review(photo_url="https://example.org/replacement")
+                self.assertEqual(200, retry.status_code)
+                self.assertTrue(retry.json["evidence_already_saved"])
+                self.assertFalse(retry.json["already_completed"])
+                consensus.assert_called_once()
+                refresh.assert_called_once()
+                after = self.saved_review_state()
+                self.assertEqual(before[:2], after[:2])
+                self.assertEqual("completed", after[2][0])
+                conn = sqlite3.connect(self.db)
+                conn.execute("UPDATE stop_review_assignments SET status='assigned',completed_at=NULL WHERE id=21")
+                conn.commit()
+                conn.close()
+
+    def test_assignment_and_saved_observation_ownership_must_match(self):
+        self.prepare_submission()
+        with patch.object(review_api, "calculate_stop_consensus", return_value={}), \
+             patch.object(review_api, "refresh_after_community_mutation"):
+            self.assertEqual(200, self.submit_photo_review().status_code)
+        before = self.saved_review_state()
+        self.assertEqual(400, self.submit_photo_review(stop_id=2).status_code)
+        with patch.object(review_api, "get_or_create_reviewer", return_value=(99, "other")):
+            self.assertEqual(403, self.submit_photo_review().status_code)
+        with self.client.session_transaction() as session:
+            session["reviewer_key"] = "reviewer"
+        self.assertEqual(before, self.saved_review_state())
+        for column, wrong_value in (("reviewer_id", 99), ("physical_stop_id", 2)):
+            conn = sqlite3.connect(self.db)
+            conn.execute(f"UPDATE stop_observations SET {column}=? WHERE assignment_id=21", (wrong_value,))
+            conn.commit()
+            conn.close()
+            response = self.submit_photo_review()
+            self.assertEqual(409, response.status_code)
+            self.assertEqual("assignment_observation_mismatch", response.json["code"])
+            conn = sqlite3.connect(self.db)
+            conn.execute(f"UPDATE stop_observations SET {column}=1 WHERE assignment_id=21")
+            conn.commit()
+            conn.close()
+
+    def test_concurrent_submissions_keep_one_observation_and_attachment(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+        self.prepare_submission()
+        barrier = Barrier(2)
+        original_query = review_api.query_db
+
+        def synchronized_query(sql, params=()):
+            rows = original_query(sql, params)
+            if "FROM stop_review_assignments" in sql and "LIMIT 1" in sql:
+                barrier.wait(timeout=10)
+            return rows
+
+        def submit():
+            client = review_api.app.test_client()
+            with client.session_transaction() as session:
+                session["reviewer_key"] = "reviewer"
+            return self.submit_photo_review(client)
+
+        with patch.object(review_api, "query_db", side_effect=synchronized_query), \
+             patch.object(review_api, "calculate_stop_consensus", return_value={}), \
+             patch.object(review_api, "refresh_after_community_mutation"), \
+             ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(submit) for _ in range(2)]
+            responses = [future.result(timeout=15) for future in futures]
+        self.assertEqual([200, 200], [response.status_code for response in responses])
+        self.assertEqual([False, True], sorted(r.json["evidence_already_saved"] for r in responses))
+        observations, attachments, assignment = self.saved_review_state()
+        self.assertEqual(1, len(observations))
+        self.assertEqual(1, len(attachments))
+        self.assertEqual("completed", assignment[0])
+
+    def test_missing_attachment_migration_rejects_photo_without_saving_evidence(self):
+        self.prepare_submission()
+        conn = sqlite3.connect(self.db)
+        conn.execute("DROP TABLE observation_attachments")
+        conn.commit()
+        conn.close()
+
+        response = self.submit_photo_review()
+        self.assertEqual(503, response.status_code)
+        self.assertEqual("review_schema_migration_required", response.json["code"])
+        conn = sqlite3.connect(self.db)
+        self.assertEqual(0, conn.execute("SELECT COUNT(*) FROM stop_observations WHERE assignment_id=21").fetchone()[0])
+        self.assertIsNone(conn.execute("SELECT name FROM sqlite_master WHERE name='observation_attachments'").fetchone())
+        conn.close()
+
+    def test_attachment_migration_is_repeatable_and_preserves_saved_review(self):
+        self.prepare_submission()
+        with patch.object(review_api, "calculate_stop_consensus", return_value={}), \
+             patch.object(review_api, "refresh_after_community_mutation"):
+            self.assertEqual(200, self.submit_photo_review().status_code)
+        before = self.saved_review_state()
+        env = dict(os.environ, DMV_BUS_STOPS_DB=str(self.db))
+        for _ in range(2):
+            subprocess.check_call(
+                [sys.executable, "scripts/active/create_review_tables.py"],
+                cwd=Path(__file__).resolve().parents[1], env=env,
+            )
+        self.assertEqual(before, self.saved_review_state())
+        conn = sqlite3.connect(self.db)
+        self.assertIsNotNone(conn.execute("SELECT name FROM sqlite_master WHERE type='index' "
+                                        "AND name='observation_attachments_observation'").fetchone())
+        conn.close()
+
+    def test_submission_connection_enforces_attachment_foreign_key(self):
+        from src.review import attachments
+        self.prepare_submission()
+        real_attach = attachments.attach_photo
+
+        def checked_attach(conn, observation_id, url):
+            self.assertEqual(1, conn.execute("PRAGMA foreign_keys").fetchone()[0])
+            with self.assertRaises(sqlite3.IntegrityError):
+                real_attach(conn, -999, url)
+            real_attach(conn, observation_id, url)
+
+        with patch.object(attachments, "attach_photo", side_effect=checked_attach), \
+             patch.object(review_api, "calculate_stop_consensus", return_value={}), \
+             patch.object(review_api, "refresh_after_community_mutation"):
+            response = self.submit_photo_review()
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(1, len(self.saved_review_state()[1]))
+
+    def test_completion_exposure_reports_zero_missing_and_coverage(self):
+        self.prepare_submission()
+        conn = sqlite3.connect(self.db)
+        try:
+            conn.execute("UPDATE stop_improvement_impact SET average_weekday_boardings=0")
+            conn.execute("INSERT INTO stop_improvement_impact VALUES(2,0,0)")
+            conn.commit()
+            with patch.object(review_api, "calculate_stop_consensus", return_value={}), \
+                 patch.object(review_api, "refresh_after_community_mutation"):
+                first = self.submit_photo_review()
+            self.assertEqual(200, first.status_code)
+            self.assertEqual(0, first.json["reviewer_stats"]["average_weekday_route_exposure_represented"])
+            self.assertTrue(first.json["reviewer_stats"]["route_exposure_coverage"]["complete"])
+            conn.execute("DELETE FROM stop_improvement_impact")
+            conn.commit()
+            retry = self.submit_photo_review()
+            self.assertEqual(200, retry.status_code)
+            self.assertIsNone(retry.json["reviewer_stats"]["average_weekday_route_exposure_represented"])
+            self.assertEqual(2, retry.json["reviewer_stats"]["route_exposure_coverage"]["missing_stops"])
+        finally:
+            conn.close()
+
 
 
 if __name__ == "__main__":

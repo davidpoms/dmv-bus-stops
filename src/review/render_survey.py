@@ -128,17 +128,21 @@ def render_question(question):
             """
         )
 
-    elif qtype == "text":
+    elif qtype in ("text", "url"):
 
         html.append(
             f"""
             <input
                 id="survey-{escape(field)}"
-                type="text"
+                type="{qtype}"
                 name="{escape(field)}"
+                {('maxlength="2048"' if qtype == 'url' else '')}
             >
             """
         )
+
+    if question.get("guidance"):
+        html.append(f'<p>{escape(question["guidance"])}</p>')
 
     if qtype == "radio" or multiple:
         html.append("</fieldset>")
@@ -275,6 +279,8 @@ def render_survey():
         </div>
         """
     )
+
+    html.append(render_question(SURVEY["photo_url"]))
 
     html.append(
         render_question(

@@ -233,3 +233,10 @@ SURVEY = {
     }
 
 }
+
+SURVEY["photo_url"] = {
+    "field": "photo_url",
+    "label": "Photos (optional)",
+    "type": "url",
+    "guidance": "Paste a link to photos of this stop. Use HTTP or HTTPS. Avoid identifiable faces and license plates where practical. Anyone viewing the review can open the link.",
+}

@@ -271,50 +271,34 @@ td, th {
 
 
 
-/* Stop popup action button */
-
-.stop-review-button {
-
-    display: inline-block;
-    padding: 10px 14px;
-    background: #333;
-    color: white;
-    border-radius: 8px;
+/* Explicit popup specificity prevents Leaflet's anchor color from winning. */
+.stop-review-button,
+.leaflet-popup-content a.stop-review-button,
+.leaflet-popup-content a.stop-review-button:visited {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    min-height: 44px;
+    margin-top: 10px;
+    padding: 10px 16px;
+    background: #1756a9;
+    color: #fff;
     text-decoration: none;
-
+    border-radius: 6px;
+    font-weight: bold;
 }
-
-
-.stop-review-button:hover {
-
-    opacity: 0.85;
-
+.stop-review-button:hover,
+.leaflet-popup-content a.stop-review-button:hover {
+    background: #123f7b;
+    color: #fff;
 }
-
-
-.stop-review-button {
-
-    display:inline-block;
-    margin-top:10px;
-    padding:10px 16px;
-    background:#2c7be5;
-    color:white;
-    text-decoration:none;
-    border-radius:6px;
-    font-weight:bold;
-
+.stop-review-button:focus-visible,
+.leaflet-popup-content a.stop-review-button:focus-visible {
+    outline: 3px solid #111;
+    outline-offset: 3px;
+    box-shadow: 0 0 0 3px #fff;
 }
-
-
-.stop-review-button:hover {
-
-    background:#1a5fb4;
-
-}
-
-
-
-
 
 /* Community review survey */
 
@@ -895,4 +879,41 @@ form input {
     .dashboard-map-card .filter-group { min-width: 0; max-width: 100%; }
     .dashboard-map-card .review-option { min-width: 0; box-sizing: border-box; overflow-wrap: anywhere; }
     .dashboard-map-card select { box-sizing: border-box; max-width: 100%; }
+}
+
+/* Field review layouts shared by public pages. */
+input, select, textarea, button { box-sizing: border-box; max-width: 100%; }
+button, select, input:not([type="radio"]):not([type="checkbox"]), .dashboard-button {
+    min-height: 44px;
+}
+button:focus-visible, a:focus-visible, input:focus-visible,
+select:focus-visible, textarea:focus-visible { outline: 3px solid #1756a9; outline-offset: 3px; }
+.review-reference-links { display: flex; flex-wrap: wrap; gap: 10px; }
+.leaflet-popup-content { overflow-wrap: anywhere; max-width: calc(100vw - 80px); }
+@media (max-width: 600px) {
+    body { margin: 12px; overflow-wrap: anywhere; }
+    h1 { font-size: 1.6rem; }
+    input, select, textarea { font-size: 16px; }
+    .card, .panel { box-sizing: border-box; max-width: 100%; margin-left: 0; margin-right: 0; }
+    .filter-group, .review-option { min-width: 0; }
+    .geo-grid, .container { grid-template-columns: minmax(0, 1fr); }
+    .filter-row { flex-wrap: wrap; position: static; }
+    .filter-row label, .filter-row select { width: 100%; }
+    #map { height: 55svh; min-height: 220px; }
+    .review-reference-links a, #reviewForm button[type="submit"] { width: 100%; }
+    .survey-question label, #routeList label { display: flex; align-items: center; min-height: 44px; gap: 8px; }
+    table { display: block; max-width: 100%; overflow-x: auto; }
+}
+@media (max-height: 500px) and (orientation: landscape) {
+    #map { height: 65svh; min-height: 180px; }
+    .filter-row { position: static; }
+}
+
+/* Verified against narrow map containers and phone landscape viewports. */
+.map-filter-card select, .map-filter-card button { min-height: 44px; }
+@media (max-width: 600px), (max-height: 500px) and (orientation: landscape) {
+    input, select, textarea, .filter-row select { font-size: 16px; }
+}
+@media (max-width: 600px) {
+    .leaflet-popup-content { max-width: calc(100vw - 120px); }
 }

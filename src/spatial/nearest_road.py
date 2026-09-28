@@ -10,7 +10,7 @@ Given a bus stop location, determine:
 - nearest roadway segment
 - distance to roadway
 - nearest point on roadway
-- heading from roadway toward stop
+- orientation along the selected roadway segment (not a camera bearing)
 
 This module contains no Google API code.
 It is purely geometric.
