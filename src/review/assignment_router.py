@@ -45,74 +45,80 @@ def normalize_campaign(campaign):
 def get_or_create_reviewer(reviewer_key=None):
 
     conn = sqlite3.connect(DB)
+    try:
 
-    cur = conn.cursor()
+        cur = conn.cursor()
 
 
-    if reviewer_key:
+        if reviewer_key:
 
-        existing = cur.execute(
-            """
+            existing = cur.execute(
+                """
             SELECT id
             FROM community_reviewers
             WHERE reviewer_key=?
             """,
-            (reviewer_key,)
-        ).fetchone()
+                (reviewer_key,)
+            ).fetchone()
 
 
-        if existing:
-
-            conn.close()
-
-            return existing[0], reviewer_key
+            if existing:
 
 
+                return existing[0], reviewer_key
 
-    reviewer_key = uuid.uuid4().hex
 
 
-    cur.execute(
-        """
+        reviewer_key = uuid.uuid4().hex
+
+
+        cur.execute(
+            """
         INSERT INTO community_reviewers
         (
             reviewer_key
         )
         VALUES (?)
         """,
-        (
-            reviewer_key,
+            (
+                reviewer_key,
+            )
         )
-    )
 
 
-    reviewer_id = cur.lastrowid
+        reviewer_id = cur.lastrowid
 
-    conn.commit()
-    conn.close()
+        conn.commit()
 
 
-    return reviewer_id, reviewer_key
+        return reviewer_id, reviewer_key
+    except BaseException:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 
 def stop_is_active(stop_id):
 
     conn = sqlite3.connect(DB)
+    try:
 
-    row = conn.execute(
-        """
+        row = conn.execute(
+            """
         SELECT physical_stop_id
         FROM stop_gtfs_status
         WHERE physical_stop_id=?
           AND current_gtfs=1
         """,
-        (stop_id,)
-    ).fetchone()
+            (stop_id,)
+        ).fetchone()
 
-    conn.close()
 
-    return row is not None
+        return row is not None
+    finally:
+        conn.close()
 
 
 def _supports_unified_cohorts(cur):
@@ -209,27 +215,26 @@ def assign_stop(
         raise ValueError("Campaign is only supported for opportunity reviews")
 
     conn = sqlite3.connect(DB)
-    cur = conn.cursor()
-    assignment_columns = {
-        item[1] for item in cur.execute("PRAGMA table_info(stop_review_assignments)")
-    }
-    if scenario == "opportunity" and "campaign" not in assignment_columns:
-        conn.close()
-        raise RuntimeError(
-            "stop_review_assignments campaign migration is required"
-        )
+    try:
+        cur = conn.cursor()
+        assignment_columns = {
+            item[1] for item in cur.execute("PRAGMA table_info(stop_review_assignments)")
+        }
+        if scenario == "opportunity" and "campaign" not in assignment_columns:
+            raise RuntimeError(
+                "stop_review_assignments campaign migration is required"
+            )
 
-    # Previous assignments and proxy evidence never establish active status.
-    if stop_id and not stop_is_active(stop_id):
-        conn.close()
-        return None
+        # Previous assignments and proxy evidence never establish active status.
+        if stop_id and not stop_is_active(stop_id):
+            return None
 
-    # Return existing assignment if reviewer already has this stop assigned
+        # Return existing assignment if reviewer already has this stop assigned
 
-    if stop_id:
+        if stop_id:
 
-        existing = cur.execute(
-            """
+            existing = cur.execute(
+                """
             SELECT
                 id,
                 stop_id
@@ -242,47 +247,46 @@ def assign_stop(
 
             LIMIT 1
             """,
-            (
-                stop_id,
-                reviewer_id
-            )
-        ).fetchone()
-
-
-        if existing:
-
-            conn.close()
-
-            return existing[0], existing[1]
-
-    # -------------------------------------------------
-    # Specific requested stop
-    # -------------------------------------------------
-
-    if stop_id:
-
-        if scenario == "opportunity":
-            workflow_clause = "AND sio.workflow_state=?" if campaign else ""
-            params = [stop_id]
-            if campaign:
-                params.append(CAMPAIGN_WORKFLOW[campaign])
-            row = cur.execute(
-                f"""
-                SELECT sio.opportunity_rank, sio.physical_stop_id
-                FROM seating_improvement_opportunities sio
-                JOIN stop_gtfs_status sgs
-                  ON sgs.physical_stop_id=sio.physical_stop_id
-                 AND sgs.current_gtfs=1
-                WHERE sio.physical_stop_id=?
-                  AND sio.workflow_state!='no_current_action'
-                  {workflow_clause}
-                LIMIT 1
-                """,
-                tuple(params),
+                (
+                    stop_id,
+                    reviewer_id
+                )
             ).fetchone()
-        else:
-            row = cur.execute(
-                """
+
+
+            if existing:
+
+
+                return existing[0], existing[1]
+
+        # -------------------------------------------------
+        # Specific requested stop
+        # -------------------------------------------------
+
+        if stop_id:
+
+            if scenario == "opportunity":
+                workflow_clause = "AND sio.workflow_state=?" if campaign else ""
+                params = [stop_id]
+                if campaign:
+                    params.append(CAMPAIGN_WORKFLOW[campaign])
+                row = cur.execute(
+                    f"""
+                    SELECT sio.opportunity_rank, sio.physical_stop_id
+                    FROM seating_improvement_opportunities sio
+                    JOIN stop_gtfs_status sgs
+                      ON sgs.physical_stop_id=sio.physical_stop_id
+                     AND sgs.current_gtfs=1
+                    WHERE sio.physical_stop_id=?
+                      AND sio.workflow_state!='no_current_action'
+                      {workflow_clause}
+                    LIMIT 1
+                    """,
+                    tuple(params),
+                ).fetchone()
+            else:
+                row = cur.execute(
+                    """
             SELECT
                 rq.id,
                 rq.physical_stop_id
@@ -297,21 +301,21 @@ def assign_stop(
 
             LIMIT 1
             """,
-            (
-                stop_id,
-            )
-            ).fetchone()
+                (
+                    stop_id,
+                )
+                ).fetchone()
 
 
 
-    # -------------------------------------------------
-    # Route mode
-    # -------------------------------------------------
+        # -------------------------------------------------
+        # Route mode
+        # -------------------------------------------------
 
-    elif scenario == "route":
+        elif scenario == "route":
 
-        row = cur.execute(
-            """
+            row = cur.execute(
+                """
             SELECT
                 rq.id,
                 rq.physical_stop_id
@@ -367,22 +371,22 @@ def assign_stop(
             LIMIT 1
 
             """,
-            (
-                reviewer_id,
-                reviewer_id
-            )
-        ).fetchone()
+                (
+                    reviewer_id,
+                    reviewer_id
+                )
+            ).fetchone()
 
 
 
-    # -------------------------------------------------
-    # Nearby mode
-    # -------------------------------------------------
+        # -------------------------------------------------
+        # Nearby mode
+        # -------------------------------------------------
 
-    elif scenario == "nearby" and latitude and longitude:
+        elif scenario == "nearby" and latitude and longitude:
 
-        row = cur.execute(
-            """
+            row = cur.execute(
+                """
             SELECT
                 rq.id,
                 rq.physical_stop_id
@@ -432,52 +436,52 @@ def assign_stop(
 
             LIMIT 1
             """,
-            (
-                reviewer_id,
-                latitude,
-                latitude,
-                longitude,
-                longitude
-            )
-        ).fetchone()
-
-
-
-    # -------------------------------------------------
-    # Opportunity/default mode
-    # -------------------------------------------------
-
-    elif scenario == "opportunity":
-
-        if campaign is None and _supports_unified_cohorts(cur):
-            row = _unified_opportunity_candidate(cur, reviewer_id)
-        else:
-            workflow_clause = "AND sio.workflow_state=?" if campaign else ""
-            params = []
-            if campaign:
-                params.append(CAMPAIGN_WORKFLOW[campaign])
-            params.append(reviewer_id)
-            row = cur.execute(
-                f"""
-                SELECT sio.opportunity_rank, sio.physical_stop_id
-                FROM seating_improvement_opportunities sio
-                JOIN stop_gtfs_status sgs
-                  ON sgs.physical_stop_id=sio.physical_stop_id AND sgs.current_gtfs=1
-                WHERE sio.workflow_state!='no_current_action'
-                  {workflow_clause}
-                  AND sio.physical_stop_id NOT IN
-                      (SELECT stop_id FROM stop_review_assignments WHERE reviewer_id=?)
-                  AND sio.physical_stop_id NOT IN
-                      (SELECT stop_id FROM stop_review_assignments WHERE status='assigned')
-                ORDER BY sio.opportunity_rank, sio.physical_stop_id
-                LIMIT 1
-                """, tuple(params)
+                (
+                    reviewer_id,
+                    latitude,
+                    latitude,
+                    longitude,
+                    longitude
+                )
             ).fetchone()
 
-    else:
 
-        row = cur.execute(
-            """
+
+        # -------------------------------------------------
+        # Opportunity/default mode
+        # -------------------------------------------------
+
+        elif scenario == "opportunity":
+
+            if campaign is None and _supports_unified_cohorts(cur):
+                row = _unified_opportunity_candidate(cur, reviewer_id)
+            else:
+                workflow_clause = "AND sio.workflow_state=?" if campaign else ""
+                params = []
+                if campaign:
+                    params.append(CAMPAIGN_WORKFLOW[campaign])
+                params.append(reviewer_id)
+                row = cur.execute(
+                    f"""
+                    SELECT sio.opportunity_rank, sio.physical_stop_id
+                    FROM seating_improvement_opportunities sio
+                    JOIN stop_gtfs_status sgs
+                      ON sgs.physical_stop_id=sio.physical_stop_id AND sgs.current_gtfs=1
+                    WHERE sio.workflow_state!='no_current_action'
+                      {workflow_clause}
+                      AND sio.physical_stop_id NOT IN
+                          (SELECT stop_id FROM stop_review_assignments WHERE reviewer_id=?)
+                      AND sio.physical_stop_id NOT IN
+                          (SELECT stop_id FROM stop_review_assignments WHERE status='assigned')
+                    ORDER BY sio.opportunity_rank, sio.physical_stop_id
+                    LIMIT 1
+                    """, tuple(params)
+                ).fetchone()
+
+        else:
+
+            row = cur.execute(
+                """
             SELECT
                 rq.id,
                 rq.physical_stop_id
@@ -532,45 +536,44 @@ def assign_stop(
             LIMIT 1
 
             """,
-            (
-                reviewer_id,
+                (
+                    reviewer_id,
+                )
+            ).fetchone()
+
+
+
+        if not row:
+
+            return None
+
+
+
+        assigned_stop_id = row[1]
+
+        if scenario == "opportunity" and campaign is None and len(row) > 2:
+            evidence_row = cur.execute(
+                "SELECT bench_status,shelter_status,adequacy_status,clearance_status,"
+                "workflow_state FROM seating_improvement_opportunities WHERE physical_stop_id=?",
+                (assigned_stop_id,),
+            ).fetchone()
+            item = dict(zip(("bench_status", "shelter_status", "adequacy_status",
+                             "clearance_status", "workflow_state"), evidence_row or ()))
+            campaign = campaign_for_cohort(
+                row[2], item, WORKFLOW_CAMPAIGN.get(item.get("workflow_state"))
             )
-        ).fetchone()
+        elif scenario == "opportunity" and campaign is None:
+            workflow_row = cur.execute(
+                "SELECT workflow_state FROM seating_improvement_opportunities "
+                "WHERE physical_stop_id=?",
+                (assigned_stop_id,),
+            ).fetchone()
+            campaign = WORKFLOW_CAMPAIGN.get(workflow_row[0]) if workflow_row else None
 
 
-
-    if not row:
-
-        conn.close()
-        return None
-
-
-
-    assigned_stop_id = row[1]
-
-    if scenario == "opportunity" and campaign is None and len(row) > 2:
-        evidence_row = cur.execute(
-            "SELECT bench_status,shelter_status,adequacy_status,clearance_status,"
-            "workflow_state FROM seating_improvement_opportunities WHERE physical_stop_id=?",
-            (assigned_stop_id,),
-        ).fetchone()
-        item = dict(zip(("bench_status", "shelter_status", "adequacy_status",
-                         "clearance_status", "workflow_state"), evidence_row or ()))
-        campaign = campaign_for_cohort(
-            row[2], item, WORKFLOW_CAMPAIGN.get(item.get("workflow_state"))
-        )
-    elif scenario == "opportunity" and campaign is None:
-        workflow_row = cur.execute(
-            "SELECT workflow_state FROM seating_improvement_opportunities "
-            "WHERE physical_stop_id=?",
-            (assigned_stop_id,),
-        ).fetchone()
-        campaign = WORKFLOW_CAMPAIGN.get(workflow_row[0]) if workflow_row else None
-
-
-    if "campaign" in assignment_columns:
-        cur.execute(
-        """
+        if "campaign" in assignment_columns:
+            cur.execute(
+            """
         INSERT INTO stop_review_assignments
         (
             stop_id,
@@ -582,26 +585,30 @@ def assign_stop(
 
         VALUES (?, ?, ?, ?, 'assigned')
         """,
-        (
-            assigned_stop_id,
-            reviewer_id,
-            scenario,
-            campaign,
-        )
-        )
-    else:
-        cur.execute(
-            "INSERT INTO stop_review_assignments(stop_id,reviewer_id,scenario,status) "
-            "VALUES (?,?,?,'assigned')",
-            (assigned_stop_id, reviewer_id, scenario),
-        )
+            (
+                assigned_stop_id,
+                reviewer_id,
+                scenario,
+                campaign,
+            )
+            )
+        else:
+            cur.execute(
+                "INSERT INTO stop_review_assignments(stop_id,reviewer_id,scenario,status) "
+                "VALUES (?,?,?,'assigned')",
+                (assigned_stop_id, reviewer_id, scenario),
+            )
 
 
-    assignment_id = cur.lastrowid
+        assignment_id = cur.lastrowid
 
 
-    conn.commit()
-    conn.close()
+        conn.commit()
 
 
-    return assignment_id, assigned_stop_id
+        return assignment_id, assigned_stop_id
+    except BaseException:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()

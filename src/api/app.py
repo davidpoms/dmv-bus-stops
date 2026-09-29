@@ -118,10 +118,11 @@ DATABASE_PATH = Path(
 def get_wmata_history(stop_id):
 
     conn = sqlite3.connect(DATABASE_PATH)
-    conn.row_factory = sqlite3.Row
+    try:
+        conn.row_factory = sqlite3.Row
 
-    rows = conn.execute(
-        """
+        rows = conn.execute(
+            """
         SELECT
             wmata_stop_id,
             wmata_status,
@@ -141,10 +142,12 @@ def get_wmata_history(stop_id):
             created_at DESC,
             match_distance_m ASC
         """,
-        (stop_id,)
-    ).fetchall()
+            (stop_id,)
+        ).fetchall()
 
-    conn.close()
+
+    finally:
+        conn.close()
 
     return [
         dict(row)
@@ -157,10 +160,11 @@ def get_wmata_history(stop_id):
 def get_wmata_evidence(stop_id):
 
     conn = sqlite3.connect(DATABASE_PATH)
-    conn.row_factory = sqlite3.Row
+    try:
+        conn.row_factory = sqlite3.Row
 
-    row = conn.execute(
-        """
+        row = conn.execute(
+            """
         SELECT
             wmata_stop_id,
             match_confidence,
@@ -174,10 +178,12 @@ def get_wmata_evidence(stop_id):
 
         LIMIT 1
         """,
-        (stop_id,)
-    ).fetchone()
+            (stop_id,)
+        ).fetchone()
 
-    conn.close()
+
+    finally:
+        conn.close()
 
     return dict(row) if row else None
 
@@ -186,16 +192,22 @@ def get_wmata_evidence(stop_id):
 def query_db(sql, params=()):
 
     conn = sqlite3.connect(DATABASE_PATH)
+    try:
 
-    cursor = conn.cursor()
+        cursor = conn.cursor()
 
-    cursor.execute(sql, params)
+        cursor.execute(sql, params)
 
-    conn.commit()
+        conn.commit()
 
-    rows = cursor.fetchall()
+        rows = cursor.fetchall()
 
-    conn.close()
+
+    except BaseException:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
     return rows
 
@@ -636,62 +648,65 @@ def retired_stop_payload(stop_id):
 def get_stop_evidence_summary(stop_id):
 
     conn = sqlite3.connect(DATABASE_PATH)
-    conn.row_factory = sqlite3.Row
+    try:
+        conn.row_factory = sqlite3.Row
 
-    transit = conn.execute(
-        """
+        transit = conn.execute(
+            """
         SELECT *
         FROM stop_transit_evidence
         WHERE stop_id=?
         """,
-        (stop_id,)
-    ).fetchone()
+            (stop_id,)
+        ).fetchone()
 
 
-    osm = conn.execute(
-        """
+        osm = conn.execute(
+            """
         SELECT *
         FROM stop_osm_evidence
         WHERE stop_id=?
         """,
-        (stop_id,)
-    ).fetchone()
+            (stop_id,)
+        ).fetchone()
 
 
-    ddot = conn.execute(
-        """
+        ddot = conn.execute(
+            """
         SELECT *
         FROM stop_ddot_shelter_evidence
         WHERE physical_stop_id=?
         ORDER BY created_at DESC
         """,
-        (stop_id,)
-    ).fetchall()
+            (stop_id,)
+        ).fetchall()
 
 
-    reviews = conn.execute(
-        """
+        reviews = conn.execute(
+            """
         SELECT *
         FROM stop_observations
         WHERE physical_stop_id=?
         ORDER BY observed_at DESC
         """,
-        (stop_id,)
-    ).fetchall()
+            (stop_id,)
+        ).fetchall()
 
-    amenity_status = conn.execute(
-        """
+        amenity_status = conn.execute(
+            """
         SELECT amenity_type, derived_status, consensus_status,
                evidence_conflict, consensus_conflicts_with_other_evidence
         FROM stop_amenity_status
         WHERE physical_stop_id=?
         """,
-        (stop_id,)
-    ).fetchall()
+            (stop_id,)
+        ).fetchall()
 
 
-    conn.close()
 
+
+    finally:
+        conn.close()
 
     return {
         "transit": dict(transit) if transit else None,
@@ -795,9 +810,10 @@ def create_observation():
         )
 
     conn = sqlite3.connect(DATABASE_PATH)
+    try:
 
-    conn.execute(
-        """
+        conn.execute(
+            """
         INSERT INTO stop_observations
         (
             physical_stop_id,
@@ -821,26 +837,30 @@ VALUES
         (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 
         """,
-        (
-            data["stop_id"],
-            data.get("observer", ""),
-            data.get("shelter_present"),
-            data.get("bench_present"),
-            data.get("trash_present"),
-            data.get("bench_feasible"),
-            data.get("ada_clearance_possible"),
-            data.get("review_mode"),
-            data.get("rider_activity"),
-            data.get("usage_times"),
-            data.get("property_owner_outreach"),
-            data.get("steward_email"),
-            data.get("steward_candidate", 0),
-            data.get("notes", "")
+            (
+                data["stop_id"],
+                data.get("observer", ""),
+                data.get("shelter_present"),
+                data.get("bench_present"),
+                data.get("trash_present"),
+                data.get("bench_feasible"),
+                data.get("ada_clearance_possible"),
+                data.get("review_mode"),
+                data.get("rider_activity"),
+                data.get("usage_times"),
+                data.get("property_owner_outreach"),
+                data.get("steward_email"),
+                data.get("steward_candidate", 0),
+                data.get("notes", "")
+            )
         )
-    )
 
-    conn.commit()
-    conn.close()
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
     reviewer_id = None
 
@@ -940,11 +960,12 @@ def validation_update():
     notes = data.get("notes", "")
 
     conn = sqlite3.connect(DATABASE_PATH)
+    try:
 
-    cursor = conn.cursor()
+        cursor = conn.cursor()
 
-    cursor.execute(
-        """
+        cursor.execute(
+            """
         INSERT INTO stop_consensus
         (
             stop_id,
@@ -962,16 +983,20 @@ def validation_update():
             notes = excluded.notes,
             updated_at = excluded.updated_at
         """,
-        (
-            stop_id,
-            confidence,
-            notes
+            (
+                stop_id,
+                confidence,
+                notes
+            )
         )
-    )
 
 
-    conn.commit()
-    conn.close()
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
     return jsonify(
@@ -3202,8 +3227,8 @@ def submit_review():
 
     # Serialize the identity check and insert. Replays never mutate saved evidence.
     observation_conn = sqlite3.connect(DATABASE_PATH)
-    observation_conn.execute("PRAGMA foreign_keys=ON")
     try:
+        observation_conn.execute("PRAGMA foreign_keys=ON")
         with observation_conn:
             observation_conn.execute("BEGIN IMMEDIATE")
             locked_assignment = observation_conn.execute(
@@ -3317,8 +3342,8 @@ def submit_review():
         observation_conn.close()
 
     refresh_conn = sqlite3.connect(DATABASE_PATH)
-    refresh_conn.row_factory = sqlite3.Row
     try:
+        refresh_conn.row_factory = sqlite3.Row
         if already_completed:
             saved_consensus = refresh_conn.execute(
                 "SELECT * FROM stop_consensus WHERE stop_id=?", (stop_id,)
@@ -3629,53 +3654,56 @@ def get_reviewer_impact(reviewer_id):
 def review_queue():
 
     conn = sqlite3.connect(DATABASE_PATH)
-    conn.row_factory = sqlite3.Row
+    try:
+        conn.row_factory = sqlite3.Row
 
-    columns = {row[1] for row in conn.execute("PRAGMA table_info(review_queue)")}
-    has_priority = "review_priority_score" in columns
-    priority_select = (
-        "rq.review_priority_score,rq.priority_amenity,"
-        "rq.shelter_review_priority,rq.bench_review_priority,"
-        "rq.rider_exposure_percentile,rq.priority_reason"
-        if has_priority else
-        "NULL review_priority_score,NULL priority_amenity,"
-        "NULL shelter_review_priority,NULL bench_review_priority,"
-        "NULL rider_exposure_percentile,NULL priority_reason"
-    )
-    order = "rq.review_priority_score DESC," if has_priority else ""
-    rows = conn.execute(
-        f"""
-        SELECT
-            rq.physical_stop_id,
-            ps.latitude AS lat,
-            ps.longitude AS lon,
-            rq.priority_rank,
-            rq.opportunity_score,
-            rq.location_name,
-            rq.review_status,
-            rq.consensus_status,
-            {priority_select}
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(review_queue)")}
+        has_priority = "review_priority_score" in columns
+        priority_select = (
+            "rq.review_priority_score,rq.priority_amenity,"
+            "rq.shelter_review_priority,rq.bench_review_priority,"
+            "rq.rider_exposure_percentile,rq.priority_reason"
+            if has_priority else
+            "NULL review_priority_score,NULL priority_amenity,"
+            "NULL shelter_review_priority,NULL bench_review_priority,"
+            "NULL rider_exposure_percentile,NULL priority_reason"
+        )
+        order = "rq.review_priority_score DESC," if has_priority else ""
+        rows = conn.execute(
+            f"""
+            SELECT
+                rq.physical_stop_id,
+                ps.latitude AS lat,
+                ps.longitude AS lon,
+                rq.priority_rank,
+                rq.opportunity_score,
+                rq.location_name,
+                rq.review_status,
+                rq.consensus_status,
+                {priority_select}
 
-        FROM review_queue rq
+            FROM review_queue rq
 
-        JOIN physical_stops ps
-            ON ps.id = rq.physical_stop_id
+            JOIN physical_stops ps
+                ON ps.id = rq.physical_stop_id
 
-        JOIN stop_gtfs_status sgs
-            ON sgs.physical_stop_id = rq.physical_stop_id
-           AND sgs.current_gtfs = 1
+            JOIN stop_gtfs_status sgs
+                ON sgs.physical_stop_id = rq.physical_stop_id
+               AND sgs.current_gtfs = 1
 
-        WHERE rq.review_status = 'pending'
+            WHERE rq.review_status = 'pending'
 
-        ORDER BY
-            {order}
-            rq.priority_rank,
-            rq.physical_stop_id
+            ORDER BY
+                {order}
+                rq.priority_rank,
+                rq.physical_stop_id
 
-        """
-    ).fetchall()
+            """
+        ).fetchall()
 
-    conn.close()
+
+    finally:
+        conn.close()
 
     return jsonify(
         {
@@ -4644,26 +4672,27 @@ def save_reviewer_routes():
     conn = sqlite3.connect(
         DATABASE_PATH
     )
+    try:
 
-    cur = conn.cursor()
+        cur = conn.cursor()
 
 
-    cur.execute(
-        """
+        cur.execute(
+            """
         DELETE FROM community_reviewer_routes
 
         WHERE reviewer_id=?
         """,
-        (
-            reviewer_id,
+            (
+                reviewer_id,
+            )
         )
-    )
 
 
-    for route in routes:
+        for route in routes:
 
-        cur.execute(
-            """
+            cur.execute(
+                """
             INSERT INTO community_reviewer_routes
             (
                 reviewer_id,
@@ -4672,15 +4701,19 @@ def save_reviewer_routes():
 
             VALUES (?,?)
             """,
-            (
-                reviewer_id,
-                route
+                (
+                    reviewer_id,
+                    route
+                )
             )
-        )
 
 
-    conn.commit()
-    conn.close()
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
     return jsonify(
@@ -4758,8 +4791,12 @@ def dashboard_static(filename):
 
 def _auth_db():
     conn = sqlite3.connect(DATABASE_PATH)
-    conn.execute("PRAGMA foreign_keys=ON")
-    return conn
+    try:
+        conn.execute("PRAGMA foreign_keys=ON")
+        return conn
+    except BaseException:
+        conn.close()
+        raise
 
 
 def review_lead_required(view):
@@ -5009,10 +5046,7 @@ def reviewer_sign_in():
             invalidate_login_token(conn, raw)
             raise RuntimeError("email delivery failed") from exc
         supersede_login_tokens(conn, raw, email)
-        conn.close()
     except RateLimitError as exc:
-        if conn is not None:
-            conn.close()
         response = jsonify({
             "message": "If that address can receive sign-in links, check your email."
         })
@@ -5020,17 +5054,14 @@ def reviewer_sign_in():
         response.headers["Retry-After"] = str(exc.retry_after)
         return response
     except ValueError as exc:
-        if conn is not None:
-            conn.close()
         return {"error": str(exc)}, 400
     except (EmailConfigurationError, OSError, RuntimeError):
-        if conn is not None:
-            conn.close()
         return {"error": "Email sign-in is temporarily unavailable. You can still review anonymously."}, 503
     except sqlite3.DatabaseError:
+        return {"error": "Email sign-in is temporarily unavailable. You can still review anonymously."}, 503
+    finally:
         if conn is not None:
             conn.close()
-        return {"error": "Email sign-in is temporarily unavailable. You can still review anonymously."}, 503
     response = {"message": "If that address can receive sign-in links, check your email."}
     if app.testing or os.environ.get("REVIEWER_AUTH_DEV_MODE") == "1":
         response["magic_link"] = link
@@ -5465,8 +5496,8 @@ def summary():
 @app.route("/pipeline/geography")
 def pipeline_geography():
     conn = sqlite3.connect(DATABASE_PATH)
-    conn.row_factory = sqlite3.Row
     try:
+        conn.row_factory = sqlite3.Row
         table_exists = conn.execute(
             """
             SELECT 1 FROM sqlite_master

@@ -96,10 +96,11 @@ def calculate_stop_consensus(stop_id, database_path=None):
     """
 
     conn = sqlite3.connect(database_path or DATABASE_PATH)
-    conn.row_factory = sqlite3.Row
+    try:
+        conn.row_factory = sqlite3.Row
 
-    rows = conn.execute(
-        """
+        rows = conn.execute(
+            """
         SELECT
             shelter_present,
             bench_present,
@@ -113,84 +114,35 @@ def calculate_stop_consensus(stop_id, database_path=None):
         AND source='community_review'
         ORDER BY observed_at ASC, id ASC
         """,
-        (stop_id,)
-    ).fetchall()
+            (stop_id,)
+        ).fetchall()
 
-    if not rows:
-        conn.execute(
-            """
+        if not rows:
+            conn.execute(
+                """
             DELETE FROM stop_consensus
             WHERE stop_id=?
             """,
-            (stop_id,)
+                (stop_id,)
+            )
+
+            conn.commit()
+
+            return None
+
+        has_shelter, shelter_agreement = _yes_no(
+            [row["shelter_present"] for row in rows]
         )
 
-        conn.commit()
-        conn.close()
-
-        return None
-
-    has_shelter, shelter_agreement = _yes_no(
-        [row["shelter_present"] for row in rows]
-    )
-
-    has_bench, bench_agreement = _yes_no(
-        [row["bench_present"] for row in rows]
-    )
-
-    bench_feasible, feasibility_agreement = _yes_no(
-        [row["bench_feasible"] for row in rows]
-    )
-
-    ada_accessible, accessibility_agreement = _yes_no(
-        [
-            "yes"
-            if row["accessibility_status"] == "good"
-            else (
-                "no"
-                if row["accessibility_status"] == "blocked"
-                else "unknown"
-            )
-            for row in rows
-        ]
-    )
-
-    seating_type, seating_agreement = _majority(
-        _seating_values(rows)
-    )
-
-    rider_comfort, comfort_agreement = _majority(
-        [
-            row["rider_comfort_category"]
-            for row in rows
-        ]
-    )
-
-    hostile_design, hostile_agreement = _majority(
-        [
-            row["hostile_design"]
-            for row in rows
-        ]
-    )
-
-    # Only include fields that have at least one usable response.
-    # Unknown / blank / unanswered fields should not count as
-    # disagreement and should not artificially reduce confidence.
-    agreement_pairs = [
-        (
-            shelter_agreement,
-            [row["shelter_present"] for row in rows]
-        ),
-        (
-            bench_agreement,
+        has_bench, bench_agreement = _yes_no(
             [row["bench_present"] for row in rows]
-        ),
-        (
-            feasibility_agreement,
+        )
+
+        bench_feasible, feasibility_agreement = _yes_no(
             [row["bench_feasible"] for row in rows]
-        ),
-        (
-            accessibility_agreement,
+        )
+
+        ada_accessible, accessibility_agreement = _yes_no(
             [
                 "yes"
                 if row["accessibility_status"] == "good"
@@ -201,44 +153,92 @@ def calculate_stop_consensus(stop_id, database_path=None):
                 )
                 for row in rows
             ]
-        ),
-        (
-            seating_agreement,
+        )
+
+        seating_type, seating_agreement = _majority(
             _seating_values(rows)
-        ),
-        (
-            comfort_agreement,
+        )
+
+        rider_comfort, comfort_agreement = _majority(
             [
                 row["rider_comfort_category"]
                 for row in rows
             ]
-        ),
-        (
-            hostile_agreement,
+        )
+
+        hostile_design, hostile_agreement = _majority(
             [
                 row["hostile_design"]
                 for row in rows
             ]
-        ),
-    ]
-
-    usable_agreements = [
-        agreement
-        for agreement, values in agreement_pairs
-        if any(
-            value not in (None, "", "unknown")
-            for value in values
         )
-    ]
 
-    confidence = (
-        sum(usable_agreements) / len(usable_agreements)
-        if usable_agreements
-        else 0.0
-    )
+        # Only include fields that have at least one usable response.
+        # Unknown / blank / unanswered fields should not count as
+        # disagreement and should not artificially reduce confidence.
+        agreement_pairs = [
+            (
+                shelter_agreement,
+                [row["shelter_present"] for row in rows]
+            ),
+            (
+                bench_agreement,
+                [row["bench_present"] for row in rows]
+            ),
+            (
+                feasibility_agreement,
+                [row["bench_feasible"] for row in rows]
+            ),
+            (
+                accessibility_agreement,
+                [
+                    "yes"
+                    if row["accessibility_status"] == "good"
+                    else (
+                        "no"
+                        if row["accessibility_status"] == "blocked"
+                        else "unknown"
+                    )
+                    for row in rows
+                ]
+            ),
+            (
+                seating_agreement,
+                _seating_values(rows)
+            ),
+            (
+                comfort_agreement,
+                [
+                    row["rider_comfort_category"]
+                    for row in rows
+                ]
+            ),
+            (
+                hostile_agreement,
+                [
+                    row["hostile_design"]
+                    for row in rows
+                ]
+            ),
+        ]
 
-    conn.execute(
-        """
+        usable_agreements = [
+            agreement
+            for agreement, values in agreement_pairs
+            if any(
+                value not in (None, "", "unknown")
+                for value in values
+            )
+        ]
+
+        confidence = (
+            sum(usable_agreements) / len(usable_agreements)
+            if usable_agreements
+            else 0.0
+        )
+
+        conn.execute(
+            """
         INSERT INTO stop_consensus
         (
             stop_id,
@@ -264,48 +264,53 @@ def calculate_stop_consensus(stop_id, database_path=None):
             hostile_design_consensus=excluded.hostile_design_consensus,
             bench_feasible=excluded.bench_feasible
         """,
-        (
-            stop_id,
             (
-                1 if has_bench is True
-                else 0 if has_bench is False
-                else None
-            ),
-            (
-                1 if has_shelter is True
-                else 0 if has_shelter is False
-                else None
-            ),
-            (
-                1 if ada_accessible is True
-                else 0 if ada_accessible is False
-                else None
-            ),
-            confidence,
-            seating_type,
-            rider_comfort,
-            hostile_design,
-            (
-                1
-                if bench_feasible is True
-                else 0
-                if bench_feasible is False
-                else None
+                stop_id,
+                (
+                    1 if has_bench is True
+                    else 0 if has_bench is False
+                    else None
+                ),
+                (
+                    1 if has_shelter is True
+                    else 0 if has_shelter is False
+                    else None
+                ),
+                (
+                    1 if ada_accessible is True
+                    else 0 if ada_accessible is False
+                    else None
+                ),
+                confidence,
+                seating_type,
+                rider_comfort,
+                hostile_design,
+                (
+                    1
+                    if bench_feasible is True
+                    else 0
+                    if bench_feasible is False
+                    else None
+                )
             )
         )
-    )
 
-    conn.commit()
+        conn.commit()
 
-    result = conn.execute(
-        """
+        result = conn.execute(
+            """
         SELECT *
         FROM stop_consensus
         WHERE stop_id=?
         """,
-        (stop_id,)
-    ).fetchone()
+            (stop_id,)
+        ).fetchone()
 
-    conn.close()
+
+    except BaseException:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
     return dict(result) if result else None
