@@ -37,6 +37,7 @@ from src.assessment.interpretation import (
 )
 
 from src.review.consensus import calculate_stop_consensus
+from src.review.progress import build_progress
 from src.review.context import build_review_context
 from src.review.auth import (
     TOKEN_LIFETIME_MINUTES, RateLimitError, consume_login_token,
@@ -5113,6 +5114,30 @@ def reviewer_profile_page():
         show_pilot_admin=show_pilot_admin,
     )
 
+
+
+@app.route("/api/reviewer/progress")
+def reviewer_progress_api():
+    def response(payload, status=200):
+        result = jsonify(payload)
+        result.status_code = status
+        result.headers["Cache-Control"] = "private, no-store"
+        return result
+
+    reviewer_id = session.get("authenticated_reviewer_id")
+    reviewer_key = session.get("reviewer_key")
+    if not reviewer_id or not reviewer_key:
+        return response({"error": "Sign in to view your progress."}, 401)
+    if request.args:
+        return response({"error": "Progress does not accept reviewer or geography selectors."}, 400)
+    try:
+        return response(build_progress(DATABASE_PATH, reviewer_id, reviewer_key))
+    except PermissionError:
+        return response({"error": "Signed-in reviewer profile was not found."}, 403)
+    except sqlite3.Error:
+        app.logger.exception("Private reviewer progress is unavailable")
+        return response({"error": "Private progress is temporarily unavailable.",
+                         "code": "progress_unavailable"}, 503)
 
 
 @app.route("/api/reviewer/profile", methods=["GET", "POST"])
