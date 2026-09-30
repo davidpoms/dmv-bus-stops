@@ -221,6 +221,47 @@ td, th {
 
 /* Keep pipeline headers visible while scrolling */
 
+#pipelineTable {
+    --pipeline-type-width: 6.5rem;
+    --pipeline-geography-width: clamp(8.5rem, 25vw, 16rem);
+    /* One scroll owner, including below the generic mobile table breakpoint. */
+    display: table;
+    overflow: visible;
+    max-width: none;
+    table-layout: fixed;
+    width: calc(var(--pipeline-type-width) + var(--pipeline-geography-width) + 90rem);
+    min-width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+#pipelineTable th,
+#pipelineTable td {
+    box-sizing: border-box;
+}
+
+#pipelineTable tr > :first-child:not([colspan]) {
+    position: sticky;
+    left: 0;
+    width: var(--pipeline-type-width);
+    background: white;
+    z-index: 2;
+}
+
+#pipelineTable tr > :nth-child(2) {
+    position: sticky;
+    left: var(--pipeline-type-width);
+    width: var(--pipeline-geography-width);
+    background: white;
+    z-index: 2;
+    box-shadow: 3px 0 4px -2px #0004;
+}
+
+#pipelineTable tbody tr > :nth-child(-n+2):not([colspan]) {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
 #pipelineTable thead th {
 
     position: sticky;
@@ -911,6 +952,11 @@ select:focus-visible, textarea:focus-visible { outline: 3px solid #1756a9; outli
 @media (max-height: 500px) and (orientation: landscape) {
     #map { height: 65svh; min-height: 180px; }
     .filter-row { position: static; }
+}
+
+#pipelineTable thead tr > :first-child:not([colspan]),
+#pipelineTable thead tr > :nth-child(2) {
+    z-index: 6;
 }
 
 /* Verified against narrow map containers and phone landscape viewports. */
