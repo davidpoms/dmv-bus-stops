@@ -56,10 +56,10 @@ class LocalEvidenceUiTests(unittest.TestCase):
         self.assertIn('return "Not recorded"', self.renderer)
         self.assertNotIn("evidence.present ?", self.renderer)
 
-    def test_unknown_type_uses_escaped_generic_fallback(self):
+    def test_unknown_type_uses_text_node_generic_fallback(self):
         self.assertIn("AMENITY_LABELS[type] || genericLabel(type)", self.renderer)
-        self.assertIn("escapeHtml(amenityLabel(evidence.amenity_type))", self.renderer)
-        self.assertIn("escapeHtml(group.sourceRecord", self.renderer)
+        self.assertIn("text(amenityLabel(evidence.amenity_type))", self.renderer)
+        self.assertIn("text(group.sourceRecord", self.renderer)
 
     def test_order_is_global_and_deterministic(self):
         positions = [self.renderer.index(f'        "{amenity}"') for amenity in (

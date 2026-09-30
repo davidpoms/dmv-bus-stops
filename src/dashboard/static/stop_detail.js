@@ -1,5 +1,7 @@
 async function loadStopProfile() {
     const details = document.getElementById("details");
+    const render = SafeRender.create();
+    const text = render.text;
 
     try {
         const stopResponse = await fetch(`/stops/${stopId}`);
@@ -8,16 +10,16 @@ async function loadStopProfile() {
         if (stopResponse.status === 410 && stop.identity_status === "retired") {
             document.getElementById("name").textContent = `Historical stop ${stopId}`;
             const links = (stop.successors || []).map(successor =>
-                `<li><a href="${successor.url}">Current stop ${successor.stop_id}</a></li>`
+                `<li>${render.link(successor.url, `Current stop ${successor.stop_id}`)}</li>`
             ).join("");
-            details.innerHTML = `
+            render.mount(details, `
                 <div class="card retired-stop-message">
                     <strong>This stop ID is retired</strong>
-                    <p>${stop.message || "Use a current successor boarding location instead."}</p>
+                    <p>${text(stop.message || "Use a current successor boarding location instead.")}</p>
                     ${links
                         ? `<p>Current boarding locations:</p><ul>${links}</ul>`
                         : "<p>No current successor link is available.</p>"}
-                </div>`;
+                </div>`);
             return;
         }
 
@@ -34,7 +36,7 @@ async function loadStopProfile() {
         const communityData =
             await communityResponse.json();
 
-        document.getElementById("name").innerHTML =
+        document.getElementById("name").textContent =
             stop.location ||
             stop.stop_name ||
             review.name ||
@@ -70,17 +72,17 @@ async function loadStopProfile() {
                 const name = routeNames[i] || "";
 
                 if (id && name) {
-                    combined.push(`${id} &mdash; ${name}`);
+                    combined.push(`${text(id)} &mdash; ${text(name)}`);
                 } else if (id) {
-                    combined.push(id);
+                    combined.push(text(id));
                 } else if (name) {
-                    combined.push(name);
+                    combined.push(text(name));
                 }
             }
 
             routeText = combined.join("<br>");
         } else if (Array.isArray(routeNames)) {
-            routeText = routeNames.join("<br>");
+            routeText = routeNames.map(text).join("<br>");
         }
 
         const boardings =
@@ -289,14 +291,14 @@ async function loadStopProfile() {
                             <span>
                                 Priority:
                                 <strong>
-                                    ${recommendationPriority(rec.priority)}
+                                    ${text(recommendationPriority(rec.priority))}
                                 </strong>
                             </span>
 
                             <span>
                                 Confidence:
                                 <strong>
-                                    ${recommendationConfidence(rec.confidence)}
+                                    ${text(recommendationConfidence(rec.confidence))}
                                 </strong>
                             </span>
 
@@ -315,7 +317,7 @@ async function loadStopProfile() {
 
                                         ${rec.reasons.map(reason => `
                                             <li>
-                                                ${reason}
+                                                ${text(reason)}
                                             </li>
                                         `).join("")}
 
@@ -327,12 +329,7 @@ async function loadStopProfile() {
 
                         <div class="recommendation-action">
 
-                            <a
-                                href="/review/${stopId}?mode=direct"
-                                class="recommendation-review-button"
-                            >
-                                Review this stop
-                            </a>
+                            ${render.link(`/review/${encodeURIComponent(stopId)}?mode=direct`, "Review this stop", "recommendation-review-button")}
 
                         </div>
 
@@ -438,7 +435,7 @@ const latestCommunity =
                             </strong>
 
                             <span class="community-observation-date">
-                                ${formatReviewDate(reviewItem.date || reviewItem.observed_at)}
+                                ${text(formatReviewDate(reviewItem.date || reviewItem.observed_at))}
                             </span>
                         </div>
 
@@ -472,9 +469,9 @@ const latestCommunity =
                                 remote: "Legacy remote review", in_person: "In person"})
                                 [reviewItem.review_mode] || "Not recorded"}
                             ${reviewItem.streetview_imagery_month
-                                ? `<br>Street View imagery captured: ${reviewItem.streetview_imagery_month}` : ""}
+                                ? `<br>Street View imagery captured: ${text(reviewItem.streetview_imagery_month)}` : ""}
                             ${reviewItem.preliminary_clearance
-                                ? `<br>Preliminary visual space observation: ${reviewItem.preliminary_clearance}` : ""}
+                                ? `<br>Preliminary visual space observation: ${text(reviewItem.preliminary_clearance)}` : ""}
                         </div>
 
                         ${PhotoLinks.render(reviewItem.attachments)}
@@ -487,7 +484,7 @@ const latestCommunity =
                                         </span>
 
                                         <div>
-                                            ${reviewItem.notes}
+                                            ${text(reviewItem.notes)}
                                         </div>
                                     </div>
                                 `
@@ -503,13 +500,13 @@ const latestCommunity =
                     </div>
                 `;
 
-        details.innerHTML = `
+        render.mount(details, `
 
             <div class="card">
 
                 <strong>Location</strong><br>
 
-                ${stop.location || review.name || "Unknown"}
+                ${text(stop.location || review.name || "Unknown")}
 
                 <br><br>
 
@@ -519,12 +516,12 @@ const latestCommunity =
                 <br><br>
 
                 <strong>${servingDirectionLabels.length > 1 ? "Serving directions" : "Serving direction"}:</strong>
-                ${servingDirectionLabels.length ? servingDirectionLabels.join(" &middot; ") : "Not available"}
+                ${servingDirectionLabels.length ? servingDirectionLabels.map(text).join(" &middot; ") : "Not available"}
 
                 <details>
                     <summary>Stop reference details</summary>
-                    Internal physical stop ID: ${stop.stop_id || stopId}<br>
-                    External stop ID: ${stop.external_stop_id || "Not recorded"}
+                    Internal physical stop ID: ${text(stop.stop_id || stopId)}<br>
+                    External stop ID: ${text(stop.external_stop_id || "Not recorded")}
                 </details>
 
             </div>
@@ -620,14 +617,12 @@ const latestCommunity =
                         <span>
                             <strong>
                                 ${
-                                    stop.impact_summary?.estimated_weekday_boardings
-                                        ? stop.impact_summary.estimated_weekday_boardings.toLocaleString()
-                                        : "Unknown"
+                                    text(SafeRender.exposure(stop.impact_summary?.estimated_weekday_boardings))
                                 }
                             </strong>
                             weekday boardings across
                             ${
-                                stop.impact_summary?.routes_served || 0
+                                text(stop.impact_summary?.routes_served || 0)
                             }
                             serving routes
                         </span>
@@ -644,7 +639,7 @@ const latestCommunity =
                             ${
                                 stop.impact_summary?.routes &&
                                 stop.impact_summary.routes.length
-                                    ? stop.impact_summary.routes.join(", ")
+                                    ? text(stop.impact_summary.routes.join(", "))
                                     : "Unknown"
                             }
                         </span>
@@ -789,39 +784,21 @@ const latestCommunity =
                 Reviews completed:
 
                 ${
-                    review.community_reviews?.review_count ||
+                    text(review.community_reviews?.review_count ||
                     stop.community_review?.total_stop_reviews ||
                     communityReviews.length ||
-                    0
+                    0)
                 }
 
                 <br><br>
 
-                                <a
-                    class="stop-review-button"
-                    href="/review/${stopId}?mode=direct">
-
-                    Review this stop
-
-                </a>
+                                ${render.link(`/review/${encodeURIComponent(stopId)}?mode=direct`, "Review this stop", "stop-review-button")}
 
                 <br><br>
 
-                <a
-                    class="stop-review-button"
-                    href="${mapsUrl}"
-                    target="_blank" rel="noopener noreferrer">
-                    Open in Google Maps
-                </a>
+                ${render.link(mapsUrl, "Open in Google Maps", "stop-review-button", true)}
 
-                ${streetview ? `<br><br><a
-                    class="stop-review-button"
-                    href="${streetview}"
-                    target="_blank" rel="noopener noreferrer">
-
-                    Try Street View
-
-                </a>` : ""}
+                ${streetview ? `<br><br>${render.link(streetview, "Try Street View", "stop-review-button", true)}` : ""}
                 <p>Street View imagery may be unavailable. Use Google Maps to locate the stop, then review in person or with another visual source.</p>
 
                 ${
@@ -830,15 +807,7 @@ const latestCommunity =
                     `
                     <br><br>
 
-                    <a
-                        class="stop-review-button"
-                        href="${riderToolsUrl}"
-                        target="_blank"
-                        rel="noopener noreferrer">
-
-                        Open WMATA Rider Tools
-
-                    </a>
+                    ${render.link(riderToolsUrl, "Open WMATA Rider Tools", "stop-review-button", true)}
                     `
                     :
                     ""
@@ -846,7 +815,7 @@ const latestCommunity =
 
             </div>
 
-        `;
+        `);
 
     } catch (error) {
 
@@ -855,7 +824,7 @@ const latestCommunity =
             error
         );
 
-        details.innerHTML =
+        details.textContent =
             "Unable to load stop information.";
     }
 }

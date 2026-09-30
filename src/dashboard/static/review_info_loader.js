@@ -31,6 +31,9 @@ document.addEventListener("DOMContentLoaded", async () => {
         return "Lower";
     };
 
+    const render = SafeRender.create();
+    const text = render.text;
+
     try {
         const sourceParams = new URLSearchParams(window.location.search);
         const infoParams = new URLSearchParams();
@@ -51,17 +54,17 @@ document.addEventListener("DOMContentLoaded", async () => {
             `${direction.compass_label} (${direction.heading_degrees}°)`
         ))];
 
-        container.innerHTML = `
+        render.mount(container, `
             <div class="panel review-stop-summary">
-                <h2>${info.name || "Bus stop"}</h2>
-                <p class="serving-heading"><strong>${headingLabels.length > 1 ? "Serving directions" : "Serving direction"}:</strong> ${headingLabels.length ? headingLabels.join(" · ") : "Not available"}</p>
+                <h2>${text(info.name || "Bus stop")}</h2>
+                <p class="serving-heading"><strong>${headingLabels.length > 1 ? "Serving directions" : "Serving direction"}:</strong> ${text(headingLabels.length ? headingLabels.join(" · ") : "Not available")}</p>
                 <div class="review-reference-links">
-                    <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${info.lat},${info.lon}`)}" target="_blank" rel="noopener noreferrer" class="stop-review-button">Open in Google Maps</a>
-                    ${info.streetview_url ? `<a href="${info.streetview_url}" target="_blank" rel="noopener noreferrer" class="stop-review-button">Try Street View</a>` : ""}
-                    ${info.wmata_rider_tools_url ? `<a href="${info.wmata_rider_tools_url}" target="_blank" rel="noopener noreferrer" class="stop-review-button">Open WMATA Rider Tools</a>` : ""}
+                    ${render.link(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${info.lat},${info.lon}`)}`, "Open in Google Maps", "stop-review-button", true)}
+                    ${info.streetview_url ? `${render.link(info.streetview_url, "Try Street View", "stop-review-button", true)}` : ""}
+                    ${info.wmata_rider_tools_url ? `${render.link(info.wmata_rider_tools_url, "Open WMATA Rider Tools", "stop-review-button", true)}` : ""}
                 </div>
                 <p>Street View imagery may be unavailable. Use Google Maps to locate the stop, then review in person or with another visual source.</p>
-                <p>${[info.state, info.county, info.municipality].filter(Boolean).join(" · ")}</p>
+                <p>${text([info.state, info.county, info.municipality].filter(Boolean).join(" · "))}</p>
 
                 <details><summary>Current evidence and review context</summary>
                 ${percentile !== null && percentile !== undefined ? `
@@ -75,9 +78,9 @@ document.addEventListener("DOMContentLoaded", async () => {
                     <div class="evidence-card opportunity-review-context">
                         ${info.review_context.entry_explanation ? `
                             <h3>Why you're reviewing this stop</h3>
-                            <p>${info.review_context.entry_explanation}</p>` : ""}
+                            <p>${text(info.review_context.entry_explanation)}</p>` : ""}
                         <h3>What would be useful to check</h3>
-                        <p>${info.review_context.evidence_explanation}</p>
+                        <p>${text(info.review_context.evidence_explanation)}</p>
                     </div>` : ""}
 
                 <div class="evidence-card">
@@ -97,14 +100,14 @@ document.addEventListener("DOMContentLoaded", async () => {
                     <h3>Community observations</h3>
                     ${reviews.length ? reviews.map(review => `
                         <div class="community-observation">
-                            <strong>${review.date || "Date not recorded"}</strong><br>
+                            <strong>${text(review.date || "Date not recorded")}</strong><br>
                             Shelter: ${observedAmenity(review.shelter)}<br>
                             Bench: ${observedAmenity(review.bench)}<br>
                             Review method: ${reviewModeLabel(review.review_mode)}
-                            ${review.streetview_imagery_month ? `<br>Imagery captured: ${review.streetview_imagery_month}` : ""}
-                            ${review.preliminary_clearance ? `<br>Preliminary visual space observation: ${review.preliminary_clearance}` : ""}
+                            ${review.streetview_imagery_month ? `<br>Imagery captured: ${text(review.streetview_imagery_month)}` : ""}
+                            ${review.preliminary_clearance ? `<br>Preliminary visual space observation: ${text(review.preliminary_clearance)}` : ""}
                             ${PhotoLinks.render(review.attachments)}
-                            ${review.notes?.trim() ? `<br>Notes: ${review.notes}` : ""}
+                            ${review.notes?.trim() ? `<br>Notes: ${text(review.notes)}` : ""}
                         </div>`).join("") : `
                         <p>No community observations yet. Your review can create a dated record for this stop.</p>`}
                 </div>
@@ -112,15 +115,15 @@ document.addEventListener("DOMContentLoaded", async () => {
                 </details>
                 <details>
                     <summary>Stop reference details</summary>
-                    <p>Internal physical stop ID: ${info.stop_id}<br>
-                    External stop ID: ${info.external_stop_id || "Not recorded"}<br>
+                    <p>Internal physical stop ID: ${text(info.stop_id)}<br>
+                    External stop ID: ${text(info.external_stop_id || "Not recorded")}<br>
                     Coordinates: ${Number(info.lat).toFixed(5)}, ${Number(info.lon).toFixed(5)}</p>
                 </details>
 
                 <p><small>This is a preliminary visual check of the available waiting space.</small></p>
 
 
-            </div>`;
+            </div>`);
 
         document.dispatchEvent(new CustomEvent("review-context-loaded", {
             detail: info.review_context || {}

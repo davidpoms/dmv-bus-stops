@@ -14,6 +14,7 @@
 .opportunity-review-context { margin-top: 16px; }
 </style>
 
+<script src="/static/safe_render.js"></script>
 <script src="/static/photo_links.js"></script>
 </head>
 
@@ -408,7 +409,9 @@ if(!response.ok){
 
 }
 
-document.body.innerHTML = `
+const render = SafeRender.create();
+const text = render.text;
+render.mount(document.body, `
 
 <div class="completion-card">
 
@@ -424,7 +427,7 @@ ${
     <p>
     Welcome back,
     <strong>
-    ${result.reviewer_stats.display_name}
+    ${text(result.reviewer_stats.display_name)}
     </strong>
     !
     </p>
@@ -461,13 +464,7 @@ Route context for this review
 The routes serving this stop are associated with approximately
 <strong>
 ${
-    result.community_impact.average_weekday_boardings
-    ?
-    Math.round(
-        result.community_impact.average_weekday_boardings
-    ).toLocaleString()
-    :
-    "unknown"
+    text(SafeRender.exposure(result.community_impact.average_weekday_boardings, "unknown", true))
 }
 </strong>
 weekday boardings in the current route-based exposure data. This is not an
@@ -483,7 +480,7 @@ ${
     <p>
     Routes served:
     <strong>
-    ${result.community_impact.routes.join(", ")}
+    ${text(result.community_impact.routes.join(", "))}
     </strong>
     </p>
     `
@@ -516,7 +513,7 @@ Your community profile
 
 <p>
 You have completed
-<strong>${result.reviewer_stats.review_count}</strong>
+<strong>${text(result.reviewer_stats.review_count)}</strong>
 review(s).
 </p>
 
@@ -528,7 +525,7 @@ ${
     <p>
     You have helped validate
     <strong>
-    ${result.reviewer_stats.stops_reviewed}
+    ${text(result.reviewer_stats.stops_reviewed)}
     </strong>
     unique stop(s).
     </p>
@@ -545,7 +542,7 @@ ${
     <p>
     You are a community steward for
     <strong>
-    ${result.reviewer_stats.stewarded_stops}
+    ${text(result.reviewer_stats.stewarded_stops)}
     </strong>
     stop(s).
     </p>
@@ -557,15 +554,13 @@ ${
 
 <p>
 Estimated average weekday route exposure across reviewed stops:
-<strong>${result.reviewer_stats.average_weekday_route_exposure_represented == null
-    ? "Not available"
-    : result.reviewer_stats.average_weekday_route_exposure_represented.toLocaleString()}</strong>
+<strong>${text(SafeRender.exposure(result.reviewer_stats.average_weekday_route_exposure_represented, "Not available"))}</strong>
 — route-level boardings, not unique riders or observed stop-level boardings.
 </p>
 ${result.reviewer_stats.route_exposure_coverage ? `
 <p>${result.reviewer_stats.route_exposure_coverage.complete ? "Exposure coverage" : "Incomplete exposure coverage"}:
-${result.reviewer_stats.route_exposure_coverage.stops_with_exposure} of
-${result.reviewer_stats.route_exposure_coverage.reviewed_stops} reviewed stops have exposure data.</p>` : ""}
+${text(result.reviewer_stats.route_exposure_coverage.stops_with_exposure)} of
+${text(result.reviewer_stats.route_exposure_coverage.reviewed_stops)} reviewed stops have exposure data.</p>` : ""}
 
 
 
@@ -577,7 +572,7 @@ ${
     <p>
     Routes covered:
     <strong>
-    ${result.reviewer_stats.routes_covered.join(", ")}
+    ${text(result.reviewer_stats.routes_covered.join(", "))}
     </strong>
     </p>
     `
@@ -591,13 +586,9 @@ ${
 
 <div class="completion-actions">
 
-<a href="/feedback?stop_id=${stopId}&page=/review/${stopId}" class="dashboard-button">
-Send feedback / Report a problem
-</a>
+${render.link(`/feedback?stop_id=${encodeURIComponent(stopId)}&page=${encodeURIComponent(`/review/${stopId}`)}`, "Send feedback / Report a problem", "dashboard-button")}
 
-<a href="/stop/${stopId}" class="dashboard-button">
-View this stop's updated record
-</a>
+${render.link(`/stop/${encodeURIComponent(stopId)}`, "View this stop's updated record", "dashboard-button")}
 
 <a href="/review/start?mode=opportunity" class="dashboard-button">
 Review another stop
@@ -615,7 +606,7 @@ Return to dashboard
 
 </div>
 
-`;
+`);
 
 
 });

@@ -61,15 +61,6 @@
         COMMUNITY_CONSENSUS: "Community consensus"
     };
 
-    function escapeHtml(value) {
-        return String(value)
-            .replaceAll("&", "&amp;")
-            .replaceAll("<", "&lt;")
-            .replaceAll(">", "&gt;")
-            .replaceAll('"', "&quot;")
-            .replaceAll("'", "&#39;");
-    }
-
     function genericLabel(value) {
         return String(value || "Amenity")
             .replace(/[_-]+/g, " ")
@@ -124,22 +115,25 @@
     }
 
     function renderCanonicalStatuses(statuses) {
-        return (Array.isArray(statuses) ? statuses : []).map(status => {
+        const renderer = SafeRender.create();
+        const text = renderer.text;
+        const markup = (Array.isArray(statuses) ? statuses : []).map(status => {
             const amenity = amenityLabel(status.amenity_type);
             const evidence = status.contributing_evidence || [];
             return `<div class="canonical-amenity-conclusion">
-                <strong>${escapeHtml(amenity)} ${escapeHtml(canonicalStatusLabel(status.derived_status))}</strong>
+                <strong>${text(amenity)} ${text(canonicalStatusLabel(status.derived_status))}</strong>
                 ${evidence.length ? evidence.map(item => {
                     const source = friendlySource(item.source);
                     const action = item.kind === "osm" ? " explicitly marks" : ":";
-                    const count = item.count ? ` (${item.count} observation${item.count === 1 ? "" : "s"})` : "";
-                    const record = item.source_record ? ` — source record ${escapeHtml(item.source_record)}` : "";
-                    return `<div>${escapeHtml(source)}${action} ${escapeHtml(status.amenity_type)} <strong>${item.claim}</strong>${count}${record}</div>`;
+                    const count = item.count ? ` (${text(item.count)} observation${item.count === 1 ? "" : "s"})` : "";
+                    const record = item.source_record ? ` — source record ${text(item.source_record)}` : "";
+                    return `<div>${text(source)}${action} ${text(status.amenity_type)} <strong>${text(item.claim)}</strong>${count}${record}</div>`;
                 }).join("") : `<div>No usable amenity evidence is currently available.</div>`}
                 ${(status.evidence_conflict || status.consensus_conflicts_with_other_evidence)
                     ? `<small>These records disagree; this does not establish that one source is wrong.</small>` : ""}
             </div>`;
         }).join("");
+        return renderer.html(markup);
     }
 
     function groupEvidence(records) {
@@ -188,19 +182,22 @@
                 : "";
         }
 
-        return groups.map(group => `
+        const renderer = SafeRender.create();
+        const text = renderer.text;
+        const markup = groups.map(group => `
             <div class="evidence-item">
-                <strong>${escapeHtml(group.jurisdiction)}</strong>
-                ${group.sourceLabel ? `<br>Source: <strong>${escapeHtml(group.sourceLabel)}</strong>` : ""}
+                <strong>${text(group.jurisdiction)}</strong>
+                ${group.sourceLabel ? `<br>Source: <strong>${text(group.sourceLabel)}</strong>` : ""}
                 <br><br>
                 ${group.amenities.map(evidence => `
-                    ${escapeHtml(amenityLabel(evidence.amenity_type))}:
+                    ${text(amenityLabel(evidence.amenity_type))}:
                     <strong>${evidenceValue(evidence)}</strong><br>
                 `).join("")}
                 Source record:
-                ${escapeHtml(group.sourceRecord || "Not recorded")}
+                ${text(group.sourceRecord || "Not recorded")}
             </div>
         `).join("");
+        return renderer.html(markup);
     }
 
     return {
