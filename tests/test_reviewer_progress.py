@@ -178,6 +178,67 @@ class ProgressTests(unittest.TestCase):
                 self.assertEqual(required, [t["required_count"] for t in data["configured_tiers"]])
                 self.assertEqual(denominator >= 10, data["eligible"])
 
+    def test_literal_whitelist_and_nonzero_progress_in_every_scope(self):
+        # Small independent populations: ANC members also belong to their ward.
+        groups = [
+            (10, 2, ("DC", None, None, "Ward 01", "1D")),
+            (2, 1, ("DC", None, None, "1.0", "1A")),
+            (11, 3, ("DC", None, None, "6", "6D")),
+            (3, 1, ("DC", None, None, "Ward 06", "6A")),
+            (15, 1, ("VA", "Arlington", "Arlington", None, None)),
+        ]
+        stop_id = 0
+        for count, reviewed_count, geography in groups:
+            for index in range(count):
+                stop_id += 1
+                self.stop(stop_id, geo=geography)
+                if index < reviewed_count:
+                    self.review(stop_id, stop_id)
+        expected = [
+            ("dc_anc:1D", 2, 10, "Neighborhood Steward — ANC 1D", 5),
+            ("dc_anc:6D", 3, 11, "Neighborhood Steward — ANC 6D", 5),
+            ("dc_ward:1", 3, 12, "Ward Steward — Ward 1", 5),
+            ("dc_ward:6", 4, 14, "Ward Steward — Ward 6", 5),
+            ("census_place:5103000", 1, 15, "Community Steward — Arlington", 5),
+        ]
+        data = self.result()
+        actual = [(g["scope_key"], g["numerator"], g["denominator"],
+                   g["display_title"], g["configured_tiers"][0]["required_count"])
+                  for g in data["geographies"]]
+        self.assertEqual(expected, actual)
+        self.assertEqual(8, data["distinct_stops_documented"])
+        self.assertEqual("dc_ward:6", data["featured_geography"]["scope_key"])
+        self.assertEqual(1, data["featured_geography"]["remaining"])
+        # Bring ANC 1D to one remaining too; configured order wins the tie.
+        self.review(100, 3)
+        self.review(101, 4)
+        featured = self.result()["featured_geography"]
+        self.assertEqual("dc_anc:1D", featured["scope_key"])
+        self.assertEqual(1, featured["remaining"])
+
+    def test_first_look_positive_nonzero_offset_orders_absolute_instants(self):
+        self.stop(1)
+        self.review(10, 1, timestamp="2026-09-23T14:00:00+02:00")
+        self.review(9, 1, reviewer=2, timestamp="2026-09-23T12:30:00Z")
+        # Owner is earlier despite later wall-clock text and a larger ID.
+        self.assertEqual(1, self.result()["first_looks"]["count"])
+
+    def test_first_look_fractional_seconds_precede_assignment_id(self):
+        self.stop(1)
+        self.review(10, 1, timestamp="2026-09-23T12:00:00.100001Z")
+        self.review(9, 1, reviewer=2, timestamp="2026-09-23T12:00:00.100002Z")
+        self.assertEqual(1, self.result()["first_looks"]["count"])
+        self.review(11, 1, reviewer=2, timestamp="2026-09-23T12:00:00.100000Z")
+        self.assertEqual(0, self.result()["first_looks"]["count"])
+
+    def test_first_look_equal_offset_instants_use_numeric_nine_before_ten(self):
+        self.stop(1)
+        self.review(10, 1, timestamp="2026-09-23T08:00:00-04:00")
+        self.review(9, 1, reviewer=2, timestamp="2026-09-23T17:30:00+05:30")
+        self.assertEqual(0, self.result()["first_looks"]["count"])
+        self.login(2, "other-key")
+        self.assertEqual(1, self.result()["first_looks"]["count"])
+
     def test_geography_crossings_and_completion(self):
         data = progress.geography_progress(progress.SCOPES[0], 5, 10)
         self.assertEqual([25, 50], data["crossed_tiers"])
@@ -306,6 +367,29 @@ class ProgressTests(unittest.TestCase):
                 progress.build_progress(self.path, 1, "owner-key")
             reads = [s for s in statements if s.lstrip().upper().startswith(("SELECT", "WITH"))]
             self.assertEqual(3, len(reads))
+
+    def test_rollback_failure_still_closes_real_connection(self):
+        real_connect = sqlite3.connect
+        connections = []
+
+        class RollbackFailure(sqlite3.Connection):
+            def rollback(self):
+                raise sqlite3.OperationalError("injected rollback failure")
+
+        def connect(*args, **kwargs):
+            conn = real_connect(*args, factory=RollbackFailure, **kwargs)
+            connections.append(conn)
+            return conn
+
+        for key in ("owner-key", "wrong-key"):
+            with self.subTest(key=key), patch.object(progress.sqlite3, "connect", side_effect=connect):
+                with self.assertRaisesRegex(sqlite3.OperationalError, "injected rollback failure"):
+                    progress.build_progress(self.path, 1, key)
+            with self.assertRaises(sqlite3.ProgrammingError):
+                connections[-1].execute("SELECT 1")
+            with closing(real_connect(self.path, timeout=0)) as writer:
+                writer.execute("BEGIN EXCLUSIVE")
+                writer.rollback()
 
 
 if __name__ == "__main__":
