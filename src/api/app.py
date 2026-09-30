@@ -943,60 +943,12 @@ VALUES
 
 @app.route("/validation/update", methods=["POST"])
 def validation_update():
+    """Retire the legacy mutation route without parsing input or opening a DB."""
+    return jsonify({
+        "code": "legacy_validation_retired",
+        "message": "The legacy validation endpoint has been retired. Use the supported reviewer workflow instead.",
+    }), 410
 
-    data = request.json
-
-    stop_id = data["stop_id"]
-    confidence = data.get("confidence", "needs_validation")
-    notes = data.get("notes", "")
-
-    conn = sqlite3.connect(DATABASE_PATH)
-    try:
-
-        cursor = conn.cursor()
-
-        cursor.execute(
-            """
-        INSERT INTO stop_consensus
-        (
-            stop_id,
-            confidence,
-            notes,
-            updated_at
-        )
-
-        VALUES (?, ?, ?, datetime('now'))
-
-        ON CONFLICT(stop_id)
-        DO UPDATE SET
-
-            confidence = excluded.confidence,
-            notes = excluded.notes,
-            updated_at = excluded.updated_at
-        """,
-            (
-                stop_id,
-                confidence,
-                notes
-            )
-        )
-
-
-        conn.commit()
-    except BaseException:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
-
-
-    return jsonify(
-        {
-            "success": True,
-            "stop_id": stop_id,
-            "confidence": confidence
-        }
-    )
 
 @app.route("/validation/queue")
 def validation_queue():

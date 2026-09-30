@@ -169,18 +169,28 @@ class ActivePublicEndpointTests(unittest.TestCase):
         conn.close()
         self.assertEqual(1, legacy_rows)
 
-    def test_validation_update_uses_configured_database_path(self):
-        response = self.client.post(
-            "/validation/update",
-            json={"stop_id": 1, "confidence": "validated", "notes": "test"},
-        )
-        self.assertEqual(200, response.status_code)
-        conn = sqlite3.connect(self.db)
-        row = conn.execute(
-            "SELECT confidence,notes FROM stop_consensus WHERE stop_id=1"
-        ).fetchone()
-        conn.close()
-        self.assertEqual(("validated", "test"), row)
+    def test_validation_update_is_retired_without_database_access(self):
+        before = self.db.read_bytes()
+        requests = [
+            {"json": {"stop_id": 1, "confidence": "validated", "notes": "test"}},
+            {"json": {"stop_id": 4}},  # Inactive stops cannot be mutated either.
+            {},
+            {"data": "{invalid", "content_type": "application/json"},
+        ]
+        with patch.object(public_api.sqlite3, "connect",
+                          side_effect=AssertionError("retired route opened a database")) as connect:
+            for payload in requests:
+                with self.subTest(payload=payload):
+                    response = self.client.post("/validation/update", **payload)
+                    self.assertEqual(410, response.status_code)
+                    self.assertTrue(response.is_json)
+                    self.assertEqual({
+                        "code": "legacy_validation_retired",
+                        "message": "The legacy validation endpoint has been retired. Use the supported reviewer workflow instead.",
+                    }, response.get_json())
+                    self.assertNotIn("Location", response.headers)
+            connect.assert_not_called()
+        self.assertEqual(before, self.db.read_bytes())
 
     def test_public_amenity_counts_use_local_and_community_evidence(self):
         summary = self.client.get("/api/evidence-summary").get_json()

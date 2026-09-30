@@ -78,7 +78,6 @@ class SQLiteLifecycleTests(unittest.TestCase):
 
     def test_direct_api_writer_commit_failures(self):
         cases = [(api.create_observation, {'stop_id': 1}),
-                 (api.validation_update, {'stop_id': 1}),
                  (api.save_reviewer_routes, {'routes': ['R1']})]
         for call, payload in cases:
             with self.subTest(call=call.__name__):
