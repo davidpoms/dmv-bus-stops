@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -344,8 +345,22 @@ def refresh_stop_amenity_status(conn, physical_stop_id):
     return rows
 
 
+def canonical_dc_ward(value):
+    """Normalize equivalent ward labels; preserve unknown or invalid values.
+
+    Use the existing numeric-string convention without truncating fractional
+    values or guessing a ward for unrecognized labels.
+    """
+    if value is None:
+        return None
+    match = re.fullmatch(r"(?:ward\s+)?0*([1-8])(?:\.0+)?", str(value).strip(), re.I)
+    return match.group(1) if match else value
+
+
 def geography_status_rows(conn):
     """Aggregate canonical statuses over intentionally overlapping geographies."""
+    # Connection-local, read-only normalization: no persisted geography changes.
+    conn.create_function("canonical_dc_ward", 1, canonical_dc_ward, deterministic=True)
     geography_sql = """
     WITH geography AS (
         SELECT stop_id, 'State' geography_type,
@@ -366,7 +381,8 @@ def geography_status_rows(conn):
         SELECT stop_id, 'Municipality', municipality
         FROM stop_jurisdiction WHERE municipality IS NOT NULL
         UNION ALL
-        SELECT stop_id, 'DC Ward', dc_ward FROM stop_jurisdiction WHERE dc_ward IS NOT NULL
+        SELECT DISTINCT stop_id, 'DC Ward', canonical_dc_ward(dc_ward)
+        FROM stop_jurisdiction WHERE dc_ward IS NOT NULL
         UNION ALL
         SELECT stop_id, 'ANC', dc_anc FROM stop_jurisdiction WHERE dc_anc IS NOT NULL
     )

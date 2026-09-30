@@ -227,6 +227,10 @@ td, th {
     top: 0;
     background: white;
     z-index: 5;
+    white-space: nowrap;
+    overflow-wrap: normal;
+    line-height: 1.4;
+    padding: 10px 12px;
 
 }
 

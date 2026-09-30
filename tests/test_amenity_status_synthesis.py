@@ -5,6 +5,7 @@ from pathlib import Path
 
 from src.amenities.status_synthesis import (
     DERIVED_STATUSES,
+    canonical_dc_ward,
     geography_status_rows,
     rebuild_stop_amenity_status,
 )
@@ -209,6 +210,71 @@ class AmenityStatusSynthesisTests(unittest.TestCase):
         all_total = sum(row["total_stops"] for row in rows)
         self.assertEqual(3, state_total)
         self.assertGreater(all_total, state_total)
+
+    def test_ward_normalization_covers_all_equivalent_representations(self):
+        for ward in range(1, 9):
+            for value in (ward, float(ward), str(ward), f"{ward}.0", f"{ward}.00",
+                          f"Ward {ward}", f"Ward {ward:02}", f"  wArD  {ward:02}.0  "):
+                with self.subTest(value=value):
+                    self.assertEqual(str(ward), canonical_dc_ward(value))
+
+    def test_ward_normalization_does_not_guess_invalid_or_missing_values(self):
+        for value in (None, "", "  ", "Unknown", "Ward 0", "Ward 9", "1.5",
+                      "1e0", "1/2", "Ward 1A", "1A", "nan", "inf"):
+            with self.subTest(value=value):
+                self.assertEqual(value, canonical_dc_ward(value))
+
+    def test_ward_aggregation_merges_labels_not_wards_or_stops(self):
+        stop_id = 0
+        for ward in range(1, 9):
+            for value in (ward, float(ward), str(ward), f"{ward}.0", f"Ward {ward}",
+                          f"Ward {ward:02}", f"  wArD {ward}.00  "):
+                stop_id += 1
+                self.add_stop(stop_id, geography=("DC", None, "Washington", value, f"{ward}A"))
+            # Duplicate equivalent geography records must not duplicate this stop.
+            self.db.execute("INSERT INTO stop_jurisdiction VALUES (?,?,?,?,?,?)",
+                            (stop_id, "DC", None, "Washington", str(ward), f"{ward}A"))
+        for current in (0, 2, None):
+            stop_id += 1
+            self.add_stop(stop_id, current=current,
+                          geography=("DC", None, "Washington", "Ward 1", "1A"))
+        rebuild_stop_amenity_status(self.db)
+        rows = [r for r in geography_status_rows(self.db) if r["type"] == "DC Ward"]
+        self.assertEqual([str(ward) for ward in range(1, 9)], [r["geography"] for r in rows])
+        self.assertEqual(56, sum(r["total_stops"] for r in rows))
+        for row in rows:
+            self.assertEqual(7, row["total_stops"])
+            for amenity in ("shelter", "bench"):
+                self.assertEqual(7, sum(row[f"{amenity}_{status}"] for status in DERIVED_STATUSES))
+
+    def test_ward_normalization_leaves_other_dimensions_and_storage_unchanged(self):
+        self.add_stop(1, geography=("DC", None, "Washington", "1.0", "1A"))
+        self.add_stop(2, geography=("MD", "Montgomery", "Silver Spring", None, None))
+        self.add_stop(3, geography=("VA", "Arlington", "Arlington", None, None))
+        rebuild_stop_amenity_status(self.db)
+        before = [tuple(r) for r in self.db.execute("SELECT * FROM stop_jurisdiction")]
+        changes = self.db.total_changes
+        rows = geography_status_rows(self.db)
+        self.assertEqual(changes, self.db.total_changes)
+        self.assertEqual(before, [tuple(r) for r in self.db.execute("SELECT * FROM stop_jurisdiction")])
+        actual = {(r["type"], r["geography"]): r["total_stops"] for r in rows}
+        self.assertEqual({
+            ("State", "District of Columbia"): 1, ("State", "Maryland"): 1,
+            ("State", "Virginia"): 1, ("DC Ward", "1"): 1, ("ANC", "1A"): 1,
+            ("County", "Montgomery County"): 1, ("County", "Arlington County"): 1,
+            ("Municipality", "Washington"): 1, ("Municipality", "Silver Spring"): 1,
+            ("Municipality", "Arlington"): 1,
+        }, actual)
+
+    def test_pipeline_headers_preserve_words_and_scroll_behavior(self):
+        css = (ROOT / "src/dashboard/static/dashboard.css").read_text(encoding="utf-8")
+        header = css.split("#pipelineTable thead th {", 1)[1].split("}", 1)[0]
+        for declaration in ("white-space: nowrap", "overflow-wrap: normal",
+                            "line-height: 1.4", "padding: 10px 12px",
+                            "position: sticky", "background: white"):
+            self.assertIn(declaration, header)
+        frame = css.split(".pipeline-table-container {", 1)[1].split("}", 1)[0]
+        self.assertIn("overflow-x: auto", frame)
 
     def test_rebuild_is_idempotent_removes_stale_and_preserves_evidence(self):
         self.add_stop(1); self.add_stop(2)
