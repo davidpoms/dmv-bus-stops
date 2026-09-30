@@ -70,14 +70,14 @@ class ReviewerFieldAuditTests(unittest.TestCase):
         self.assertAlmostEqual(180, bearing_to_stop(1, 0, 0, 0))
         self.assertIsNone(bearing_to_stop(1, 2, 1, 2))
         with patch.object(api, 'get_road_index') as index:
-            index.return_value.nearest_road.return_value = {
-                'road_lat': 0, 'road_lon': 0, 'heading': 180}
-            url, heading = api.streetview_for_stop(0, 1)
-            index.return_value.nearest_road.assert_called_once_with(1, 0)
-            self.assertEqual(90, heading)
-            self.assertIn('viewpoint=0,0&heading=90', url)
-            index.return_value.nearest_road.return_value = None
-            self.assertNotIn('heading=', api.streetview_for_stop(0, 1)[0])
+            for lat, lon in [(0, 1), (38.912345, -77.023456)]:
+                url, heading = api.streetview_for_stop(lat, lon)
+                self.assertEqual(
+                    'https://www.google.com/maps/@?api=1&map_action=pano'
+                    f'&viewpoint={lat},{lon}', url)
+                self.assertIsNone(heading)
+                self.assertNotIn('heading=', url)
+            index.assert_not_called()
 
     def test_photo_validation_and_evidence_identity(self):
         for value in ['javascript:alert(1)', 'file:///tmp/x', '//example.org',

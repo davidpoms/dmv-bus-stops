@@ -400,19 +400,10 @@ def serving_direction_payload(stop_id):
 
 
 def streetview_for_stop(latitude, longitude):
-    """Aim from the estimated road viewpoint toward the stop, not along the road."""
-    road = get_road_index().nearest_road(longitude, latitude)
-    camera_heading = None
-    viewpoint_lat, viewpoint_lon = latitude, longitude
-    if road and road.get("road_lat") is not None and road.get("road_lon") is not None:
-        viewpoint_lat, viewpoint_lon = road["road_lat"], road["road_lon"]
-        from src.spatial.camera_heading import bearing_to_stop
-        camera_heading = bearing_to_stop(viewpoint_lat, viewpoint_lon, latitude, longitude)
+    """Offer best-effort imagery at the stop without estimating a camera heading."""
     url = ("https://www.google.com/maps/@?api=1&map_action=pano"
-           f"&viewpoint={viewpoint_lat},{viewpoint_lon}")
-    if camera_heading is not None:
-        url += f"&heading={camera_heading}"
-    return url, camera_heading
+           f"&viewpoint={latitude},{longitude}")
+    return url, None
 
 
 def get_serving_headings(stop_id):
@@ -1802,8 +1793,8 @@ GROUP BY ps.id
                 row[6].split(",")
                 if row[5]
                 else [],
-            # Estimated road-to-stop camera bearing only. Transit direction is exposed
-            # separately by the identity-linked serving_directions payload.
+            # Optional imagery has no estimated camera heading. Transit direction
+            # remains the separate identity-linked serving_directions payload.
             "streetview_camera_heading": streetview_camera_heading,
             **serving_direction_payload(stop_id),
             "streetview_url": streetview_url,
