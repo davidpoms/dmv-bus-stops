@@ -25,6 +25,9 @@ Supporting references:
   Waitress startup, backup/restore, logging, and smoke-test operations.
 - [Small-pilot readiness audit](PILOT_READINESS.md) records deployment blockers,
   repository housekeeping decisions, and the supervised-pilot checklist.
+- [Reviewer achievements V1 proposal](reviewer-achievements-v1-design.md) describes
+  proposed private progress, opt-in recognition, evidence and rollout requirements;
+  it is a design for review, not implemented functionality.
 - [`scripts/active`](../scripts/active/README.md) inventories supported mutating
   commands; [`scripts/diagnostics`](../scripts/diagnostics/README.md) lists supported
   read-only checks.
