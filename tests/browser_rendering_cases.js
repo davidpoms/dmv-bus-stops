@@ -196,6 +196,154 @@
             assert(doc.querySelector('.current-review strong').textContent.trim() === expected, 'Completion exposure mismatch');
         }
     });
+    function progressData(count = 0, title = null) {
+        return {distinct_stops_documented: count,
+            explorer: {crossed_thresholds: count ? [5, 20] : [], next_threshold: count ? 50 : 5,
+                remaining: count ? 30 : 5},
+            first_looks: {available: true, count: count ? 3 : 0},
+            featured_geography: title === null ? null : {display_title: title,
+                numerator: 7, denominator: 40, current_percentage: 17.5,
+                next_tier_percentage: 25, required_count: 10, remaining: 3},
+            reviewer_id: 'PRIVATE_ID', reviewer_key: 'PRIVATE_KEY',
+            stops: ['PRIVATE_STOP'], coordinates: 'PRIVATE_COORDINATES',
+            geographies: [{display_title: 'UNSELECTED_GEOGRAPHY'}]};
+    }
+    async function progressPage(page, signedIn, payload, status = 200, authStatus = 200) {
+        const {doc} = environment();
+        const template = sources[page + '.html'];
+        doc.documentElement.innerHTML = template.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+        const calls = [];
+        const handlers = {};
+        const state = {signedIn, progress: null};
+        const win = {addEventListener: (name, handler) => { handlers[name] = handler; },
+            location: {assign: () => {}}};
+        const fetch = async url => {
+            calls.push(url);
+            if (url === '/api/reviewer/progress') {
+                if (state.progress) return state.progress();
+                if (status === 'network') throw new Error('Offline');
+                return {ok: status === 200, status, json: async () => payload};
+            }
+            return {ok: authStatus === 200, status: authStatus, json: async () => ({
+                signed_in: state.signedIn, display_name: 'Existing reviewer',
+                stats: {reviews_completed: 12, stops_reviewed: 9, stewarded_stops: 0},
+                stewarded_stops: []})};
+        };
+        let source;
+        if (page === 'reviewer_profile') {
+            source = template.match(/<script>([\s\S]*?)<\/script>/)[1]
+                .replace(/loadProfile\(\);\s*$/, 'return loadProfile();');
+        } else {
+            const full = sources['dashboard.js'];
+            source = full.slice(full.indexOf('let communityProgressVersion ='),
+                full.indexOf('let benchCandidateRows ='))
+                + '\nreturn loadCommunityProfileCard();';
+        }
+        try { await new Function('document', 'fetch', 'window', source)(doc, fetch, win); }
+        catch (error) { assert(authStatus !== 200, 'Unexpected profile failure: ' + error); }
+        // Profile progress loads independently of the existing activity renderer.
+        for (let i = 0; i < 12; i++) await Promise.resolve();
+        const card = doc.getElementById(page === 'dashboard' ? 'communityProfileCard' : 'privateProgressCard');
+        const content = doc.getElementById(page === 'dashboard' ? 'communityProgressContent' : 'privateProgressContent');
+        return {doc, calls, card, content, state, handlers};
+    }
+    await test('progress_auth', async () => {
+        for (const page of ['reviewer_profile', 'dashboard']) {
+            for (const authStatus of [200, 401, 403, 503]) {
+                const env = await progressPage(page, false, progressData(), 200, authStatus);
+                assert(env.calls.length === 1, 'Signed-out request fetched progress');
+                assert(env.card.style.display === 'none', 'Signed-out progress visible');
+            }
+            for (const status of [401, 403, 503, 'network']) {
+                const env = await progressPage(page, true, progressData(20), status);
+                assert(env.calls[1] === '/api/reviewer/progress', 'Missing authenticated progress fetch');
+                assert(!env.content.textContent.includes('20'), 'Private data rendered after failure');
+                if (page === 'reviewer_profile') {
+                    literal(env.doc.getElementById('stats'), '12');
+                    assert(env.doc.getElementById('profileName').textContent === 'Existing reviewer', 'Profile lost');
+                } else {
+                    assert(env.card.style.display !== 'none', 'Profile navigation hidden by progress failure');
+                    assert(env.doc.querySelector('#communityProfileCard a').getAttribute('href') === '/reviewer/profile', 'Profile navigation lost');
+                    assert(env.doc.getElementById('map'), 'Dashboard map lost');
+                }
+            }
+        }
+    });
+    await test('progress_content', async () => {
+        new Function(sources['dashboard.js']);
+        for (const page of ['reviewer_profile', 'dashboard']) {
+            const zero = await progressPage(page, true, progressData());
+            assert(zero.card.style.display !== 'none', 'Signed-in progress hidden');
+            literal(zero.content, '0');
+            literal(zero.content, 'provisional');
+            if (page === 'reviewer_profile') literal(zero.content, '5 stops (5 remaining)');
+            for (const value of fixtures) {
+                const env = await progressPage(page, true, progressData(20, value));
+                literal(env.content, value);
+                assert(!env.content.querySelector('img, script, b, [onerror]'), 'Progress interpreted as markup');
+                assert(!/PRIVATE_|UNSELECTED_GEOGRAPHY/.test(env.content.textContent), 'Non-display data exposed');
+                if (page === 'reviewer_profile') {
+                    literal(env.content, '5, 20');
+                    literal(env.content, '50 stops (30 remaining)');
+                    literal(env.content, '7 / 40 stops (17.5%)');
+                    literal(env.content, '10 stops (3 remaining)');
+                } else {
+                    assert(!env.content.textContent.includes('17.5'), 'Full geography leaked into teaser');
+                }
+            }
+        }
+    });
+    await test('progress_restoration', async () => {
+        for (const page of ['reviewer_profile', 'dashboard']) {
+            const env = await progressPage(page, true, progressData(20, 'Private geography'));
+            literal(env.content, 'Private geography');
+            const initialCalls = env.calls.length;
+            await env.handlers.pageshow({persisted: false});
+            assert(env.calls.length === initialCalls, 'Initial pageshow duplicated loading');
+            env.handlers.pagehide();
+            assert(env.content.textContent === '', 'Page exit retained private progress');
+            await env.handlers.pageshow({persisted: true});
+            literal(env.content, 'Private geography');
+            env.state.signedIn = false;
+            const restored = env.handlers.pageshow({persisted: true});
+            assert(!env.content.textContent.includes('Private geography'), 'Restoration left old progress visible');
+            const before = env.calls.filter(url => url === '/api/reviewer/progress').length;
+            await restored;
+            assert(env.content.textContent === '', 'Auth loss retained progress');
+            assert(env.calls.filter(url => url === '/api/reviewer/progress').length === before, 'Auth loss fetched progress');
+            if (page === 'dashboard') {
+                const link = env.doc.querySelector('#communityProfileCard a');
+                assert(env.card.style.display !== 'none' && link.getAttribute('href') === '/reviewer/profile', 'Profile navigation unavailable');
+            } else {
+                literal(env.doc.getElementById('stats'), '12');
+            }
+        }
+    });
+    await test('progress_stale_requests', async () => {
+        for (const page of ['reviewer_profile', 'dashboard']) {
+            for (const outcome of ['response', 'json', 'reject']) {
+                const env = await progressPage(page, true, progressData(20, 'Private geography'));
+                let release;
+                const delayed = new Promise((resolve, reject) => { release = outcome === 'reject' ? reject : resolve; });
+                env.state.progress = () => outcome === 'json'
+                    ? {ok: true, status: 200, json: () => delayed} : delayed;
+                const oldRequest = env.handlers.pageshow({persisted: true});
+                for (let i = 0; i < 12; i++) await Promise.resolve();
+                env.handlers.pagehide();
+                env.state.signedIn = false;
+                await env.handlers.pageshow({persisted: true});
+                release(outcome === 'response' ? {ok: true, status: 200, json: async () => progressData(20, 'STALE')}
+                    : outcome === 'json' ? progressData(20, 'STALE') : new Error('Late failure'));
+                await oldRequest;
+                assert(env.content.textContent === '', 'Stale request changed cleared content');
+            }
+        }
+    });
+    await test('progress_logout', async () => {
+        const env = await progressPage('reviewer_profile', true, progressData(20, 'Private geography'));
+        env.doc.querySelector('#accountStatus button').click();
+        assert(env.content.textContent === '' && env.card.style.display === 'none', 'Logout retained progress');
+    });
     // Encode results, not fixture markup, into the only active document.
     document.getElementById('results').textContent = [...new TextEncoder().encode(JSON.stringify(results))]
         .map(byte => byte.toString(16).padStart(2, '0')).join('');

@@ -31,6 +31,12 @@
 <p><a href="/review/start?mode=opportunity" class="dashboard-button">Continue reviewing</a></p>
 </div>
 
+<div class="card volunteer-card" id="privateProgressCard" style="display:none;">
+<h2>Your Progress</h2>
+<div id="privateProgressContent" role="status">Loading progress...</div>
+<p><small>Progress is current activity, not permanent awards. Network changes, corrected evidence, and updated geography membership can change these numbers.</small></p>
+</div>
+
 <div class="panel volunteer-card">
 <h2>Stops you steward</h2>
 <p>Stewardship means contributing observations over time. It does not imply ownership
@@ -48,6 +54,32 @@ or authority over a stop.</p>
 
 <script>
 let profileData = null;
+let privateProgressVersion = 0;
+
+function clearPrivateProgress() {
+    privateProgressVersion++;
+    document.getElementById("privateProgressCard").style.display = "none";
+    document.getElementById("privateProgressContent").replaceChildren();
+}
+
+async function restorePrivateProgress() {
+    clearPrivateProgress();
+    const version = privateProgressVersion;
+    try {
+        const response = await fetch("/api/reviewer/status");
+        if (!response.ok) return;
+        const status = await response.json();
+        if (version !== privateProgressVersion || status.signed_in !== true) return;
+        await loadPrivateProgress(version);
+    } catch (error) {
+        // Keep private progress cleared; existing profile sections remain available.
+    }
+}
+
+window.addEventListener("pagehide", clearPrivateProgress);
+window.addEventListener("pageshow", event => {
+    if (event.persisted) return restorePrivateProgress();
+});
 
 function addStat(container, label, value) {
     const row = document.createElement("p");
@@ -78,13 +110,18 @@ function renderStewardedStops(stops) {
 }
 
 async function loadProfile() {
+    clearPrivateProgress();
+    const version = privateProgressVersion;
     const response = await fetch("/api/reviewer/profile");
+    if (!response.ok) throw new Error("Profile unavailable");
     profileData = await response.json();
+    if (version !== privateProgressVersion) return;
     const name = profileData.display_name || "Community Volunteer";
     document.getElementById("profileName").textContent = name;
     const account = document.getElementById("accountStatus");
     const form = document.getElementById("displayNameForm");
-    if (profileData.signed_in) {
+    if (profileData.signed_in === true) {
+        loadPrivateProgress(version);
         account.replaceChildren();
         const signedIn = document.createElement("strong");
         signedIn.textContent = `Signed in as ${name}`;
@@ -92,6 +129,7 @@ async function loadProfile() {
         signOut.type = "button";
         signOut.textContent = "Sign out";
         signOut.addEventListener("click", async () => {
+            clearPrivateProgress();
             await fetch("/reviewer/sign-out", {
                 method: "POST", headers: {"Content-Type": "application/json"},
                 body: JSON.stringify({csrf_token: profileData.csrf_token})
@@ -121,6 +159,58 @@ async function loadProfile() {
     addStat(stats, "Routes covered", (profileData.stats.routes_covered || []).join(", ") || "None yet");
     addStat(stats, "Stops stewarded", profileData.stats.stewarded_stops);
     renderStewardedStops(profileData.stewarded_stops || []);
+}
+
+async function loadPrivateProgress(version) {
+    const card = document.getElementById("privateProgressCard");
+    const content = document.getElementById("privateProgressContent");
+    card.style.display = "block";
+    content.textContent = "Loading progress...";
+    try {
+        const response = await fetch("/api/reviewer/progress");
+        if (version !== privateProgressVersion) return;
+        if (response.status === 401 || response.status === 403) {
+            content.textContent = "Sign in again to view your private progress.";
+            return;
+        }
+        if (!response.ok) throw new Error("Progress unavailable");
+        const data = await response.json();
+        if (version !== privateProgressVersion) return;
+        const result = document.createElement("div");
+        addStat(result, "Explorer — distinct stops documented", data.distinct_stops_documented);
+        const explorer = data.explorer;
+        if (explorer.crossed_thresholds.length) {
+            addStat(result, "Current Explorer milestones reached", explorer.crossed_thresholds.join(", "));
+        }
+        if (explorer.next_threshold != null) {
+            addStat(result, "Next Explorer milestone",
+                `${explorer.next_threshold} stops (${explorer.remaining} remaining)`);
+        } else {
+            addStat(result, "Explorer", "All configured milestones currently reached.");
+        }
+        addStat(result, "First Looks — current, provisional",
+            data.first_looks.available ? data.first_looks.count : "Not available");
+        const geography = data.featured_geography;
+        if (geography) {
+            const heading = document.createElement("h3");
+            heading.textContent = geography.display_title;
+            result.appendChild(heading);
+            addStat(result, "Current coverage",
+                `${geography.numerator} / ${geography.denominator} stops (${Number(geography.current_percentage).toFixed(1)}%)`);
+            if (geography.next_tier_percentage != null) {
+                addStat(result, "Next geography milestone",
+                    `${geography.next_tier_percentage}% — ${geography.required_count} stops (${geography.remaining} remaining)`);
+            } else {
+                addStat(result, "Geography progress", "All configured milestones currently reached.");
+            }
+        } else {
+            addStat(result, "Geography progress", "No current progress in an eligible pilot geography yet.");
+        }
+        content.replaceChildren(result);
+    } catch (error) {
+        if (version !== privateProgressVersion) return;
+        content.textContent = "Progress is temporarily unavailable. Your profile is still available.";
+    }
 }
 
 document.getElementById("displayNameForm").addEventListener("submit", async (event) => {

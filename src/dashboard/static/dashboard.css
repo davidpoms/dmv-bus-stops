@@ -175,6 +175,15 @@ td, th {
     margin-bottom:25px;
 }
 
+#communityProfileCard, #privateProgressCard {
+    overflow-wrap: anywhere;
+}
+
+#communityProfileCard .dashboard-button {
+    box-sizing: border-box;
+    max-width: 100%;
+}
+
 
 .review-options {
     display:flex;

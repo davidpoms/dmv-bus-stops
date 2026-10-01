@@ -1516,6 +1516,14 @@ window.addEventListener(
     enableNearbyReview
 );
 
+let communityProgressVersion = 0;
+
+function clearCommunityProgress() {
+    communityProgressVersion++;
+    document.getElementById("communityProgressContent")?.replaceChildren();
+    document.getElementById("communityProfileName")?.replaceChildren();
+}
+
 async function loadCommunityProfileCard(){
 
     const card =
@@ -1534,6 +1542,13 @@ async function loadCommunityProfileCard(){
     }
 
 
+    if (communityProgressVersion === 0) card.style.display = "none";
+    clearCommunityProgress();
+    const version = communityProgressVersion;
+    const content = document.getElementById("communityProgressContent");
+    content.textContent = "Loading private progress...";
+    if (signInLink) signInLink.style.display = "";
+
     try {
 
         const response =
@@ -1542,11 +1557,14 @@ async function loadCommunityProfileCard(){
             );
 
 
+        if (!response.ok) throw new Error("Reviewer status unavailable");
+
         const data =
             await response.json();
+        if (version !== communityProgressVersion) return;
 
 
-        if(data.signed_in){
+        if(data.signed_in === true){
 
             card.style.display =
                 "block";
@@ -1570,11 +1588,43 @@ async function loadCommunityProfileCard(){
 
             }
 
+            try {
+                const progressResponse = await fetch("/api/reviewer/progress");
+                if (version !== communityProgressVersion) return;
+                if (progressResponse.status === 401 || progressResponse.status === 403) {
+                    content.textContent = "Sign in again to view your private progress.";
+                    return;
+                }
+                if (!progressResponse.ok) throw new Error("Progress unavailable");
+                const progress = await progressResponse.json();
+                if (version !== communityProgressVersion) return;
+                const summary = document.createElement("span");
+                summary.textContent = `Explorer: ${progress.distinct_stops_documented} stops documented`;
+                if (progress.first_looks.available) {
+                    summary.append(document.createTextNode(` · ${progress.first_looks.count} First Looks (current, provisional)`));
+                } else {
+                    summary.append(document.createTextNode(" · First Looks: Not available (current, provisional)"));
+                }
+                content.replaceChildren(summary);
+                if (progress.featured_geography) {
+                    const title = document.createElement("span");
+                    title.textContent = progress.featured_geography.display_title;
+                    content.append(document.createElement("br"), title);
+                }
+            } catch (error) {
+                if (version !== communityProgressVersion) return;
+                content.textContent = "Progress is temporarily unavailable. You can still view your profile.";
+            }
+
+        } else {
+            content.replaceChildren();
         }
 
     }
 
     catch(error){
+        if (version !== communityProgressVersion) return;
+        content.textContent = "Progress is temporarily unavailable. You can still view your profile.";
 
         console.error(
             "Unable to load reviewer profile:",
@@ -1591,6 +1641,10 @@ window.addEventListener(
     "load",
     loadCommunityProfileCard
 );
+window.addEventListener("pagehide", clearCommunityProgress);
+window.addEventListener("pageshow", event => {
+    if (event.persisted) return loadCommunityProfileCard();
+});
 
 let benchCandidateRows = [];
 let benchCandidateRequestVersion = 0;

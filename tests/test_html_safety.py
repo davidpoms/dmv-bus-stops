@@ -32,7 +32,9 @@ class HtmlSafetyTests(unittest.TestCase):
             raise unittest.SkipTest('Local Chromium required; set CHROMIUM_BINARY')
         sources = {name: (ROOT / 'src/dashboard/static' / name).read_text(encoding='utf-8')
                    for name in ('safe_render.js', 'photo_links.js', 'local_evidence.js',
-                                'stop_detail.js', 'review_info_loader.js')}
+                                'stop_detail.js', 'review_info_loader.js', 'dashboard.js')}
+        for name in ('reviewer_profile.html', 'dashboard.html'):
+            sources[name] = (ROOT / 'src/dashboard/templates' / name).read_text(encoding='utf-8')
         sources['review.html'] = (ROOT / 'src/dashboard/templates/review.html').read_text(encoding='utf-8')
         cases = (ROOT / 'tests/browser_rendering_cases.js').read_text(encoding='utf-8')
         # Prevent fixture/source strings from terminating the test harness script.
@@ -62,6 +64,21 @@ class HtmlSafetyTests(unittest.TestCase):
     def check_case(self, name):
         self.assertIn(name, self.results)
         self.assertEqual('ok', self.results[name])
+
+    def test_private_progress_authentication_and_failures(self):
+        self.check_case('progress_auth')
+
+    def test_private_progress_counts_milestones_and_safe_geography(self):
+        self.check_case('progress_content')
+
+    def test_private_progress_restoration_revalidates_authentication(self):
+        self.check_case('progress_restoration')
+
+    def test_private_progress_stale_requests_cannot_restore_content(self):
+        self.check_case('progress_stale_requests')
+
+    def test_private_progress_logout_clears_content(self):
+        self.check_case('progress_logout')
 
     def test_pages_load_safe_renderer_before_consumers(self):
         for name in ('review.html', 'stop_detail.html'):

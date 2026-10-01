@@ -177,7 +177,7 @@ class ReviewerAuthTests(unittest.TestCase):
         self.assertIn("Sign in to your reviewer profile", dashboard)
         self.assertIn("My reviewer profile", dashboard)
         self.assertIn('style="display:none;"', dashboard)
-        self.assertIn("if(data.signed_in)", dashboard_script)
+        self.assertIn("if(data.signed_in === true)", dashboard_script)
         self.assertIn("Set or update favorite routes", profile)
         self.assertIn('/review/start?mode=route', profile)
         self.assertIn("Continue reviewing", profile)
