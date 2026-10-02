@@ -40,8 +40,8 @@ def target_binding(target, manifest_sha256, source_sha256):
             and stat.st_dev == binding["device"] and stat.st_ino == binding["inode"]
             and stat.st_ino != 0 and bool(binding["review_reference"])
             and target.name.lower() != "recognition-working.db", "unauthorized_production_target")
-    require(binding["manifest_sha256"] == manifest_sha256.lower(), "binding_manifest_hash_mismatch")
-    require(binding["snapshot_sha256"] == source_sha256.lower(), "binding_source_hash_mismatch")
+    require(binding["manifest_sha256"].lower() == manifest_sha256.lower(), "binding_manifest_hash_mismatch")
+    require(binding["snapshot_sha256"].lower() == source_sha256.lower(), "binding_source_hash_mismatch")
     return binding
 
 

@@ -63,6 +63,23 @@ class RecognitionTests(unittest.TestCase):
             manifest_sha256=arguments['manifest_sha256'], snapshot_sha256=arguments['source_sha256'],
             review_reference='SYNTHETIC TEST AUTHORIZATION ONLY')), encoding='utf-8')
 
+    def test_production_binding_accepts_uppercase_stored_hashes(self):
+        self.binding_path = self.path.parent / 'reviewed-binding.json'
+        manifest_hash = 'abcdef01' * 8
+        snapshot_hash = 'fedcba98' * 8
+        self.write_issuance_binding(dict(manifest_sha256=manifest_hash.upper(),
+                                        source_sha256=snapshot_hash.upper()))
+        before = self.binding_path.read_bytes()
+        with patch.object(issuance, 'BINDING_PATH', self.binding_path):
+            binding = issuance.target_binding(self.path.resolve(), manifest_hash, snapshot_hash)
+            self.assertEqual(manifest_hash.upper(), binding['manifest_sha256'])
+            self.assertEqual(snapshot_hash.upper(), binding['snapshot_sha256'])
+            with self.assertRaisesRegex(ValueError, 'binding_manifest_hash_mismatch'):
+                issuance.target_binding(self.path.resolve(), '0' * 64, snapshot_hash)
+            with self.assertRaisesRegex(ValueError, 'binding_source_hash_mismatch'):
+                issuance.target_binding(self.path.resolve(), manifest_hash, '0' * 64)
+        self.assertEqual(before, self.binding_path.read_bytes())
+
     def test_issuance_default_and_cli_require_explicit_authorization(self):
         source, path, manifest, args = self.issuance_fixture()
         before = self.path.read_bytes()
