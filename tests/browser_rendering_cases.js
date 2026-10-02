@@ -208,23 +208,35 @@
             stops: ['PRIVATE_STOP'], coordinates: 'PRIVATE_COORDINATES',
             geographies: [{display_title: 'UNSELECTED_GEOGRAPHY'}]};
     }
-    async function progressPage(page, signedIn, payload, status = 200, authStatus = 200) {
+    function activityData(name = 'Main Street Stop') {
+        return {available: true, activities: Array.from({length: 5}, (_, i) => ({
+            stop_id: 9001 + i, stop_name: name,
+            completed_at: `2026-10-01T12:0${4-i}:00Z`
+        }))};
+    }
+    async function progressPage(page, signedIn, payload, status = 200, authStatus = 200, activityResponse = null) {
         const {doc} = environment();
         const template = sources[page + '.html'];
         doc.documentElement.innerHTML = template.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
         const calls = [];
         const handlers = {};
-        const state = {signedIn, progress: null};
+        const state = {signedIn, progress: null, activity: activityResponse, visibility: 'visible', authStatus};
+        Object.defineProperty(doc, 'visibilityState', {get: () => state.visibility});
+        doc.addEventListener = (name, handler) => { handlers[name] = handler; };
         const win = {addEventListener: (name, handler) => { handlers[name] = handler; },
             location: {assign: () => {}}};
         const fetch = async url => {
             calls.push(url);
+            if (url === '/api/reviewer/recent-activity') {
+                if (state.activity) return state.activity();
+                return {ok: true, status: 200, json: async () => activityData()};
+            }
             if (url === '/api/reviewer/progress') {
                 if (state.progress) return state.progress();
                 if (status === 'network') throw new Error('Offline');
                 return {ok: status === 200, status, json: async () => payload};
             }
-            return {ok: authStatus === 200, status: authStatus, json: async () => ({
+            return {ok: state.authStatus === 200, status: state.authStatus, json: async () => ({
                 signed_in: state.signedIn, display_name: 'Existing reviewer',
                 stats: {reviews_completed: 12, stops_reviewed: 9, stewarded_stops: 0},
                 stewarded_stops: []})};
@@ -305,6 +317,7 @@
             await env.handlers.pageshow({persisted: true});
             literal(env.content, 'Private geography');
             env.state.signedIn = false;
+            env.handlers.pagehide();
             const restored = env.handlers.pageshow({persisted: true});
             assert(!env.content.textContent.includes('Private geography'), 'Restoration left old progress visible');
             const before = env.calls.filter(url => url === '/api/reviewer/progress').length;
@@ -327,6 +340,7 @@
                 const delayed = new Promise((resolve, reject) => { release = outcome === 'reject' ? reject : resolve; });
                 env.state.progress = () => outcome === 'json'
                     ? {ok: true, status: 200, json: () => delayed} : delayed;
+                env.handlers.pagehide();
                 const oldRequest = env.handlers.pageshow({persisted: true});
                 for (let i = 0; i < 12; i++) await Promise.resolve();
                 env.handlers.pagehide();
@@ -343,6 +357,161 @@
         const env = await progressPage('reviewer_profile', true, progressData(20, 'Private geography'));
         env.doc.querySelector('#accountStatus button').click();
         assert(env.content.textContent === '' && env.card.style.display === 'none', 'Logout retained progress');
+    });
+    await test('recent_activity_content', async () => {
+        for (const name of fixtures) {
+            const env = await progressPage('reviewer_profile', true, progressData(), 200, 200,
+                () => ({ok: true, status: 200, json: async () => activityData(name)}));
+            const content = env.doc.getElementById('recentActivityContent');
+            assert(!env.doc.getElementById('recentActivitySection').hidden, 'Activity hidden');
+            assert(env.calls[0] === '/api/reviewer/profile', 'Activity fetched before profile');
+            assert(env.calls.filter(url => url === '/api/reviewer/recent-activity').length === 1, 'Duplicate activity fetch');
+            assert(content.querySelectorAll('li').length === 5, 'Not five activity entries');
+            assert(!content.querySelector('img, script, b, [onerror]'), 'Stop name became markup');
+            const formatter = new Intl.DateTimeFormat(undefined, {year: 'numeric', month: 'short', day: 'numeric',
+                hour: 'numeric', minute: '2-digit', timeZoneName: 'short'});
+            [...content.querySelectorAll('li')].forEach((row, i) => {
+                const link = row.querySelector('a'), time = row.querySelector('time');
+                assert(link.textContent === name, 'Stop name changed');
+                assert(link.getAttribute('href') === '/stop/' + (9001+i), 'Stop link unusable');
+                assert(!row.textContent.includes(String(9001+i)), 'ID visible');
+                assert(row.textContent.includes('Review completed'), 'Missing completion label');
+                const date = new Date(activityData().activities[i].completed_at);
+                assert(time.dateTime === date.toISOString().replace('.000Z', 'Z'), 'Canonical time missing');
+                assert(time.textContent === formatter.format(date), 'Time not local');
+                const zone = formatter.formatToParts(date).find(part => part.type === 'timeZoneName').value;
+                assert(time.textContent.includes(zone), 'Timezone indicator missing');
+            });
+        }
+    });
+    await test('recent_activity_states', async () => {
+        const signedOut = await progressPage('reviewer_profile', false, progressData());
+        assert(!signedOut.calls.includes('/api/reviewer/recent-activity'), 'Signed-out activity fetch');
+        assert(signedOut.doc.getElementById('recentActivitySection').hidden, 'Signed-out activity visible');
+        for (const status of ['empty', 'unavailable', 'network', 401, 403, 503]) {
+            const env = await progressPage('reviewer_profile', true, progressData(), 200, 200, () => {
+                if (status === 'network') throw new Error('Offline');
+                return {ok: typeof status === 'string', status,
+                    json: async () => ({available: status === 'empty', activities: []})};
+            });
+            const content = env.doc.getElementById('recentActivityContent');
+            const expected = status === 'empty' ? 'No completed reviews' :
+                [401,403].includes(status) ? 'Sign in again' : 'temporarily unavailable';
+            literal(content, expected);
+            literal(env.doc.getElementById('stats'), '12');
+            assert(env.doc.getElementById('profileName').textContent === 'Existing reviewer', 'Profile disrupted');
+            assert(env.doc.querySelector('a[href="/dashboard"]'), 'Navigation lost');
+            literal(env.doc.getElementById('stewardedStops'), 'not stewarding');
+        }
+        let release;
+        const pending = new Promise(resolve => { release = resolve; });
+        const loading = await progressPage('reviewer_profile', true, progressData(), 200, 200, () => pending);
+        literal(loading.doc.getElementById('recentActivityContent'), 'Loading recent activity');
+        literal(loading.doc.getElementById('stats'), '12');
+        release({ok: true, status: 200, json: async () => activityData()});
+    });
+    await test('recent_activity_lifecycle', async () => {
+        for (const event of ['logout', 'restoration']) {
+            for (const outcome of ['response', 'json', 'reject']) {
+                const env = await progressPage('reviewer_profile', true, progressData());
+                const content = env.doc.getElementById('recentActivityContent');
+                assert(content.querySelectorAll('li').length === 5, 'Initial activity missing');
+                const calls = env.calls.length;
+                await env.handlers.pageshow({persisted: false});
+                assert(env.calls.length === calls, 'Initial pageshow duplicated activity');
+                let release;
+                const delayed = new Promise((resolve, reject) => { release = outcome === 'reject' ? reject : resolve; });
+                env.state.activity = () => outcome === 'json'
+                    ? {ok: true, status: 200, json: () => delayed} : delayed;
+                env.handlers.pagehide();
+                const oldRequest = env.handlers.pageshow({persisted: true});
+                for (let i = 0; i < 12; i++) await Promise.resolve();
+                if (event === 'logout') env.doc.querySelector('#accountStatus button').click();
+                else env.handlers.pagehide();
+                assert(content.textContent === '', 'Exit retained private activity');
+                assert(env.doc.getElementById('recentActivitySection').hidden, 'Exit kept section visible');
+                env.state.signedIn = false;
+                const before = env.calls.filter(url => url === '/api/reviewer/recent-activity').length;
+                await env.handlers.pageshow({persisted: true});
+                assert(env.calls.filter(url => url === '/api/reviewer/recent-activity').length === before, 'Auth loss fetched activity');
+                release(outcome === 'response' ? {ok: true, status: 200, json: async () => activityData('STALE')}
+                    : outcome === 'json' ? activityData('STALE') : new Error('Late failure'));
+                await oldRequest;
+                assert(content.textContent === '', 'Stale request repopulated private activity');
+                literal(env.doc.getElementById('stats'), '12');
+                assert(env.doc.querySelector('a[href="/dashboard"]'), 'Navigation lost');
+            }
+        }
+    });
+    await test('recent_activity_visibility_auth_loss', async () => {
+        for (const authStatus of [200, 401, 403]) {
+            for (const outcome of ['response', 'json', 'reject']) {
+                const env = await progressPage('reviewer_profile', true, progressData());
+                const content = env.doc.getElementById('recentActivityContent');
+                assert(content.querySelectorAll('li').length === 5, 'Initial activity missing');
+                const hidden = () => {
+                    env.state.visibility = 'hidden';
+                    env.handlers.visibilitychange();
+                    assert(content.textContent === '' && env.doc.getElementById('recentActivitySection').hidden,
+                        'Hidden tab retained activity');
+                    assert(env.content.textContent === '' && env.card.style.display === 'none',
+                        'Hidden tab retained progress');
+                };
+                hidden();
+                let release;
+                const pending = new Promise((resolve, reject) => { release = outcome === 'reject' ? reject : resolve; });
+                env.state.activity = () => outcome === 'json'
+                    ? {ok: true, status: 200, json: () => pending} : pending;
+                env.state.visibility = 'visible';
+                const staleRequest = env.handlers.visibilitychange();
+                for (let i = 0; i < 12; i++) await Promise.resolve();
+                hidden();
+                env.state.signedIn = false;
+                env.state.authStatus = authStatus;
+                const before = env.calls.length;
+                env.state.visibility = 'visible';
+                await env.handlers.visibilitychange();
+                assert(JSON.stringify(env.calls.slice(before)) === JSON.stringify(['/api/reviewer/status']),
+                    'Tab return did not revalidate or fetched private data after auth loss');
+                release(outcome === 'response' ? {ok: true, status: 200, json: async () => activityData('STALE')}
+                    : outcome === 'json' ? activityData('STALE') : new Error('Late failure'));
+                await staleRequest;
+                assert(content.textContent === '' && env.doc.getElementById('recentActivitySection').hidden,
+                    'Stale response restored hidden activity');
+                literal(env.doc.getElementById('stats'), '12');
+                assert(env.doc.getElementById('profileName').textContent === 'Existing reviewer', 'Profile content lost');
+                const nav = env.doc.querySelector('a[href="/dashboard"]');
+                assert(nav && !nav.closest('[hidden]'), 'Profile navigation hidden');
+            }
+        }
+    });
+    await test('recent_activity_visibility_authenticated_once', async () => {
+        for (const firstEvent of ['visibility', 'pageshow']) {
+            for (const awaitFirst of [false, true]) {
+                const env = await progressPage('reviewer_profile', true, progressData());
+                for (let cycle = 0; cycle < 2; cycle++) {
+                    env.state.visibility = 'hidden';
+                    env.handlers.visibilitychange();
+                    env.handlers.pagehide();
+                    const before = env.calls.length;
+                    await env.handlers.pageshow({persisted: true});
+                    assert(env.calls.length === before, 'Hidden restoration fetched private data');
+                    env.state.visibility = 'visible';
+                    const resume = event => event === 'visibility' ? env.handlers.visibilitychange()
+                        : env.handlers.pageshow({persisted: true});
+                    const first = resume(firstEvent);
+                    if (awaitFirst) await first;
+                    const second = resume(firstEvent === 'visibility' ? 'pageshow' : 'visibility');
+                    await Promise.all([first, second]);
+                    assert(JSON.stringify(env.calls.slice(before)) === JSON.stringify([
+                        '/api/reviewer/status', '/api/reviewer/progress', '/api/reviewer/recent-activity'
+                    ]), 'Restoration duplicated authentication/progress/activity requests');
+                    assert(env.doc.getElementById('recentActivityContent').querySelectorAll('li').length === 5,
+                        'Authenticated tab return did not restore activity');
+                    assert(!env.doc.getElementById('recentActivitySection').hidden, 'Repopulated activity hidden');
+                }
+            }
+        }
     });
     // Encode results, not fixture markup, into the only active document.
     document.getElementById('results').textContent = [...new TextEncoder().encode(JSON.stringify(results))]

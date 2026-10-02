@@ -24,10 +24,14 @@
 <p><a href="/review/start?mode=route" class="dashboard-button">Start route-based review</a></p>
 </div>
 
-<div class="panel volunteer-card">
+<div class="panel volunteer-card" id="reviewerActivityCard">
 <h2>Your review activity</h2>
 <p>Route-level ridership associated with reviewed stops, not unique riders or observed stop-level boardings. Uses current mappings, not snapshots at review time.</p>
 <div id="stats">Loading activity...</div>
+<section id="recentActivitySection" hidden>
+<h3>Recent Activity — Only you</h3>
+<div id="recentActivityContent" role="status">Loading recent activity...</div>
+</section>
 <p><a href="/review/start?mode=opportunity" class="dashboard-button">Continue reviewing</a></p>
 </div>
 
@@ -55,30 +59,48 @@ or authority over a stop.</p>
 <script>
 let profileData = null;
 let privateProgressVersion = 0;
+let privateRestoreNeeded = false;
+let privateRestorePromise = null;
 
 function clearPrivateProgress() {
     privateProgressVersion++;
+    privateRestoreNeeded = true;
+    privateRestorePromise = null;
     document.getElementById("privateProgressCard").style.display = "none";
     document.getElementById("privateProgressContent").replaceChildren();
+    document.getElementById("recentActivitySection").hidden = true;
+    document.getElementById("recentActivityContent").replaceChildren();
 }
 
-async function restorePrivateProgress() {
-    clearPrivateProgress();
-    const version = privateProgressVersion;
-    try {
-        const response = await fetch("/api/reviewer/status");
-        if (!response.ok) return;
-        const status = await response.json();
-        if (version !== privateProgressVersion || status.signed_in !== true) return;
-        await loadPrivateProgress(version);
-    } catch (error) {
-        // Keep private progress cleared; existing profile sections remain available.
+function restorePrivateProgress() {
+    if (document.visibilityState === "hidden" || !privateRestoreNeeded) {
+        return privateRestorePromise;
     }
+    // Both pageshow and visibilitychange can describe the same restoration.
+    // Consume the invalidation once, even if the second event arrives later.
+    privateRestoreNeeded = false;
+    const version = privateProgressVersion;
+    privateRestorePromise = (async () => {
+        try {
+            const response = await fetch("/api/reviewer/status");
+            if (!response.ok) return;
+            const status = await response.json();
+            if (version !== privateProgressVersion || status.signed_in !== true) return;
+            await Promise.all([loadPrivateProgress(version), loadRecentActivity(version)]);
+        } catch (error) {
+            // Keep private content cleared; existing profile sections remain available.
+        }
+    })();
+    return privateRestorePromise;
 }
 
 window.addEventListener("pagehide", clearPrivateProgress);
 window.addEventListener("pageshow", event => {
     if (event.persisted) return restorePrivateProgress();
+});
+document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") clearPrivateProgress();
+    else return restorePrivateProgress();
 });
 
 function addStat(container, label, value) {
@@ -111,6 +133,7 @@ function renderStewardedStops(stops) {
 
 async function loadProfile() {
     clearPrivateProgress();
+    privateRestoreNeeded = document.visibilityState === "hidden";
     const version = privateProgressVersion;
     const response = await fetch("/api/reviewer/profile");
     if (!response.ok) throw new Error("Profile unavailable");
@@ -121,7 +144,10 @@ async function loadProfile() {
     const account = document.getElementById("accountStatus");
     const form = document.getElementById("displayNameForm");
     if (profileData.signed_in === true) {
-        loadPrivateProgress(version);
+        if (document.visibilityState !== "hidden") {
+            loadPrivateProgress(version);
+            loadRecentActivity(version);
+        }
         account.replaceChildren();
         const signedIn = document.createElement("strong");
         signedIn.textContent = `Signed in as ${name}`;
@@ -159,6 +185,52 @@ async function loadProfile() {
     addStat(stats, "Routes covered", (profileData.stats.routes_covered || []).join(", ") || "None yet");
     addStat(stats, "Stops stewarded", profileData.stats.stewarded_stops);
     renderStewardedStops(profileData.stewarded_stops || []);
+}
+
+async function loadRecentActivity(version) {
+    const section = document.getElementById("recentActivitySection");
+    const content = document.getElementById("recentActivityContent");
+    section.hidden = false;
+    content.textContent = "Loading recent activity...";
+    try {
+        const response = await fetch("/api/reviewer/recent-activity");
+        if (version !== privateProgressVersion) return;
+        if (response.status === 401 || response.status === 403) {
+            content.textContent = "Sign in again to view your private recent activity.";
+            return;
+        }
+        if (!response.ok) throw new Error("Recent activity unavailable");
+        const data = await response.json();
+        if (version !== privateProgressVersion) return;
+        if (data.available !== true || !Array.isArray(data.activities)) {
+            throw new Error("Recent activity unavailable");
+        }
+        if (!data.activities.length) {
+            content.textContent = "No completed reviews to show yet.";
+            return;
+        }
+        const formatter = new Intl.DateTimeFormat(undefined, {
+            year: "numeric", month: "short", day: "numeric",
+            hour: "numeric", minute: "2-digit", timeZoneName: "short"
+        });
+        const list = document.createElement("ul");
+        for (const activity of data.activities.slice(0, 5)) {
+            const row = document.createElement("li");
+            const link = document.createElement("a");
+            link.href = `/stop/${encodeURIComponent(activity.stop_id)}`;
+            link.textContent = activity.stop_name || "Bus Stop";
+            const time = document.createElement("time");
+            time.dateTime = activity.completed_at;
+            time.textContent = formatter.format(new Date(activity.completed_at));
+            row.append(document.createTextNode("Review completed — "), link,
+                document.createElement("br"), time);
+            list.appendChild(row);
+        }
+        content.replaceChildren(list);
+    } catch (error) {
+        if (version !== privateProgressVersion) return;
+        content.textContent = "Recent activity is temporarily unavailable. Your profile is still available.";
+    }
 }
 
 async function loadPrivateProgress(version) {

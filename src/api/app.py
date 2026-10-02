@@ -38,6 +38,7 @@ from src.assessment.interpretation import (
 
 from src.review.consensus import calculate_stop_consensus
 from src.review.progress import build_progress
+from src.review.recent_activity import build_recent_activity
 from src.review.context import build_review_context
 from src.review.auth import (
     TOKEN_LIFETIME_MINUTES, RateLimitError, consume_login_token,
@@ -5138,6 +5139,29 @@ def reviewer_progress_api():
         app.logger.exception("Private reviewer progress is unavailable")
         return response({"error": "Private progress is temporarily unavailable.",
                          "code": "progress_unavailable"}, 503)
+
+
+@app.route("/api/reviewer/recent-activity")
+def reviewer_recent_activity_api():
+    def response(payload, status=200):
+        result = jsonify(payload)
+        result.status_code = status
+        result.headers["Cache-Control"] = "private, no-store"
+        return result
+
+    reviewer_id = session.get("authenticated_reviewer_id")
+    reviewer_key = session.get("reviewer_key")
+    if not reviewer_id or not reviewer_key:
+        return response({"available": False, "error": "Sign in to view your recent activity."}, 401)
+    if request.args or request.get_data():
+        return response({"available": False, "error": "Recent activity does not accept parameters."}, 400)
+    try:
+        return response(build_recent_activity(DATABASE_PATH, reviewer_id, reviewer_key))
+    except PermissionError:
+        return response({"available": False, "error": "Signed-in reviewer profile was not found."}, 403)
+    except sqlite3.Error:
+        app.logger.exception("Private recent activity is unavailable")
+        return response({"available": False, "error": "Recent activity is temporarily unavailable."}, 503)
 
 
 @app.route("/api/reviewer/profile", methods=["GET", "POST"])

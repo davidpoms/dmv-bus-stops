@@ -80,6 +80,21 @@ class HtmlSafetyTests(unittest.TestCase):
     def test_private_progress_logout_clears_content(self):
         self.check_case('progress_logout')
 
+    def test_recent_activity_safe_rows_links_and_local_times(self):
+        self.check_case('recent_activity_content')
+
+    def test_recent_activity_loading_empty_failure_and_authentication(self):
+        self.check_case('recent_activity_states')
+
+    def test_recent_activity_logout_restoration_and_stale_requests(self):
+        self.check_case('recent_activity_lifecycle')
+
+    def test_recent_activity_tab_visibility_auth_loss_and_stale_requests(self):
+        self.check_case('recent_activity_visibility_auth_loss')
+
+    def test_recent_activity_authenticated_tab_return_deduplicates_restoration(self):
+        self.check_case('recent_activity_visibility_authenticated_once')
+
     def test_pages_load_safe_renderer_before_consumers(self):
         for name in ('review.html', 'stop_detail.html'):
             source = (ROOT / 'src/dashboard/templates' / name).read_text(encoding='utf-8')

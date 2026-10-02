@@ -175,11 +175,11 @@ td, th {
     margin-bottom:25px;
 }
 
-#communityProfileCard, #privateProgressCard {
+#communityProfileCard, #privateProgressCard, #reviewerActivityCard {
     overflow-wrap: anywhere;
 }
 
-#communityProfileCard .dashboard-button {
+#communityProfileCard .dashboard-button, #reviewerActivityCard .dashboard-button {
     box-sizing: border-box;
     max-width: 100%;
 }
