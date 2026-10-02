@@ -33,51 +33,30 @@ def complete_stop_review(
 ):
 
     conn = sqlite3.connect(DATABASE_PATH)
-
-    cursor = conn.cursor()
-
-    cursor.execute(
-        """
-        DELETE FROM stop_observations
-
-        WHERE physical_stop_id = ?
-        AND reviewer_id = ?;
-        """,
-        (
-            physical_stop_id,
-            reviewer_id
-        )
-    )
-
-
-    cursor.execute(
-        """
-        INSERT INTO stop_observations
-        (
-            physical_stop_id,
-            reviewer_id,
-            shelter_present,
-            bench_present,
-            bench_condition,
-            waiting_area_type,
-            notes
-        )
-
-        VALUES (?, ?, ?, ?, ?, ?, ?);
-        """,
-        (
-            physical_stop_id,
-            reviewer_id,
-            shelter_present,
-            bench_present,
-            bench_condition,
-            waiting_area_type,
-            notes
-        )
-    )
-
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute("PRAGMA foreign_keys=ON")
+        # Retain this standalone CLI helper, but serialize its retention check
+        # with capture so a reference cannot appear between checking and deleting.
+        conn.execute("BEGIN IMMEDIATE")
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='recognition_completions'").fetchone():
+            retained = conn.execute("""SELECT 1 FROM stop_observations o
+                JOIN recognition_completions c ON c.observation_id=o.id
+                WHERE o.physical_stop_id=? AND o.reviewer_id=? LIMIT 1""",
+                (physical_stop_id, reviewer_id)).fetchone()
+            if retained:
+                raise ValueError("recognition_retention_prevents_observation_replacement")
+        conn.execute("DELETE FROM stop_observations WHERE physical_stop_id=? AND reviewer_id=?",
+                     (physical_stop_id, reviewer_id))
+        conn.execute("""INSERT INTO stop_observations
+            (physical_stop_id,reviewer_id,shelter_present,bench_present,bench_condition,waiting_area_type,notes)
+            VALUES(?,?,?,?,?,?,?)""",
+            (physical_stop_id, reviewer_id, shelter_present, bench_present, bench_condition, waiting_area_type, notes))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
     print(
         f"Saved review for stop {physical_stop_id}"
