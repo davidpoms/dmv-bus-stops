@@ -2,7 +2,10 @@
 
 from pathlib import Path
 from contextlib import contextmanager
+from contextlib import redirect_stderr
+import io
 import json
+import os
 import sqlite3
 import subprocess
 import sys
@@ -18,12 +21,571 @@ from src.review.recognition.integrity import check_award_integrity
 from src.review.recognition.qualification import Quarantined, capture, permanent_time, qualify
 from src.review.recognition.rules import RULE_KEY, canonical, digest, explorer_candidates, initial_definition
 from src.review.recognition.schema import TABLES, connection, migrate
+from scripts.active import rehearse_recognition_capture as rehearsal
+from scripts.active import issue_historical_explorer as issuance
 
 
 ENABLED = RecognitionGate(capture=True, issuance=True)
 
 
 class RecognitionTests(unittest.TestCase):
+    def issuance_fixture(self):
+        source, path, manifest, arguments = self.rehearsal_fixture()
+        # Four awards across three owners: 42, 7, 5, 1 distinct completions.
+        self.sql("INSERT INTO community_reviewers VALUES(3,'third'),(4,'fourth')")
+        for start, end, owner in ((184, 190, 2), (191, 195, 3), (196, 196, 4)):
+            self.sql("UPDATE stop_review_assignments SET reviewer_id=? WHERE id BETWEEN ? AND ?", (owner, start, end))
+            self.sql("UPDATE stop_observations SET reviewer_id=? WHERE assignment_id BETWEEN ? AND ?", (owner, start, end))
+        # Snapshot may include initialized but empty recognition tables.
+        source.write_bytes(self.path.read_bytes())
+        manifest = dry_run(self.path, RULE_KEY, after_assignment=141, through_assignment=210,
+                           sqlite_utc_provenance="synthetic-fixture-current-timestamp")
+        capture_batch(self.path, manifest, gate=RecognitionGate(capture=True))
+        manifest = dry_run(self.path, RULE_KEY, after_assignment=141, through_assignment=210,
+                           sqlite_utc_provenance="synthetic-fixture-current-timestamp")
+        path.write_text(canonical(manifest), encoding="utf-8")
+        arguments.update(source_sha256=rehearsal.file_hash(source), manifest_sha256=rehearsal.file_hash(path))
+        self.binding_path = self.path.parent / 'reviewed-binding.json'
+        binding_patch = patch.object(issuance, 'BINDING_PATH', self.binding_path)
+        binding_patch.start()
+        self.addCleanup(binding_patch.stop)
+        announce_patch = patch.object(issuance, 'announce')
+        self.announcements = announce_patch.start()
+        self.addCleanup(announce_patch.stop)
+        self.write_issuance_binding(arguments)
+        self.assertEqual(4, len(manifest['candidates']))
+        return source, path, manifest, arguments
+
+    def write_issuance_binding(self, arguments):
+        stat = self.path.stat()
+        self.binding_path.write_text(canonical(dict(environment='production', hostname=issuance.socket.getfqdn(),
+            database=str(self.path.resolve()), device=stat.st_dev, inode=stat.st_ino,
+            manifest_sha256=arguments['manifest_sha256'], snapshot_sha256=arguments['source_sha256'],
+            review_reference='SYNTHETIC TEST AUTHORIZATION ONLY')), encoding='utf-8')
+
+    def test_issuance_default_and_cli_require_explicit_authorization(self):
+        source, path, manifest, args = self.issuance_fixture()
+        before = self.path.read_bytes()
+        with patch.object(issuance, 'lease_jobs', side_effect=AssertionError('write')):
+            self.assertEqual('verify-only', issuance.issue(self.path, source, path, **args)['mode'])
+        bootstrap = "from pathlib import Path; from scripts.active import issue_historical_explorer as m; " \
+                    "m.BINDING_PATH=Path(" + repr(str(self.binding_path)) + "); m.main()"
+        command = [sys.executable, '-B', '-c', bootstrap, '--production-db', str(self.path),
+                   '--source-snapshot', str(source), '--manifest', str(path),
+                   '--manifest-sha256', args['manifest_sha256'], '--source-sha256', args['source_sha256'],
+                   '--expected-excluded', '1']
+        result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual('verify-only', json.loads(result.stdout)['mode'])
+        result = subprocess.run(command + ['--capture'], capture_output=True, text=True, timeout=30)
+        self.assertEqual(2, result.returncode)
+        self.assertEqual(before, self.path.read_bytes())
+
+    def test_issuance_four_awards_pending_jobs_and_idempotent_retry(self):
+        source, path, manifest, args = self.issuance_fixture()
+        source_before = source.read_bytes()
+        with patch.object(issuance, 'lease_jobs', wraps=lease_jobs) as lease:
+            result = issuance.issue(self.path, source, path, issue_production=True, **args)
+        self.assertEqual(55, lease.call_count)
+        self.assertTrue(all(c.kwargs['gate'] == RecognitionGate(capture=False, issuance=True)
+                            for c in lease.call_args_list))
+        self.assertEqual(4, result['awards_issued'])
+        self.assertEqual(35, sum(a['witness_count'] for a in result['awards']))
+        self.assertTrue(all(j['state'] == 'done' and j['attempts'] == 1 for j in result['jobs']))
+        before = self.path.read_bytes()
+        self.assertEqual(0, issuance.issue(self.path, source, path, issue_production=True, **args)['awards_issued'])
+        self.assertEqual(before, self.path.read_bytes())
+        self.assertEqual(source_before, source.read_bytes())
+        self.assertEqual(RecognitionGate(), DISABLED)
+        for name in ('src/api/app.py', 'src/review/complete_stop_review.py'):
+            self.assertNotIn('issue_historical_explorer', Path(name).read_text(encoding='utf-8'))
+
+    def test_issuance_rejects_manifest_hash_rule_and_candidate_changes(self):
+        source, path, manifest, args = self.issuance_fixture()
+        before = self.path.read_bytes()
+        with self.assertRaisesRegex(ValueError, 'manifest_hash'):
+            issuance.issue(self.path, source, path, **dict(args, manifest_sha256='0' * 64))
+        for defect in ('rule', 'candidate', 'cohort'):
+            changed = json.loads(canonical(manifest))
+            if defect == 'rule':
+                changed['rule_key'] = 'explorer:v2'
+            elif defect == 'candidate':
+                changed['candidates'][0]['earned_at_utc'] = '2000-01-01T00:00:00Z'
+            else:
+                changed['cohort']['after_assignment'] = 140
+            path.write_text(canonical(changed), encoding='utf-8')
+            with self.subTest(defect=defect), self.assertRaises(ValueError), \
+                 patch.object(issuance, 'lease_jobs', side_effect=AssertionError('write')):
+                issuance.issue(self.path, source, path, issue_production=True,
+                               **dict(args, manifest_sha256=rehearsal.file_hash(path)))
+        self.assertEqual(before, self.path.read_bytes())
+
+    def test_issuance_rejects_missing_unexpected_or_leased_jobs(self):
+        source, path, manifest, args = self.issuance_fixture()
+        for mutation in ("DELETE FROM recognition_jobs WHERE assignment_id=142",
+                         "UPDATE recognition_jobs SET attempts=1 WHERE assignment_id=142",
+                         "UPDATE recognition_jobs SET state='leased',lease_token='other',"
+                         "lease_until_utc='2099-01-01T00:00:00Z' WHERE assignment_id=142"):
+            backup = self.path.read_bytes()
+            self.sql(mutation)
+            before = self.path.read_bytes()
+            with self.assertRaisesRegex(ValueError, 'unexpected_job'), \
+                 patch.object(issuance, 'lease_jobs', side_effect=AssertionError('write')):
+                issuance.issue(self.path, source, path, issue_production=True, **args)
+            self.assertEqual(before, self.path.read_bytes())
+            self.path.write_bytes(backup)
+
+    def test_issuance_rejects_changed_evidence_schema_and_source_alias(self):
+        source, path, manifest, args = self.issuance_fixture()
+        with self.assertRaisesRegex(ValueError, 'source_target_alias'):
+            issuance.issue(source, source, path, **args)
+        with self.assertRaisesRegex(ValueError, 'source_hash'):
+            issuance.issue(self.path, source, path, **dict(args, source_sha256='0' * 64))
+        self.sql("UPDATE stop_review_assignments SET completed_at='2026-09-24 21:10:27' WHERE id=142")
+        before = self.path.read_bytes()
+        with self.assertRaisesRegex(ValueError, 'reviewed_manifest'), \
+             patch.object(issuance, 'lease_jobs', side_effect=AssertionError('write')):
+            issuance.issue(self.path, source, path, issue_production=True, **args)
+        self.assertEqual(before, self.path.read_bytes())
+
+    def test_issuance_partial_witness_failure_rolls_back_lease_and_awards(self):
+        source, path, manifest, args = self.issuance_fixture()
+        before = {table: self.sql('SELECT * FROM ' + table) for table in TABLES}
+        original = issuance.connection
+
+        @contextmanager
+        def fail_witnesses(*a, **kw):
+            with original(*a, **kw) as conn:
+                if kw.get('write'):
+                    class PartialWitnessConnection:
+                        def __getattr__(self, name):
+                            return getattr(conn, name)
+
+                        def executemany(self, sql, rows):
+                            self_outer.assertIn('recognition_award_witnesses', sql)
+                            conn.execute(sql, rows[0])
+                            self_outer.assertEqual(1, conn.execute(
+                                'SELECT COUNT(*) FROM recognition_award_witnesses').fetchone()[0])
+                            raise sqlite3.IntegrityError('injected after first witness')
+                    self_outer = self
+                    yield PartialWitnessConnection()
+                else:
+                    yield conn
+        with patch.object(issuance, 'connection', side_effect=fail_witnesses):
+            with self.assertRaises(sqlite3.DatabaseError):
+                issuance.issue(self.path, source, path, issue_production=True, **args)
+        self.assertEqual(before, {table: self.sql('SELECT * FROM ' + table) for table in TABLES})
+        self.assertEqual(4, issuance.issue(self.path, source, path, issue_production=True, **args)['awards_issued'])
+
+    def test_issuance_partial_cohort_retry_and_unexpected_job(self):
+        source, path, manifest, args = self.issuance_fixture()
+        def fail_second(conn, assignment_id, *a, **kw):
+            if assignment_id == 143:
+                raise RuntimeError('interrupted cohort')
+            return finalize_job(conn, assignment_id, *a, **kw)
+        with patch.object(issuance, 'finalize_job', side_effect=fail_second):
+            with self.assertRaisesRegex(RuntimeError, 'interrupted cohort'):
+                issuance.issue(self.path, source, path, issue_production=True, **args)
+        self.assertEqual([('done', 1), ('pending', 0)], self.sql(
+            'SELECT state,attempts FROM recognition_jobs WHERE assignment_id IN (142,143) ORDER BY assignment_id'))
+        self.assertEqual(2, issuance.issue(self.path, source, path, issue_production=True, **args)['awards_issued'])
+        # Corrupt fixture only: extra orphan job must fail integrity before leasing.
+        conn = sqlite3.connect(self.path)
+        try:
+            conn.execute("INSERT INTO recognition_jobs(assignment_id,rule_key,updated_at_utc) VALUES(999,?,'now')", (RULE_KEY,))
+            conn.commit()
+        finally:
+            conn.close()
+        with self.assertRaisesRegex(ValueError, 'foreign_key_check'), \
+             patch.object(issuance, 'lease_jobs', side_effect=AssertionError('write')):
+            issuance.issue(self.path, source, path, issue_production=True, **args)
+
+    def test_issuance_rejects_unexpected_award_trigger_before_writes(self):
+        source, path, manifest, args = self.issuance_fixture()
+        self.sql("CREATE TRIGGER unwanted AFTER INSERT ON recognition_awards BEGIN "
+                 "UPDATE community_reviewers SET display_name='changed'; END")
+        before = self.path.read_bytes()
+        with self.assertRaisesRegex(ValueError, 'unexpected_capture_trigger'), \
+             patch.object(issuance, 'lease_jobs', side_effect=AssertionError('write')):
+            issuance.issue(self.path, source, path, issue_production=True, **args)
+        self.assertEqual(before, self.path.read_bytes())
+
+    def test_production_binding_rejects_rehearsal_copy_host_and_replacement(self):
+        source, path, manifest, args = self.issuance_fixture()
+        original_binding = self.binding_path.read_text(encoding='utf-8')
+        working = self.path.parent / 'recognition-working.db'
+        working.write_bytes(self.path.read_bytes())
+        before = working.read_bytes()
+        with self.assertRaisesRegex(ValueError, 'unauthorized_production_target'):
+            issuance.issue(working, source, path, issue_production=True, **args)
+        self.assertEqual(before, working.read_bytes())
+        for key, value in (('hostname', 'not-this-host'), ('environment', 'rehearsal'), ('inode', -1)):
+            changed = json.loads(original_binding)
+            changed[key] = value
+            self.binding_path.write_text(canonical(changed), encoding='utf-8')
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, 'unauthorized_production_target'):
+                issuance.issue(self.path, source, path, issue_production=True, **args)
+        self.binding_path.write_text(original_binding, encoding='utf-8')
+        result = issuance.issue(self.path, source, path, **args)
+        self.assertEqual(str(self.path.resolve()), result['target'])
+        self.assertEqual(manifest['candidates'], result['expected_candidates'])
+        self.assertEqual(55, result['expected_jobs'])
+        self.assertEqual('production', result['environment'])
+
+    def test_issuance_accepts_unrelated_live_drift_and_preserves_it(self):
+        source, path, manifest, args = self.issuance_fixture()
+        self.sql("INSERT INTO community_reviewers VALUES(9,'new profile')")
+        self.review(300, timestamp='2026-10-01T00:00:00Z')
+        self.sql('UPDATE stop_review_assignments SET reviewer_id=9 WHERE id=300')
+        self.sql('UPDATE stop_observations SET reviewer_id=9 WHERE assignment_id=300')
+        self.sql("UPDATE community_reviewers SET display_name='updated unrelated profile' WHERE id=9")
+        self.sql('CREATE TABLE unrelated_application_data(value TEXT)')
+        self.sql("INSERT INTO unrelated_application_data VALUES('new live data')")
+        with connection(self.path) as conn:
+            before = rehearsal.application_fingerprint(conn)
+        result = issuance.issue(self.path, source, path, issue_production=True, **args)
+        self.assertEqual(4, result['awards_total'])
+        with connection(self.path) as conn:
+            self.assertEqual(before, rehearsal.application_fingerprint(conn))
+
+    def test_issuance_pins_all_candidate_identity_fields(self):
+        source, path, manifest, args = self.issuance_fixture()
+        before = self.path.read_bytes()
+        for field in ('reviewer_id', 'tier_key', 'earned_at_utc', 'rule_key',
+                      'assignment_id', 'observation_id', 'physical_stop_id'):
+            changed = json.loads(canonical(manifest))
+            candidate = changed['candidates'][0]
+            if field in ('assignment_id', 'observation_id', 'physical_stop_id'):
+                candidate['evidence']['witnesses'][0][field] += 1
+            else:
+                candidate[field] = 99 if field == 'reviewer_id' else 'changed'
+            path.write_text(canonical(changed), encoding='utf-8')
+            changed_args = dict(args, manifest_sha256=rehearsal.file_hash(path))
+            self.write_issuance_binding(changed_args)
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, 'unexpected_candidate_set'), \
+                 patch.object(issuance, 'lease_jobs', side_effect=AssertionError('first write reached')):
+                issuance.issue(self.path, source, path, issue_production=True, **changed_args)
+            self.assertEqual(before, self.path.read_bytes())
+
+    def test_issuance_rejects_pinned_historical_row_mutations(self):
+        source, path, manifest, args = self.issuance_fixture()
+        for statement in (
+            "UPDATE community_reviewers SET display_name='historical owner changed' WHERE id=1",
+            'UPDATE stop_review_assignments SET reviewer_id=2 WHERE id=142',
+            'UPDATE stop_observations SET physical_stop_id=143 WHERE assignment_id=142',
+            "UPDATE stop_observations SET observed_at='changed' WHERE assignment_id=142",
+        ):
+            backup = self.path.read_bytes()
+            self.sql(statement)
+            with self.subTest(statement=statement), self.assertRaises(ValueError), \
+                 patch.object(issuance, 'lease_jobs', side_effect=AssertionError('first write reached')):
+                issuance.issue(self.path, source, path, issue_production=True, **args)
+            self.path.write_bytes(backup)
+
+    def test_issuance_expired_lease_refused_and_inflight_expiry_rolls_back(self):
+        source, path, manifest, args = self.issuance_fixture()
+        backup = self.path.read_bytes()
+        self.sql("UPDATE recognition_jobs SET state='leased',attempts=1,lease_token='old',"
+                 "lease_until_utc='2000-01-01T00:00:00Z' WHERE assignment_id=142")
+        with self.assertRaisesRegex(ValueError, 'unexpected_job_state'):
+            issuance.issue(self.path, source, path, issue_production=True, **args)
+        self.path.write_bytes(backup)
+
+        def expire(conn, *a, **kw):
+            jobs = lease_jobs(conn, *a, **kw)
+            conn.execute("UPDATE recognition_jobs SET lease_until_utc='2000-01-01T00:00:00Z' WHERE assignment_id=?",
+                         (jobs[0]['assignment_id'],))
+            return jobs
+        with patch.object(issuance, 'lease_jobs', side_effect=expire), self.assertRaisesRegex(ValueError, 'stale_job_lease'):
+            issuance.issue(self.path, source, path, issue_production=True, **args)
+        self.assertEqual(backup, self.path.read_bytes())
+
+    def test_issuance_later_award_failure_rolls_back_entire_job(self):
+        source, path, manifest, args = self.issuance_fixture()
+        before = self.path.read_bytes()
+        calls = []
+        def fail_later(conn, award_id):
+            result = check_award_integrity(conn, award_id)
+            calls.append(award_id)
+            if len(calls) == 2:
+                self.assertEqual(2, conn.execute('SELECT COUNT(*) FROM recognition_awards').fetchone()[0])
+                self.assertEqual(25, conn.execute('SELECT COUNT(*) FROM recognition_award_witnesses').fetchone()[0])
+                raise ValueError('later award injected failure')
+            return result
+        with patch('src.review.recognition.processing.check_award_integrity', side_effect=fail_later), \
+             self.assertRaisesRegex(ValueError, 'later award injected'):
+            issuance.issue(self.path, source, path, issue_production=True, **args)
+        self.assertEqual(before, self.path.read_bytes())
+
+    def test_issuance_rechecks_cohort_and_schema_before_first_write(self):
+        source, path, manifest, args = self.issuance_fixture()
+        for change in ('cohort', 'schema'):
+            backup = self.path.read_bytes()
+            def race(event, *a, **kw):
+                if event == 'issuance-authorization-boundary':
+                    if change == 'cohort':
+                        self.sql("UPDATE community_reviewers SET display_name='changed after verification' WHERE id=1")
+                    else:
+                        self.sql("CREATE TRIGGER racing AFTER INSERT ON recognition_awards BEGIN SELECT 1; END")
+            with self.subTest(change=change), patch.object(issuance, 'announce', side_effect=race), \
+                 patch.object(issuance, 'lease_jobs', side_effect=AssertionError('first write reached')), \
+                 self.assertRaisesRegex(ValueError, 'historical_cohort_changed|schema_changed'):
+                issuance.issue(self.path, source, path, issue_production=True, **args)
+            self.assertEqual([(0,)], self.sql('SELECT COUNT(*) FROM recognition_awards'))
+            self.path.write_bytes(backup)
+
+    def test_issuance_writer_has_no_full_application_or_integrity_scan(self):
+        source, path, manifest, args = self.issuance_fixture()
+        original = issuance.connection
+        statements = []
+        @contextmanager
+        def trace(*a, **kw):
+            with original(*a, **kw) as conn:
+                if kw.get('write'):
+                    conn.set_trace_callback(statements.append)
+                yield conn
+        with patch.object(issuance, 'connection', side_effect=trace), \
+             patch.object(rehearsal, 'application_fingerprint', side_effect=AssertionError('whole application scan')):
+            issuance.issue(self.path, source, path, issue_production=True, **args)
+        self.assertFalse(any('PRAGMA integrity_check' in s or 'PRAGMA foreign_key_check' in s for s in statements))
+        self.assertTrue(any('BEGIN IMMEDIATE' in s for s in statements))
+
+    def test_issuance_source_snapshot_race_rejected_before_write(self):
+        source, path, manifest, args = self.issuance_fixture()
+        before = self.path.read_bytes()
+        def race(event, *a, **kw):
+            if event == 'issuance-authorization-boundary':
+                with source.open('ab') as stream:
+                    stream.write(b'changed snapshot')
+        with patch.object(issuance, 'announce', side_effect=race), \
+             patch.object(issuance, 'lease_jobs', side_effect=AssertionError('first write reached')), \
+             self.assertRaisesRegex(ValueError, 'source_snapshot_changed'):
+            issuance.issue(self.path, source, path, issue_production=True, **args)
+        self.assertEqual(before, self.path.read_bytes())
+
+    def test_issuance_cli_reports_partial_progress_after_committed_job(self):
+        source, path, manifest, args = self.issuance_fixture()
+        def fail_second(conn, assignment_id, *a, **kw):
+            if assignment_id == 143:
+                raise ValueError('second job failed')
+            return finalize_job(conn, assignment_id, *a, **kw)
+        output = io.StringIO()
+        argv = ['--production-db', str(self.path), '--source-snapshot', str(source), '--manifest', str(path),
+                '--manifest-sha256', args['manifest_sha256'], '--source-sha256', args['source_sha256'],
+                '--expected-excluded', '1', '--issue-production']
+        with patch.object(issuance, 'finalize_job', side_effect=fail_second), redirect_stderr(output), \
+             self.assertRaises(SystemExit) as stopped:
+            issuance.main(argv)
+        self.assertEqual(1, stopped.exception.code)
+        result = json.loads(output.getvalue())
+        self.assertEqual('second job failed', result['error'])
+        self.assertEqual(2, result['partial_progress']['awards_total'])
+        self.assertIn(dict(state='done', attempts=1, count=1), result['partial_progress']['jobs'])
+        self.assertTrue(any(c.args[0] == 'job-committed' for c in self.announcements.call_args_list))
+        self.assertTrue(any(c.args[0] == 'issuance-authorization-boundary' for c in self.announcements.call_args_list))
+
+    def test_issuance_hard_termination_recovery_only_then_retry(self):
+        source, path, manifest, args = self.issuance_fixture()
+        code = """
+import os, sys
+from src.review.recognition.schema import connection
+from src.review.recognition import RecognitionGate
+from src.review.recognition.processing import lease_jobs, prepare_evaluation, finalize_job
+p = prepare_evaluation(sys.argv[1], 1, 'explorer:v1')
+with connection(sys.argv[1], write=True) as c:
+    c.execute('PRAGMA cache_size=1')
+    c.execute('BEGIN IMMEDIATE')
+    g=RecognitionGate(issuance=True)
+    j=lease_jobs(c,'explorer:v1',gate=g,limit=1)[0]
+    finalize_job(c,j['assignment_id'],j['lease_token'],'explorer:v1',p,gate=g)
+    # Force dirty pages into the DB while the rollback journal protects them.
+    c.execute("UPDATE community_reviewers SET display_name=? WHERE id=1", ('x'*200000,))
+    os._exit(73)
+"""
+        child = subprocess.run([sys.executable, '-B', '-c', code, str(self.path)], capture_output=True, timeout=30)
+        self.assertEqual(73, child.returncode, child.stderr)
+        journal = Path(str(self.path) + '-journal')
+        self.assertTrue(journal.exists())
+        with self.assertRaisesRegex(ValueError, 'offline_copy_required'):
+            issuance.issue(self.path, source, path, **args)
+        with patch.object(issuance, 'lease_jobs', side_effect=AssertionError('recovery cannot issue')):
+            result = issuance.issue(self.path, source, path, recover_production=True, **args)
+        self.assertFalse(journal.exists())
+        self.assertEqual('recover-production', result['mode'])
+        self.assertEqual(0, result['awards_total'])
+        self.assertTrue(all(j['state'] == 'pending' and j['attempts'] == 0 for j in result['jobs']))
+        self.assertEqual(4, issuance.issue(self.path, source, path, issue_production=True, **args)['awards_total'])
+        with self.assertRaisesRegex(ValueError, 'recovery_cannot_issue'):
+            issuance.issue(self.path, source, path, issue_production=True, recover_production=True, **args)
+
+    def rehearsal_fixture(self):
+        for assignment in range(142, 197):
+            self.review(assignment, timestamp="2026-09-23 21:10:27")
+        self.sql("INSERT INTO stop_review_assignments VALUES(210,142,1,'assigned',NULL)")
+        source = self.path.parent / "snapshot.db"
+        source.write_bytes(self.path.read_bytes())
+        migrate(self.path, apply=True)
+        manifest = dry_run(self.path, RULE_KEY, after_assignment=141, through_assignment=210,
+                           sqlite_utc_provenance="synthetic-fixture-current-timestamp")
+        path = self.path.parent / "reviewed.json"
+        path.write_text(canonical(manifest), encoding="utf-8")
+        arguments = dict(source_sha256=rehearsal.file_hash(source),
+                         manifest_sha256=rehearsal.file_hash(path), expected_excluded=1)
+        return source, path, manifest, arguments
+
+    def test_rehearsal_default_is_read_only_and_cli_has_no_issuance(self):
+        source, path, manifest, arguments = self.rehearsal_fixture()
+        before = self.path.read_bytes()
+        with patch.object(rehearsal, "capture_batch", side_effect=AssertionError("write")):
+            result = rehearsal.rehearse(source, self.path, path, **arguments)
+        self.assertEqual("empty", result["state"])
+        self.assertEqual(before, self.path.read_bytes())
+        command = [sys.executable, "-B", str(Path(rehearsal.__file__)),
+                   "--source-snapshot", str(source), "--disposable-target", str(self.path),
+                   "--manifest", str(path), "--source-sha256", arguments["source_sha256"],
+                   "--manifest-sha256", arguments["manifest_sha256"], "--expected-excluded", "1"]
+        result = subprocess.run(command, capture_output=True, text=True, timeout=20)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("verify-only", json.loads(result.stdout)["mode"])
+        result = subprocess.run(command + ["--issuance"], capture_output=True, text=True, timeout=20)
+        self.assertEqual(2, result.returncode)
+        self.assertEqual(before, self.path.read_bytes())
+
+    def test_rehearsal_paths_and_uninitialized_target_rejected(self):
+        source, path, manifest, arguments = self.rehearsal_fixture()
+        alias = source.parent / "hardlink.db"
+        os.link(source, alias)
+        for target in (source, source.parent / "." / source.name, alias):
+            with self.subTest(target=target), self.assertRaisesRegex(ValueError, "source_target_alias"):
+                rehearsal.rehearse(source, target, path, **arguments)
+        missing = source.parent / "missing.db"
+        with self.assertRaises(FileNotFoundError):
+            rehearsal.rehearse(source, missing, path, **arguments)
+        self.assertFalse(missing.exists())
+        uninitialized = source.parent / "uninitialized.db"
+        uninitialized.write_bytes(source.read_bytes())
+        with self.assertRaisesRegex(ValueError, "initialized_schema_required"):
+            rehearsal.rehearse(source, uninitialized, path, **arguments)
+        with patch.dict(os.environ, {"DMV_BUS_STOPS_DB": str(self.path)}):
+            with self.assertRaisesRegex(ValueError, "application_target_forbidden"):
+                rehearsal.rehearse(source, self.path, path, **arguments)
+
+    def test_rehearsal_capture_55_pending_only_and_exact_retry(self):
+        source, path, manifest, arguments = self.rehearsal_fixture()
+        source_before = source.read_bytes()
+        with patch.object(rehearsal, "capture_batch", wraps=capture_batch) as batch, \
+             patch("src.review.recognition.processing.lease_jobs", side_effect=AssertionError("lease")), \
+             patch("src.review.recognition.processing.finalize_job", side_effect=AssertionError("issue")):
+            result = rehearsal.rehearse(source, self.path, path, capture_disposable=True, **arguments)
+            self.assertEqual(RecognitionGate(capture=True, issuance=False), batch.call_args.kwargs["gate"])
+        self.assertEqual("captured", result["state"])
+        before = {table: self.sql("SELECT * FROM " + table) for table in TABLES}
+        rehearsal.rehearse(source, self.path, path, capture_disposable=True, **arguments)
+        self.assertEqual(before, {table: self.sql("SELECT * FROM " + table) for table in TABLES})
+        self.assertEqual(55, len(before["recognition_completions"]))
+        self.assertEqual([(55,)], self.sql("SELECT COUNT(*) FROM recognition_jobs WHERE state='pending' "
+                         "AND attempts=0 AND lease_token IS NULL AND lease_until_utc IS NULL"))
+        self.assertEqual([], before["recognition_awards"])
+        self.assertEqual([], before["recognition_award_witnesses"])
+        self.assertEqual(1, len(before["recognition_runs"]))
+        self.assertEqual(source_before, source.read_bytes())
+        self.assertTrue(dry_run(self.path, RULE_KEY, after_assignment=141, through_assignment=210,
+                               sqlite_utc_provenance=manifest["sqlite_utc_provenance"])["candidates"])
+        self.assertEqual(RecognitionGate(), DISABLED)
+
+    def test_rehearsal_tampered_manifest_and_changed_source_rejected(self):
+        source, path, manifest, arguments = self.rehearsal_fixture()
+        before = self.path.read_bytes()
+        for field, value in (("rule_sha256", "wrong"), ("excluded", []), ("source_sha256", "wrong"),
+                             ("candidates", [{}]), ("qualified", []), ("source", []),
+                             ("cohort", dict(manifest["cohort"], has_more=True)),
+                             ("cohort", dict(manifest["cohort"], after_assignment=142)),
+                             ("excluded", [dict(manifest["excluded"][0], reason="fabricated")])):
+            tampered = dict(manifest, **{field: value})
+            path.write_text(canonical(tampered), encoding="utf-8")
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                rehearsal.rehearse(source, self.path, path, capture_disposable=True,
+                                   **dict(arguments, manifest_sha256=rehearsal.file_hash(path)))
+        self.assertEqual(before, self.path.read_bytes())
+        path.write_text(canonical(manifest) + " ", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "manifest_hash_mismatch"):
+            rehearsal.rehearse(source, self.path, path, **arguments)
+        path.write_text(canonical(manifest), encoding="utf-8")
+        self.sql("UPDATE stop_review_assignments SET completed_at='2026-09-24 00:00:00' WHERE id=142")
+        with self.assertRaisesRegex(ValueError, "source_target_data_mismatch"):
+            rehearsal.rehearse(source, self.path, path, capture_disposable=True, **arguments)
+        with self.assertRaisesRegex(ValueError, "source_hash_mismatch"):
+            rehearsal.rehearse(source, self.path, path, **dict(arguments, source_sha256="0" * 64))
+
+    def test_rehearsal_failure_rolls_back_completion_job_and_run(self):
+        source, path, manifest, arguments = self.rehearsal_fixture()
+        before = self.path.read_bytes()
+        with patch("src.review.recognition.backfill.record_run", side_effect=RuntimeError("injected")):
+            with self.assertRaisesRegex(RuntimeError, "injected"):
+                rehearsal.rehearse(source, self.path, path, capture_disposable=True, **arguments)
+        self.assertEqual(before, self.path.read_bytes())
+        for table in ("recognition_completions", "recognition_jobs", "recognition_runs"):
+            self.assertEqual([(0,)], self.sql("SELECT COUNT(*) FROM " + table))
+        rehearsal.rehearse(source, self.path, path, capture_disposable=True, **arguments)
+
+    def test_rehearsal_refuses_unexpected_jobs_and_missing_protection(self):
+        source, path, manifest, arguments = self.rehearsal_fixture()
+        rehearsal.rehearse(source, self.path, path, capture_disposable=True, **arguments)
+        self.sql("UPDATE recognition_jobs SET attempts=1 WHERE assignment_id=142")
+        with self.assertRaisesRegex(ValueError, "job_state_mismatch"):
+            rehearsal.rehearse(source, self.path, path, capture_disposable=True, **arguments)
+        self.sql("DROP TRIGGER recognition_completion_sequence")
+        with self.assertRaisesRegex(ValueError, "recognition_protection_missing"):
+            rehearsal.rehearse(source, self.path, path, **arguments)
+
+    def test_rehearsal_rejects_replaced_trigger_before_capture(self):
+        source, path, manifest, arguments = self.rehearsal_fixture()
+        self.sql("DROP TRIGGER recognition_completion_sequence")
+        self.sql("CREATE TRIGGER recognition_completion_sequence BEFORE INSERT ON recognition_completions "
+                 "BEGIN SELECT 1; END")
+        before = self.path.read_bytes()
+        for apply in (False, True):
+            with self.subTest(capture=apply), patch.object(rehearsal, "capture_batch") as batch:
+                with self.assertRaisesRegex(ValueError, "recognition_protection_mismatch"):
+                    rehearsal.rehearse(source, self.path, path, capture_disposable=apply, **arguments)
+                batch.assert_not_called()
+            self.assertEqual(before, self.path.read_bytes())
+
+    def test_rehearsal_rejects_extra_trigger_on_each_capture_table_before_writes(self):
+        source, path, manifest, arguments = self.rehearsal_fixture()
+        source_before = source.read_bytes()
+        for table in ("recognition_completions", "recognition_jobs", "recognition_runs"):
+            self.sql(f"CREATE TRIGGER unexpected_mutation AFTER INSERT ON {table} "
+                     "BEGIN UPDATE community_reviewers SET display_name='changed'; END")
+            before = self.path.read_bytes()
+            for apply in (False, True):
+                with self.subTest(table=table, capture=apply), patch.object(rehearsal, "capture_batch") as batch:
+                    with self.assertRaisesRegex(ValueError, "unexpected_capture_trigger"):
+                        rehearsal.rehearse(source, self.path, path, capture_disposable=apply, **arguments)
+                    batch.assert_not_called()
+                self.assertEqual(before, self.path.read_bytes())
+                self.assertEqual(source_before, source.read_bytes())
+            self.sql("DROP TRIGGER unexpected_mutation")
+
+    def test_rehearsal_fingerprint_is_lossless_and_deterministic(self):
+        with sqlite3.connect(":memory:") as conn:
+            conn.execute("CREATE TABLE values_to_compare(value)")
+            fingerprints = []
+            for value in (None, 1, 1.0, "1", b"1", "prefix\x00one", "prefix\x00two",
+                          b"prefix\x00one", b"prefix\x00two"):
+                conn.execute("DELETE FROM values_to_compare")
+                conn.execute("INSERT INTO values_to_compare VALUES(?)", (value,))
+                result = rehearsal.application_fingerprint(conn)
+                self.assertEqual(result, rehearsal.application_fingerprint(conn))
+                fingerprints.append(canonical(result))
+            self.assertEqual(len(fingerprints), len(set(fingerprints)))
+            conn.execute("DELETE FROM values_to_compare")
+            conn.executemany("INSERT INTO values_to_compare VALUES(?)", [("a\x00b",), (b"a\x00b",)])
+            original = rehearsal.application_fingerprint(conn)
+            conn.execute("DELETE FROM values_to_compare")
+            conn.executemany("INSERT INTO values_to_compare VALUES(?)", [(b"a\x00b",), ("a\x00b",)])
+            self.assertEqual(original, rehearsal.application_fingerprint(conn))
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
