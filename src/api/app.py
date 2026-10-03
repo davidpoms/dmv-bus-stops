@@ -38,6 +38,8 @@ from src.assessment.interpretation import (
 
 from src.review.consensus import calculate_stop_consensus
 from src.review.progress import build_progress
+from src.review.recognition.achievements import build_achievements
+from src.review.recognition.qualification import Quarantined
 from src.review.recent_activity import build_recent_activity
 from src.review.context import build_review_context
 from src.review.auth import (
@@ -5139,6 +5141,30 @@ def reviewer_progress_api():
         app.logger.exception("Private reviewer progress is unavailable")
         return response({"error": "Private progress is temporarily unavailable.",
                          "code": "progress_unavailable"}, 503)
+
+
+@app.route("/api/reviewer/achievements")
+def reviewer_achievements_api():
+    def response(payload, status=200):
+        result = jsonify(payload)
+        result.status_code = status
+        result.headers["Cache-Control"] = "private, no-store"
+        return result
+
+    reviewer_id = session.get("authenticated_reviewer_id")
+    reviewer_key = session.get("reviewer_key")
+    if not reviewer_id or not reviewer_key:
+        return response({"available": False, "error": "Sign in to view your achievements."}, 401)
+    if request.args or request.get_data():
+        return response({"available": False, "error": "Achievements do not accept parameters."}, 400)
+    try:
+        return response(build_achievements(DATABASE_PATH, reviewer_id, reviewer_key))
+    except PermissionError:
+        return response({"available": False, "error": "Signed-in reviewer profile was not found."}, 403)
+    except (Quarantined, sqlite3.Error, ValueError):
+        app.logger.exception("Private reviewer achievements are unavailable")
+        return response({"available": False, "error": "Achievements are temporarily unavailable.",
+                         "code": "achievements_unavailable"}, 503)
 
 
 @app.route("/api/reviewer/recent-activity")
