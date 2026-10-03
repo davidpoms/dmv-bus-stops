@@ -68,6 +68,15 @@ class HtmlSafetyTests(unittest.TestCase):
     def test_private_progress_authentication_and_failures(self):
         self.check_case('progress_auth')
 
+    def test_achievements_explanation_safe_titles_and_dates(self):
+        self.check_case('achievements_content')
+
+    def test_achievements_empty_failure_and_signed_out_states(self):
+        self.check_case('achievements_states')
+
+    def test_achievements_private_lifecycle_and_stale_requests(self):
+        self.check_case('achievements_privacy_lifecycle')
+
     def test_private_progress_counts_milestones_and_safe_geography(self):
         self.check_case('progress_content')
 

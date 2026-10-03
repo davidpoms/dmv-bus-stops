@@ -175,8 +175,13 @@ td, th {
     margin-bottom:25px;
 }
 
-#communityProfileCard, #privateProgressCard, #reviewerActivityCard {
+#communityProfileCard, #privateProgressCard, #reviewerActivityCard, #privateAchievementsCard {
     overflow-wrap: anywhere;
+}
+
+#privateAchievementsCard summary {
+    padding: 12px 0;
+    cursor: pointer;
 }
 
 #communityProfileCard .dashboard-button, #reviewerActivityCard .dashboard-button {

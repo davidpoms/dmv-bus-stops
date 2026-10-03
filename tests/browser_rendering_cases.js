@@ -214,19 +214,23 @@
             completed_at: `2026-10-01T12:0${4-i}:00Z`
         }))};
     }
-    async function progressPage(page, signedIn, payload, status = 200, authStatus = 200, activityResponse = null) {
+    async function progressPage(page, signedIn, payload, status = 200, authStatus = 200, activityResponse = null, achievementsResponse = null) {
         const {doc} = environment();
         const template = sources[page + '.html'];
         doc.documentElement.innerHTML = template.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
         const calls = [];
         const handlers = {};
-        const state = {signedIn, progress: null, activity: activityResponse, visibility: 'visible', authStatus};
+        const state = {signedIn, progress: null, activity: activityResponse, achievements: achievementsResponse, visibility: 'visible', authStatus};
         Object.defineProperty(doc, 'visibilityState', {get: () => state.visibility});
         doc.addEventListener = (name, handler) => { handlers[name] = handler; };
         const win = {addEventListener: (name, handler) => { handlers[name] = handler; },
             location: {assign: () => {}}};
         const fetch = async url => {
             calls.push(url);
+            if (url === '/api/reviewer/achievements') {
+                return state.achievements ? state.achievements() :
+                    {ok: true, status: 200, json: async () => ({available: true, achievements: []})};
+            }
             if (url === '/api/reviewer/recent-activity') {
                 if (state.activity) return state.activity();
                 return {ok: true, status: 200, json: async () => activityData()};
@@ -504,7 +508,7 @@
                     const second = resume(firstEvent === 'visibility' ? 'pageshow' : 'visibility');
                     await Promise.all([first, second]);
                     assert(JSON.stringify(env.calls.slice(before)) === JSON.stringify([
-                        '/api/reviewer/status', '/api/reviewer/progress', '/api/reviewer/recent-activity'
+                        '/api/reviewer/status', '/api/reviewer/progress', '/api/reviewer/recent-activity', '/api/reviewer/achievements'
                     ]), 'Restoration duplicated authentication/progress/activity requests');
                     assert(env.doc.getElementById('recentActivityContent').querySelectorAll('li').length === 5,
                         'Authenticated tab return did not restore activity');
@@ -512,6 +516,96 @@
                 }
             }
         }
+    });
+    function awardsResponse() {
+        return {ok: true, status: 200, json: async () => ({available: true, achievements: [5, 20].map(count => ({
+            family: 'explorer', scope_key: 'global', tier_key: String(count), numerator: count,
+            earned_at_utc: '2026-09-29T12:34:56Z'
+        }))})};
+    }
+    await test('achievements_content', async () => {
+        const env = await progressPage('reviewer_profile', true, progressData(), 200, 200, null, awardsResponse);
+        const card = env.doc.getElementById('privateAchievementsCard');
+        const content = env.doc.getElementById('privateAchievementsContent');
+        assert(!card.hidden, 'Achievements hidden');
+        assert(card.querySelector('details > summary').textContent === 'How recognition works', 'Native disclosure missing');
+        assert(!card.querySelector('details').open, 'Disclosure not compact by default');
+        literal(card, 'Currently available: Explorer');
+        literal(card, 'More recognition categories may be introduced as their rules and data requirements are finalized.');
+        literal(card, 'Explorer milestones are 5, 20, 50, and 100 distinct stops.');
+        literal(card, 'Qualifying historical reviews can count, including reviews of stops that are no longer active.');
+        literal(card, 'Current progress and permanent achievements are separate: progress can change, while an earned award is permanent.');
+        for (const count of [5, 20]) {
+            literal(content, `Explorer — ${count} stops`);
+            literal(content, `Reviewed ${count} distinct qualifying stops`);
+        }
+        const formatter = new Intl.DateTimeFormat(undefined, {year: 'numeric', month: 'short', day: 'numeric'});
+        assert(content.querySelectorAll('time').length === 2, 'Award dates missing');
+        for (const time of content.querySelectorAll('time')) {
+            assert(time.dateTime === '2026-09-29T12:34:56Z', 'Earned timestamp altered');
+            assert(time.textContent === formatter.format(new Date(time.dateTime)), 'Date not reviewer-facing');
+        }
+        assert(!content.textContent.includes('global'), 'Internal scope exposed');
+        assert(env.calls.filter(url => url === '/api/reviewer/achievements').length === 1, 'Duplicate achievements fetch');
+        for (const hostile of fixtures) {
+            const safe = await progressPage('reviewer_profile', true, progressData(), 200, 200, null, () => ({
+                ok: true, status: 200, json: async () => ({available: true, achievements: [{
+                    family: 'explorer', tier_key: hostile, numerator: hostile, earned_at_utc: '2026-09-29T12:34:56Z'
+                }]})
+            }));
+            const text = safe.doc.getElementById('privateAchievementsContent');
+            literal(text, hostile);
+            assert(!text.querySelector('img, script, b, [onerror]'), 'Award values became markup');
+        }
+    });
+    await test('achievements_states', async () => {
+        const signedOut = await progressPage('reviewer_profile', false, progressData());
+        assert(!signedOut.calls.includes('/api/reviewer/achievements'), 'Signed-out awards fetched');
+        assert(signedOut.doc.getElementById('privateAchievementsCard').hidden, 'Signed-out awards visible');
+        const empty = await progressPage('reviewer_profile', true, progressData());
+        literal(empty.doc.getElementById('privateAchievementsContent'), 'No achievements yet. Complete qualifying reviews at 5 distinct physical stops');
+        for (const status of [401, 403, 503, 'network']) {
+            const env = await progressPage('reviewer_profile', true, progressData(), 200, 200, null, () => {
+                if (status === 'network') throw new Error('Offline');
+                return {ok: false, status};
+            });
+            literal(env.doc.getElementById('privateAchievementsContent'), [401, 403].includes(status) ? 'Sign in again' : 'temporarily unavailable');
+            literal(env.doc.getElementById('stats'), '12');
+            assert(env.doc.querySelector('a[href="/dashboard"]'), 'Navigation lost');
+        }
+    });
+    await test('achievements_privacy_lifecycle', async () => {
+        const env = await progressPage('reviewer_profile', true, progressData(), 200, 200, null, awardsResponse);
+        const content = env.doc.getElementById('privateAchievementsContent');
+        const card = env.doc.getElementById('privateAchievementsCard');
+        literal(content, 'Explorer — 20 stops');
+        env.handlers.pagehide();
+        assert(card.hidden && content.textContent === '', 'Exit retained awards');
+        await env.handlers.pageshow({persisted: true});
+        literal(content, 'Explorer — 20 stops');
+        let release;
+        env.state.achievements = () => new Promise(resolve => { release = resolve; });
+        env.handlers.pagehide();
+        const pending = env.handlers.pageshow({persisted: true});
+        for (let i = 0; i < 12; i++) await Promise.resolve();
+        literal(content, 'Loading achievements');
+        env.state.visibility = 'hidden';
+        env.handlers.visibilitychange();
+        env.state.signedIn = false;
+        env.state.visibility = 'visible';
+        const before = env.calls.length;
+        await env.handlers.visibilitychange();
+        assert(JSON.stringify(env.calls.slice(before)) === JSON.stringify(['/api/reviewer/status']), 'Auth loss fetched awards');
+        release(awardsResponse());
+        await pending;
+        assert(card.hidden && content.textContent === '', 'Stale awards restored');
+        env.state.signedIn = true;
+        env.state.achievements = awardsResponse;
+        env.handlers.pagehide();
+        await env.handlers.pageshow({persisted: true});
+        literal(content, 'Explorer — 5 stops');
+        env.doc.querySelector('#accountStatus button').click();
+        assert(card.hidden && content.textContent === '', 'Logout retained awards');
     });
     // Encode results, not fixture markup, into the only active document.
     document.getElementById('results').textContent = [...new TextEncoder().encode(JSON.stringify(results))]

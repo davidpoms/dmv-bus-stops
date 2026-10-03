@@ -35,6 +35,29 @@
 <p><a href="/review/start?mode=opportunity" class="dashboard-button">Continue reviewing</a></p>
 </div>
 
+<div class="card volunteer-card" id="privateAchievementsCard" hidden>
+<h2>Your Achievements</h2>
+<p><small>Only you can see your recognition history.</small></p>
+<div id="privateAchievementsContent" role="status">Loading achievements...</div>
+<p><strong>Currently available: Explorer</strong></p>
+<p>More recognition categories may be introduced as their rules and data requirements are finalized.</p>
+<details>
+<summary>How recognition works</summary>
+<p>Recognition celebrates meaningful reviewing milestones. Your progress is based on completed community reviews that meet the recognition rules; repeated reviews of the same physical stop don't multiply your distinct-stop count.</p>
+<h3>Explorer</h3>
+<p>Explore distinct physical stops through completed reviews. Explorer milestones are 5, 20, 50, and 100 stops. Once a milestone is permanently earned, it remains part of your private recognition history.</p>
+<p>Keep reviewing eligible stops to reach the next Explorer milestone.</p>
+<ul>
+<li>Explorer is earned through completed qualifying reviews at distinct physical stops.</li>
+<li>Explorer milestones are 5, 20, 50, and 100 distinct stops.</li>
+<li>Reviewing the same physical stop again does not create another distinct-stop credit.</li>
+<li>Qualifying historical reviews can count, including reviews of stops that are no longer active.</li>
+<li>Earned awards remain part of your private recognition history.</li>
+<li>Current progress and permanent achievements are separate: progress can change, while an earned award is permanent.</li>
+</ul>
+</details>
+</div>
+
 <div class="card volunteer-card" id="privateProgressCard" style="display:none;">
 <h2>Your Progress</h2>
 <div id="privateProgressContent" role="status">Loading progress...</div>
@@ -70,6 +93,8 @@ function clearPrivateProgress() {
     document.getElementById("privateProgressContent").replaceChildren();
     document.getElementById("recentActivitySection").hidden = true;
     document.getElementById("recentActivityContent").replaceChildren();
+    document.getElementById("privateAchievementsCard").hidden = true;
+    document.getElementById("privateAchievementsContent").replaceChildren();
 }
 
 function restorePrivateProgress() {
@@ -86,7 +111,7 @@ function restorePrivateProgress() {
             if (!response.ok) return;
             const status = await response.json();
             if (version !== privateProgressVersion || status.signed_in !== true) return;
-            await Promise.all([loadPrivateProgress(version), loadRecentActivity(version)]);
+            await Promise.all([loadPrivateProgress(version), loadRecentActivity(version), loadAchievements(version)]);
         } catch (error) {
             // Keep private content cleared; existing profile sections remain available.
         }
@@ -147,6 +172,7 @@ async function loadProfile() {
         if (document.visibilityState !== "hidden") {
             loadPrivateProgress(version);
             loadRecentActivity(version);
+            loadAchievements(version);
         }
         account.replaceChildren();
         const signedIn = document.createElement("strong");
@@ -185,6 +211,47 @@ async function loadProfile() {
     addStat(stats, "Routes covered", (profileData.stats.routes_covered || []).join(", ") || "None yet");
     addStat(stats, "Stops stewarded", profileData.stats.stewarded_stops);
     renderStewardedStops(profileData.stewarded_stops || []);
+}
+
+async function loadAchievements(version) {
+    const card = document.getElementById("privateAchievementsCard");
+    const content = document.getElementById("privateAchievementsContent");
+    card.hidden = false;
+    content.textContent = "Loading achievements...";
+    try {
+        const response = await fetch("/api/reviewer/achievements");
+        if (version !== privateProgressVersion) return;
+        if (response.status === 401 || response.status === 403) {
+            content.textContent = "Sign in again to view your private achievements.";
+            return;
+        }
+        if (!response.ok) throw new Error("Achievements unavailable");
+        const data = await response.json();
+        if (version !== privateProgressVersion) return;
+        if (data.available !== true || !Array.isArray(data.achievements)) throw new Error("Achievements unavailable");
+        if (!data.achievements.length) {
+            content.textContent = "No achievements yet. Complete qualifying reviews at 5 distinct physical stops to earn your first Explorer milestone.";
+            return;
+        }
+        const result = document.createElement("div");
+        const formatter = new Intl.DateTimeFormat(undefined, {year: "numeric", month: "short", day: "numeric"});
+        for (const award of data.achievements) {
+            const title = document.createElement("h3");
+            title.textContent = award.family === "explorer" ? `Explorer — ${award.tier_key} stops` : "Achievement";
+            const description = document.createElement("p");
+            description.textContent = award.family === "explorer" ? `Reviewed ${award.numerator} distinct qualifying stops` : "Earned recognition";
+            const date = document.createElement("p");
+            const time = document.createElement("time");
+            time.dateTime = award.earned_at_utc;
+            time.textContent = formatter.format(new Date(award.earned_at_utc));
+            date.append(document.createTextNode("Earned "), time);
+            result.append(title, description, date);
+        }
+        content.replaceChildren(result);
+    } catch (error) {
+        if (version !== privateProgressVersion) return;
+        content.textContent = "Achievements are temporarily unavailable. Your profile is still available.";
+    }
 }
 
 async function loadRecentActivity(version) {
