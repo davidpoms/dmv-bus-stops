@@ -213,7 +213,8 @@ The non-secret binding has exactly these fields (template, not runnable values):
   "database": "/REVIEWED/ABSOLUTE/production.db",
   "device": 0,
   "inode": 0,
-  "manifest_sha256": "REVIEWED_MANIFEST_FILE_SHA256",
+  "capture_manifest_sha256": "REVIEWED_CAPTURE_MANIFEST_SHA256",
+  "issuance_manifest_sha256": "REVIEWED_ISSUANCE_MANIFEST_FILE_SHA256",
   "snapshot_sha256": "VERIFIED_SNAPSHOT_FILE_SHA256",
   "review_reference": "INDEPENDENT_TARGET_AND_COHORT_APPROVAL_REFERENCE"
 }
@@ -231,6 +232,20 @@ review. Do not replace a database file while the command is running.
 Verification displays target/environment/host; issuance displays them again
 immediately before its authorization boundary. The binding is rechecked for
 every job. Tests substitute a synthetic binding in temporary fixtures only.
+
+The two manifest hashes authorize distinct artifacts. `capture_manifest_sha256`
+identifies the original immutable 55-completion capture artifact with
+`candidates=[]`; `issuance_manifest_sha256` identifies the separately reviewed
+four-candidate issuance artifact. Both are SHA-256 of the exact original file
+bytes, and comparisons are case-insensitive. Neither hash should be overwritten
+with the other. The legacy single `manifest_sha256` binding field is rejected.
+
+Supply the original capture file with `--capture-manifest`; `--manifest` and
+`--manifest-sha256` continue to refer to issuance. The command verifies the capture
+file against its own binding hash and checks that its parsed contents equal the
+issuance manifest with candidates cleared. This does not change
+`recognition_runs.manifest_sha256` or `run_id`: those remain the canonical JSON
+digest of the original capture manifest, independent of file formatting/newlines.
 
 #### Historical provenance versus live data
 
@@ -257,7 +272,7 @@ integrity/FK scan runs under that writer. The historical row collection has a
 Verification only (replace every placeholder with reviewed values):
 
 ```text
-python -B scripts/active/issue_historical_explorer.py --production-db /absolute/production.db --source-snapshot /absolute/verified-snapshot.db --manifest /absolute/reviewed-four-candidates.json --manifest-sha256 REVIEWED_MANIFEST_FILE_SHA256 --source-sha256 VERIFIED_SNAPSHOT_FILE_SHA256 --expected-excluded REVIEWED_EXCLUSION_COUNT
+python -B scripts/active/issue_historical_explorer.py --production-db /absolute/production.db --source-snapshot /absolute/verified-snapshot.db --capture-manifest /absolute/reviewed-capture.json --manifest /absolute/reviewed-four-candidates.json --manifest-sha256 REVIEWED_ISSUANCE_MANIFEST_FILE_SHA256 --source-sha256 VERIFIED_SNAPSHOT_FILE_SHA256 --expected-excluded REVIEWED_EXCLUSION_COUNT
 ```
 
 The manifest is the reviewed post-capture planner JSON, not the original
@@ -326,7 +341,7 @@ last committed progress events. An error may follow earlier successful commits;
 do not assume it means zero awards. A crash after commit but before output may
 also omit the last event; fresh verification is authoritative.
 
-Privately retain the exact reviewed candidate manifest, snapshot manifest and
+Privately retain both exact reviewed capture and candidate manifests, snapshot manifest and
 snapshot/hash, independently approved binding, verification output, recovery
 output (if applicable), and issuance stdout **and stderr**. The database retains
 immutable award/witness evidence, rule identity and job state, but does not create

@@ -29,9 +29,11 @@ BINDING_PATH = ROOT / "ops" / "recognition-production-binding.json"
 def target_binding(target, manifest_sha256, source_sha256):
     binding = json.loads(BINDING_PATH.read_text(encoding="utf-8"))
     require(isinstance(binding, dict) and set(binding) == {"environment", "hostname", "database", "device", "inode",
-                             "manifest_sha256", "snapshot_sha256", "review_reference"}, "invalid_target_binding")
+                             "capture_manifest_sha256", "issuance_manifest_sha256",
+                             "snapshot_sha256", "review_reference"}, "invalid_target_binding")
     require(all(isinstance(binding[k], str) and binding[k].strip() for k in
-                ("environment", "hostname", "database", "manifest_sha256", "snapshot_sha256", "review_reference"))
+                ("environment", "hostname", "database", "capture_manifest_sha256",
+                 "issuance_manifest_sha256", "snapshot_sha256", "review_reference"))
             and type(binding["device"]) is int and type(binding["inode"]) is int, "invalid_target_binding")
     stat = target.stat()
     require(binding["environment"] == "production" and binding["hostname"] == socket.getfqdn()
@@ -40,7 +42,7 @@ def target_binding(target, manifest_sha256, source_sha256):
             and stat.st_dev == binding["device"] and stat.st_ino == binding["inode"]
             and stat.st_ino != 0 and bool(binding["review_reference"])
             and target.name.lower() != "recognition-working.db", "unauthorized_production_target")
-    require(binding["manifest_sha256"].lower() == manifest_sha256.lower(), "binding_manifest_hash_mismatch")
+    require(binding["issuance_manifest_sha256"].lower() == manifest_sha256.lower(), "binding_manifest_hash_mismatch")
     require(binding["snapshot_sha256"].lower() == source_sha256.lower(), "binding_source_hash_mismatch")
     return binding
 
@@ -127,7 +129,7 @@ def validate_state(conn, manifest):
 
 
 def issue(production_db, source_snapshot, manifest_path, *, manifest_sha256, source_sha256,
-          expected_excluded, issue_production=False, recover_production=False):
+          capture_manifest_path, expected_excluded, issue_production=False, recover_production=False):
     require(not (issue_production and recover_production), "recovery_cannot_issue")
     source = offline_file(source_snapshot)
     target = Path(production_db).resolve(strict=True)
@@ -136,6 +138,12 @@ def issue(production_db, source_snapshot, manifest_path, *, manifest_sha256, sou
     announce("target-verification", binding)
     require(file_hash(source) == source_sha256.lower(), "source_hash_mismatch")
     manifest = read_manifest(manifest_path, manifest_sha256, 55, expected_excluded, expected_candidates=4)
+    require(file_hash(Path(capture_manifest_path)) == binding["capture_manifest_sha256"].lower(),
+            "binding_capture_manifest_hash_mismatch")
+    capture_manifest = read_manifest(capture_manifest_path, binding["capture_manifest_sha256"],
+                                     55, expected_excluded)
+    require(canonical(capture_manifest) == canonical(dict(manifest, candidates=[])),
+            "capture_manifest_mismatch")
     require(manifest["cohort"]["after_assignment"] == 141
             and manifest["cohort"]["through_assignment"] == 210, "historical_cohort_required")
     if recover_production:
@@ -216,6 +224,8 @@ def main(argv=None):
     parser.add_argument("--production-db", type=Path, required=True)
     parser.add_argument("--source-snapshot", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, required=True)
+    parser.add_argument("--capture-manifest", type=Path, required=True,
+                        help="Original reviewed capture manifest file; its exact bytes are hash-checked")
     parser.add_argument("--manifest-sha256", required=True)
     parser.add_argument("--source-sha256", required=True)
     parser.add_argument("--expected-excluded", type=int, required=True)
@@ -227,6 +237,7 @@ def main(argv=None):
     try:
         result = issue(args.production_db, args.source_snapshot, args.manifest,
                        manifest_sha256=args.manifest_sha256, source_sha256=args.source_sha256,
+                       capture_manifest_path=args.capture_manifest,
                        expected_excluded=args.expected_excluded, issue_production=args.issue_production,
                        recover_production=args.recover_production)
     except (ValueError, OSError, sqlite3.Error) as error:

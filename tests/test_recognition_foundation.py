@@ -41,10 +41,15 @@ class RecognitionTests(unittest.TestCase):
         manifest = dry_run(self.path, RULE_KEY, after_assignment=141, through_assignment=210,
                            sqlite_utc_provenance="synthetic-fixture-current-timestamp")
         capture_batch(self.path, manifest, gate=RecognitionGate(capture=True))
+        capture_path = self.path.parent / 'reviewed-capture.json'
+        # File-byte identity deliberately differs from the canonical ledger digest.
+        capture_path.write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+        self.capture_manifest_hash = rehearsal.file_hash(capture_path)
         manifest = dry_run(self.path, RULE_KEY, after_assignment=141, through_assignment=210,
                            sqlite_utc_provenance="synthetic-fixture-current-timestamp")
         path.write_text(canonical(manifest), encoding="utf-8")
-        arguments.update(source_sha256=rehearsal.file_hash(source), manifest_sha256=rehearsal.file_hash(path))
+        arguments.update(source_sha256=rehearsal.file_hash(source), manifest_sha256=rehearsal.file_hash(path),
+                         capture_manifest_path=capture_path)
         self.binding_path = self.path.parent / 'reviewed-binding.json'
         binding_patch = patch.object(issuance, 'BINDING_PATH', self.binding_path)
         binding_patch.start()
@@ -60,19 +65,22 @@ class RecognitionTests(unittest.TestCase):
         stat = self.path.stat()
         self.binding_path.write_text(canonical(dict(environment='production', hostname=issuance.socket.getfqdn(),
             database=str(self.path.resolve()), device=stat.st_dev, inode=stat.st_ino,
-            manifest_sha256=arguments['manifest_sha256'], snapshot_sha256=arguments['source_sha256'],
+            capture_manifest_sha256=self.capture_manifest_hash,
+            issuance_manifest_sha256=arguments['manifest_sha256'], snapshot_sha256=arguments['source_sha256'],
             review_reference='SYNTHETIC TEST AUTHORIZATION ONLY')), encoding='utf-8')
 
     def test_production_binding_accepts_uppercase_stored_hashes(self):
         self.binding_path = self.path.parent / 'reviewed-binding.json'
         manifest_hash = 'abcdef01' * 8
+        self.capture_manifest_hash = ('abcdef23' * 8).upper()
         snapshot_hash = 'fedcba98' * 8
         self.write_issuance_binding(dict(manifest_sha256=manifest_hash.upper(),
                                         source_sha256=snapshot_hash.upper()))
         before = self.binding_path.read_bytes()
         with patch.object(issuance, 'BINDING_PATH', self.binding_path):
             binding = issuance.target_binding(self.path.resolve(), manifest_hash, snapshot_hash)
-            self.assertEqual(manifest_hash.upper(), binding['manifest_sha256'])
+            self.assertEqual(manifest_hash.upper(), binding['issuance_manifest_sha256'])
+            self.assertEqual(self.capture_manifest_hash, binding['capture_manifest_sha256'])
             self.assertEqual(snapshot_hash.upper(), binding['snapshot_sha256'])
             with self.assertRaisesRegex(ValueError, 'binding_manifest_hash_mismatch'):
                 issuance.target_binding(self.path.resolve(), '0' * 64, snapshot_hash)
@@ -89,6 +97,7 @@ class RecognitionTests(unittest.TestCase):
                     "m.BINDING_PATH=Path(" + repr(str(self.binding_path)) + "); m.main()"
         command = [sys.executable, '-B', '-c', bootstrap, '--production-db', str(self.path),
                    '--source-snapshot', str(source), '--manifest', str(path),
+                   '--capture-manifest', str(args['capture_manifest_path']),
                    '--manifest-sha256', args['manifest_sha256'], '--source-sha256', args['source_sha256'],
                    '--expected-excluded', '1']
         result = subprocess.run(command, capture_output=True, text=True, timeout=30)
@@ -96,6 +105,57 @@ class RecognitionTests(unittest.TestCase):
         self.assertEqual('verify-only', json.loads(result.stdout)['mode'])
         result = subprocess.run(command + ['--capture'], capture_output=True, text=True, timeout=30)
         self.assertEqual(2, result.returncode)
+        self.assertEqual(before, self.path.read_bytes())
+
+    def test_separate_binding_manifest_hashes_and_case_insensitive_checks(self):
+        source, path, manifest, args = self.issuance_fixture()
+        binding = json.loads(self.binding_path.read_text(encoding='utf-8'))
+        capture_hash = binding['capture_manifest_sha256']
+        issuance_hash = binding['issuance_manifest_sha256']
+        self.assertNotEqual(capture_hash, issuance_hash)
+        self.assertNotEqual(capture_hash, digest(dict(manifest, candidates=[])))
+        before = self.path.read_bytes()
+        uppercase = dict(binding, capture_manifest_sha256=capture_hash.upper(),
+                         issuance_manifest_sha256=issuance_hash.upper(),
+                         snapshot_sha256=binding['snapshot_sha256'].upper())
+        self.binding_path.write_text(canonical(uppercase), encoding='utf-8')
+        self.assertEqual('verify-only', issuance.issue(self.path, source, path, **args)['mode'])
+        for field, value, error in (
+            ('issuance_manifest_sha256', '0' * 64, 'binding_manifest_hash_mismatch'),
+            ('capture_manifest_sha256', '0' * 64, 'binding_capture_manifest_hash_mismatch'),
+            ('snapshot_sha256', '0' * 64, 'binding_source_hash_mismatch'),
+            ('issuance_manifest_sha256', capture_hash, 'binding_manifest_hash_mismatch'),
+            ('capture_manifest_sha256', issuance_hash, 'binding_capture_manifest_hash_mismatch'),
+        ):
+            self.binding_path.write_text(canonical(dict(binding, **{field: value})), encoding='utf-8')
+            with self.subTest(field=field, value=value), self.assertRaisesRegex(ValueError, error), \
+                 patch.object(issuance, 'lease_jobs', side_effect=AssertionError('write')):
+                issuance.issue(self.path, source, path, issue_production=True, **args)
+        self.assertEqual(before, self.path.read_bytes())
+
+    def test_separate_binding_fields_required_and_capture_content_pinned(self):
+        source, path, manifest, args = self.issuance_fixture()
+        binding = json.loads(self.binding_path.read_text(encoding='utf-8'))
+        legacy = dict(binding, manifest_sha256=binding['issuance_manifest_sha256'])
+        del legacy['capture_manifest_sha256']
+        del legacy['issuance_manifest_sha256']
+        invalid = [legacy, dict(binding, manifest_sha256=binding['issuance_manifest_sha256'])]
+        invalid.extend(dict(binding, **{field: value}) for field in
+                       ('capture_manifest_sha256', 'issuance_manifest_sha256') for value in ('', ' ', None))
+        for changed in invalid:
+            self.binding_path.write_text(canonical(changed), encoding='utf-8')
+            with self.subTest(binding=changed), self.assertRaisesRegex(ValueError, 'invalid_target_binding'):
+                issuance.issue(self.path, source, path, **args)
+        capture_path = args['capture_manifest_path']
+        capture = json.loads(capture_path.read_text(encoding='utf-8'))
+        capture['sqlite_utc_provenance'] = 'different capture artifact'
+        capture_path.write_text(canonical(capture), encoding='utf-8')
+        binding['capture_manifest_sha256'] = rehearsal.file_hash(capture_path)
+        self.binding_path.write_text(canonical(binding), encoding='utf-8')
+        before = self.path.read_bytes()
+        with self.assertRaisesRegex(ValueError, 'capture_manifest_mismatch'), \
+             patch.object(issuance, 'lease_jobs', side_effect=AssertionError('write')):
+            issuance.issue(self.path, source, path, issue_production=True, **args)
         self.assertEqual(before, self.path.read_bytes())
 
     def test_issuance_four_awards_pending_jobs_and_idempotent_retry(self):
@@ -388,6 +448,7 @@ class RecognitionTests(unittest.TestCase):
             return finalize_job(conn, assignment_id, *a, **kw)
         output = io.StringIO()
         argv = ['--production-db', str(self.path), '--source-snapshot', str(source), '--manifest', str(path),
+                '--capture-manifest', str(args['capture_manifest_path']),
                 '--manifest-sha256', args['manifest_sha256'], '--source-sha256', args['source_sha256'],
                 '--expected-excluded', '1', '--issue-production']
         with patch.object(issuance, 'finalize_job', side_effect=fail_second), redirect_stderr(output), \
