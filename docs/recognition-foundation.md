@@ -7,6 +7,8 @@ scheduler, HTTP backfill, or application enable switch. The separate disposable-
 rehearsal below can explicitly invoke capture-only services; issuance stays disabled.
 The separately authorized historical issuance command below can enable issuance
 only for the reviewed cohort within that invocation, without enabling capture.
+The separate controlled historical production capture command creates only the
+reviewed completion/job/run state; it never issues awards or enables future capture.
 
 The seven additive tables retain rules, global scope, completions, jobs, awards,
 witnesses and finalized run manifests. No snapshot, route, First Look, consent or
@@ -173,6 +175,74 @@ transaction, preventing a capture/check/delete race. Unreferenced replacement
 remains supported; rollback and close are deterministic on failure.
 
 ## Retention and rollback
+
+### Controlled historical production capture
+
+`scripts/active/capture_historical_explorer.py` is verification-only by default.
+It is separate from the disposable rehearsal and the issuance command. The
+production database must already have the recognition schema installed; this
+command does not migrate, provision a binding, create a backup, recover journals,
+schedule work or change application/HTTP behavior. Keep application and other
+writers stopped, retain an independently prepared backup, and do not replace the
+database or binding while running. WAL/journal sidecars are refused; recovery
+before the captured state exists requires a separately reviewed maintenance
+procedure (the issuance recovery command expects an already-captured ledger).
+
+Verification:
+
+```text
+python -B scripts/active/capture_historical_explorer.py --production-db /absolute/production.db --manifest /private/reviewed-capture.json
+```
+
+Only for an explicitly authorized production capture, append `--capture-production`.
+There is no issuance option. The existing independent production binding below is
+required: environment, hostname, resolved path, device/inode and the prohibition
+on `recognition-working.db` are enforced by the same target validator as issuance.
+The capture file's exact bytes must match `capture_manifest_sha256` (case-insensitive).
+The binding's issuance hash is retained but does not authorize issuance here.
+The snapshot hash is reported as a provenance reference, not claimed to have been
+reverified against a snapshot file by this command.
+
+The command accepts only `explorer:v1`, assignment bounds `141 < id <= 210`,
+exactly 55 qualified records, 14 exclusions, and no candidates. It compares the
+production source cohort with the reviewed manifest and requires either empty
+recognition processing tables or the exact previously captured state. It rejects
+partial capture, leased/done jobs, awards, witnesses and unrelated recognition runs.
+It does not require unrelated application data to match a historical snapshot.
+
+The only ledger-writing call is the existing `capture_batch()` with
+`RecognitionGate(capture=True, issuance=False)`. The service's optional transaction
+guard is backward-compatible: existing callers omit it. The new CLI uses it just
+after `BEGIN IMMEDIATE` and immediately before commit to recheck binding, manifest
+bytes, schema identity, source evidence, pinned cohort rows and recognition state.
+The precommit check requires exactly 55 immutable completions, 55 pending jobs
+with zero attempts/no leases, zero awards/witnesses, and one complete backfill run
+whose canonical manifest, digest and ID match. A failed guard rolls back the entire
+batch. No leasing, candidate evaluation or finalization service is invoked.
+The hook receives the service-owned active connection. During each hook call,
+SQLite's authorizer permits validation reads and denies SQL writes and transaction
+control, including award inserts, job leasing and commits. Validation mismatches
+raise `Quarantined`; even a swallowed SQL-denial exception aborts the batch.
+The authorizer is removed before normal capture resumes. Hooks are trusted Python
+validators, not a sandbox for hostile Python: they must not replace connection
+configuration or open separate writing connections. Callers without a hook keep
+the existing behavior; disabled capture does not invoke a hook. The CLI never
+wraps or monkey-patches `backfill.connection`.
+
+Full schema/FK/SQLite integrity checks occur before capture and after it; the
+transaction guard prevents schema/state races before writes and validates state
+before commit, so postchecks are not the rollback mechanism. A target file change
+before the guarded transaction is rejected by filesystem identity. This does not
+replace the operator requirement to prevent filesystem replacement during use.
+
+JSON reports target/environment/host, binding and capture hashes, cohort counts,
+completion/pending-job counts, attempts, leases, awards, witnesses, run ID and
+integrity result. Retain stdout/stderr privately. Retrying the identical manifest
+against the exact captured state is idempotent. An error after a successful commit
+does not undo capture: inspect verification-only state before retrying. Successful
+capture creates the production capture state **but does not issue awards**; the
+separately reviewed four-candidate manifest and issuance authorization are still
+required for the issuance command.
 
 ### One-time historical Explorer issuance
 

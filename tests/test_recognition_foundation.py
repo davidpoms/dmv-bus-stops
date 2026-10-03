@@ -23,12 +23,228 @@ from src.review.recognition.rules import RULE_KEY, canonical, digest, explorer_c
 from src.review.recognition.schema import TABLES, connection, migrate
 from scripts.active import rehearse_recognition_capture as rehearsal
 from scripts.active import issue_historical_explorer as issuance
+from scripts.active import capture_historical_explorer as production_capture
 
 
 ENABLED = RecognitionGate(capture=True, issuance=True)
 
 
 class RecognitionTests(unittest.TestCase):
+    def test_capture_guard_active_transaction_and_normal_commit(self):
+        self.review(1)
+        migrate(self.path, apply=True)
+        manifest = dry_run(self.path, RULE_KEY, through_assignment=1)
+        calls = []
+        def guard(conn, phase):
+            self.assertTrue(conn.in_transaction)
+            self.assertEqual(1, conn.execute('PRAGMA foreign_keys').fetchone()[0])
+            count = conn.execute('SELECT COUNT(*) FROM recognition_completions').fetchone()[0]
+            self.assertEqual(0 if phase == 'before_capture' else 1, count)
+            calls.append((conn, phase))
+        capture_batch(self.path, manifest, gate=RecognitionGate(capture=True), transaction_guard=guard)
+        self.assertEqual(['before_capture', 'before_commit'], [phase for _, phase in calls])
+        self.assertIs(calls[0][0], calls[1][0])
+        self.assertEqual([(1,)], self.sql('SELECT COUNT(*) FROM recognition_completions'))
+        self.assertEqual([('pending', 0)], self.sql('SELECT state,attempts FROM recognition_jobs'))
+
+    def test_capture_guard_cannot_write_awards_lease_or_commit(self):
+        self.review(1)
+        migrate(self.path, apply=True)
+        manifest = dry_run(self.path, RULE_KEY, through_assignment=1)
+        before = self.path.read_bytes()
+        for operation in ('award', 'lease', 'commit', 'caught_write'):
+            def guard(conn, phase):
+                if phase != 'before_commit':
+                    return
+                if operation == 'award':
+                    conn.execute("INSERT INTO recognition_awards(award_id) VALUES('forbidden')")
+                elif operation == 'lease':
+                    lease_jobs(conn, RULE_KEY, gate=RecognitionGate(issuance=True), limit=1)
+                elif operation == 'commit':
+                    conn.commit()
+                else:
+                    try:
+                        conn.execute("UPDATE recognition_jobs SET attempts=9")
+                    except sqlite3.DatabaseError:
+                        pass
+            with self.subTest(operation=operation), self.assertRaisesRegex(Quarantined, 'capture_guard_write_forbidden'):
+                capture_batch(self.path, manifest, gate=RecognitionGate(capture=True), transaction_guard=guard)
+            self.assertEqual(before, self.path.read_bytes())
+
+    def test_capture_guard_failure_quarantines_and_disabled_capture_skips_guard(self):
+        self.review(1)
+        migrate(self.path, apply=True)
+        manifest = dry_run(self.path, RULE_KEY, through_assignment=1)
+        before = self.path.read_bytes()
+        for failure_phase in ('before_capture', 'before_commit'):
+            def guard(conn, phase):
+                if phase == failure_phase:
+                    raise ValueError('guard_state_mismatch')
+            with self.subTest(phase=failure_phase), self.assertRaisesRegex(Quarantined, 'guard_state_mismatch'):
+                capture_batch(self.path, manifest, gate=RecognitionGate(capture=True), transaction_guard=guard)
+            self.assertEqual(before, self.path.read_bytes())
+        disabled_guard = MagicMock(side_effect=AssertionError('disabled guard ran'))
+        self.assertIsNone(capture_batch(self.path, manifest, transaction_guard=disabled_guard))
+        disabled_guard.assert_not_called()
+
+    def production_capture_fixture(self):
+        source, path, _, arguments = self.rehearsal_fixture()
+        for assignment in range(197, 210):
+            self.sql("INSERT INTO stop_review_assignments VALUES(?,142,1,'assigned',NULL)", (assignment,))
+        manifest = dry_run(self.path, RULE_KEY, after_assignment=141, through_assignment=210,
+                           sqlite_utc_provenance='synthetic-fixture-current-timestamp')
+        path.write_text(canonical(manifest), encoding='utf-8')
+        self.capture_manifest_hash = rehearsal.file_hash(path)
+        self.binding_path = self.path.parent / 'reviewed-binding.json'
+        self.write_issuance_binding(dict(manifest_sha256='a1' * 32, source_sha256=arguments['source_sha256']))
+        binding_patch = patch.object(issuance, 'BINDING_PATH', self.binding_path)
+        binding_patch.start()
+        self.addCleanup(binding_patch.stop)
+        announce_patch = patch.object(issuance, 'announce')
+        announce_patch.start()
+        self.addCleanup(announce_patch.stop)
+        self.assertEqual(55, len(manifest['qualified']))
+        self.assertEqual(14, len(manifest['excluded']))
+        return source, path, manifest
+
+    def test_production_capture_default_and_cli_never_enable_issuance(self):
+        source, path, manifest = self.production_capture_fixture()
+        before = self.path.read_bytes()
+        with patch.object(production_capture, 'capture_batch', side_effect=AssertionError('capture')):
+            result = production_capture.capture_historical(self.path, path)
+        self.assertEqual('verify-only', result['mode'])
+        self.assertEqual('empty', result['state'])
+        bootstrap = "from pathlib import Path; from scripts.active import issue_historical_explorer as i; " \
+                    "from scripts.active import capture_historical_explorer as c; " \
+                    "i.BINDING_PATH=Path(" + repr(str(self.binding_path)) + "); c.main()"
+        command = [sys.executable, '-B', '-c', bootstrap, '--production-db', str(self.path), '--manifest', str(path)]
+        result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertFalse(json.loads(result.stdout)['issuance_enabled'])
+        for flag in ('--issue-production', '--issuance', '--capture-disposable'):
+            result = subprocess.run(command + [flag], capture_output=True, text=True, timeout=30)
+            self.assertEqual(2, result.returncode)
+        self.assertEqual(before, self.path.read_bytes())
+
+    def test_production_capture_exact_state_gate_and_idempotent_retry(self):
+        source, path, manifest = self.production_capture_fixture()
+        source_before = source.read_bytes()
+        with connection(self.path) as conn:
+            application_before = rehearsal.application_fingerprint(conn)
+        with patch.object(production_capture, 'capture_batch', wraps=capture_batch) as capture_service, \
+             patch.object(issuance, 'lease_jobs', side_effect=AssertionError('lease')), \
+             patch.object(issuance, 'prepare_evaluation', side_effect=AssertionError('prepare')), \
+             patch.object(issuance, 'finalize_job', side_effect=AssertionError('finalize')), \
+             patch('src.review.recognition.processing.lease_jobs', side_effect=AssertionError('lease')), \
+             patch('src.review.recognition.processing.prepare_evaluation', side_effect=AssertionError('prepare')), \
+             patch('src.review.recognition.processing.finalize_job', side_effect=AssertionError('finalize')):
+            result = production_capture.capture_historical(self.path, path, capture_production=True)
+            self.assertEqual(RecognitionGate(capture=True, issuance=False), capture_service.call_args.kwargs['gate'])
+            before = self.path.read_bytes()
+            retry = production_capture.capture_historical(self.path, path, capture_production=True)
+        self.assertEqual(before, self.path.read_bytes())
+        self.assertEqual(result, retry)
+        self.assertEqual((55, 55, 0, 0, 0, 0, 1), tuple(result[k] for k in
+                         ('completions', 'pending_jobs', 'attempts', 'leases', 'awards', 'witnesses', 'runs')))
+        with connection(self.path) as conn:
+            self.assertEqual('captured', rehearsal.check_state(conn, manifest, allow_empty=False))
+            run = conn.execute('SELECT * FROM recognition_runs').fetchone()
+            self.assertEqual(('backfill', 'complete', canonical(manifest), digest(manifest), digest(manifest)),
+                             tuple(run[k] for k in ('kind', 'state', 'manifest_json', 'manifest_sha256', 'run_id')))
+            self.assertEqual(application_before, rehearsal.application_fingerprint(conn))
+            self.assertEqual('ok', conn.execute('PRAGMA integrity_check').fetchone()[0])
+        self.assertEqual(source_before, source.read_bytes())
+
+    def test_production_capture_rejects_wrong_binding_and_capture_hash(self):
+        source, path, manifest = self.production_capture_fixture()
+        binding = json.loads(self.binding_path.read_text(encoding='utf-8'))
+        before = self.path.read_bytes()
+        for field, value in (('environment', 'rehearsal'), ('hostname', 'wrong-host'), ('database', str(source)),
+                             ('device', -1), ('inode', -1), ('capture_manifest_sha256', '0' * 64)):
+            self.binding_path.write_text(canonical(dict(binding, **{field: value})), encoding='utf-8')
+            with self.subTest(field=field), self.assertRaises(ValueError), \
+                 patch.object(production_capture, 'capture_batch', side_effect=AssertionError('capture')):
+                production_capture.capture_historical(self.path, path, capture_production=True)
+        self.binding_path.write_text(canonical(binding), encoding='utf-8')
+        working = self.path.parent / 'recognition-working.db'
+        working.write_bytes(before)
+        with self.assertRaisesRegex(ValueError, 'unauthorized_production_target'):
+            production_capture.capture_historical(working, path, capture_production=True)
+        self.assertEqual(before, self.path.read_bytes())
+
+    def test_production_capture_rejects_candidates_cohort_counts_and_source(self):
+        source, path, manifest = self.production_capture_fixture()
+        binding = json.loads(self.binding_path.read_text(encoding='utf-8'))
+        for defect in ('candidates', 'cohort', 'qualified', 'excluded', 'rule', 'source'):
+            changed = json.loads(canonical(manifest))
+            if defect == 'candidates':
+                changed['candidates'] = [{}]
+            elif defect == 'cohort':
+                changed['cohort']['after_assignment'] = 140
+            elif defect in ('qualified', 'excluded'):
+                changed[defect].pop()
+            elif defect == 'rule':
+                changed['rule_key'] = 'explorer:v2'
+            else:
+                changed['source'][0]['assignment']['completed_at'] = '2000-01-01 00:00:00'
+            path.write_text(canonical(changed), encoding='utf-8')
+            self.binding_path.write_text(canonical(dict(binding, capture_manifest_sha256=rehearsal.file_hash(path))), encoding='utf-8')
+            with self.subTest(defect=defect), self.assertRaises(ValueError), \
+                 patch.object(production_capture, 'capture_batch', side_effect=AssertionError('capture')):
+                production_capture.capture_historical(self.path, path, capture_production=True)
+
+    def test_production_capture_transaction_guard_rejects_concurrent_changes(self):
+        source, path, manifest = self.production_capture_fixture()
+        pristine = self.path.read_bytes()
+        manifest_bytes = path.read_bytes()
+        for defect in ('schema', 'source', 'profile', 'state', 'manifest'):
+            def race(*a, **kw):
+                if defect == 'schema':
+                    self.sql("CREATE TRIGGER unexpected AFTER INSERT ON recognition_jobs BEGIN "
+                             "UPDATE community_reviewers SET display_name='bad'; END")
+                elif defect == 'source':
+                    self.sql("UPDATE stop_review_assignments SET completed_at='2000-01-01 00:00:00' WHERE id=142")
+                elif defect == 'profile':
+                    self.sql("UPDATE community_reviewers SET display_name='changed' WHERE id=1")
+                elif defect == 'state':
+                    capture_batch(self.path, manifest, gate=RecognitionGate(capture=True))
+                else:
+                    path.write_bytes(manifest_bytes + b' ')
+                return capture_batch(*a, **kw)
+            with self.subTest(defect=defect), patch.object(production_capture, 'capture_batch', side_effect=race), \
+                 self.assertRaises(ValueError):
+                production_capture.capture_historical(self.path, path, capture_production=True)
+            self.assertEqual([(55 if defect == 'state' else 0,)], self.sql('SELECT COUNT(*) FROM recognition_completions'))
+            self.assertEqual([(0,)], self.sql('SELECT COUNT(*) FROM recognition_awards'))
+            self.path.write_bytes(pristine)
+            path.write_bytes(manifest_bytes)
+
+    def test_production_capture_rejects_target_replacement_under_guard(self):
+        source, path, manifest = self.production_capture_fixture()
+        def replace_target(*a, **kw):
+            original = self.path.parent / 'original.db'
+            self.path.rename(original)
+            self.path.write_bytes(original.read_bytes())
+            return capture_batch(*a, **kw)
+        with patch.object(production_capture, 'capture_batch', side_effect=replace_target), \
+             self.assertRaisesRegex(ValueError, 'unauthorized_production_target'):
+            production_capture.capture_historical(self.path, path, capture_production=True)
+        self.assertEqual([(0,)], self.sql('SELECT COUNT(*) FROM recognition_completions'))
+
+    def test_production_capture_precommit_failure_rolls_back_entire_batch(self):
+        source, path, manifest = self.production_capture_fixture()
+        before = self.path.read_bytes()
+        def fail_postcondition(conn, manifest, *, allow_empty):
+            state = rehearsal.check_state(conn, manifest, allow_empty=allow_empty)
+            if not allow_empty:
+                self.assertEqual(55, conn.execute('SELECT COUNT(*) FROM recognition_completions').fetchone()[0])
+                raise ValueError('injected precommit failure')
+            return state
+        with patch.object(production_capture, 'check_state', side_effect=fail_postcondition), \
+             self.assertRaisesRegex(ValueError, 'injected precommit failure'):
+            production_capture.capture_historical(self.path, path, capture_production=True)
+        self.assertEqual(before, self.path.read_bytes())
+
     def issuance_fixture(self):
         source, path, manifest, arguments = self.rehearsal_fixture()
         # Four awards across three owners: 42, 7, 5, 1 distinct completions.

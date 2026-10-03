@@ -1,5 +1,7 @@
 """Private, bounded backfill planning; no command in this slice enables writes."""
 
+import sqlite3
+
 from . import DISABLED
 from .processing import bounded, ledger_candidates, materialize_ledger, record_run
 from .qualification import Quarantined, capture, qualify
@@ -65,18 +67,48 @@ def dry_run(database, rule_key, **cohort):
     return plan_batch(plan, snapshot)
 
 
-def capture_batch(database, manifest, *, gate=DISABLED):
+def _validate_transaction(conn, guard, phase):
+    """Trusted validator gets the active connection with SQL mutation denied."""
+    denied = False
+
+    def authorize(action, first, second, database, trigger):
+        nonlocal denied
+        allowed = action in (sqlite3.SQLITE_SELECT, sqlite3.SQLITE_READ, sqlite3.SQLITE_FUNCTION)
+        allowed = allowed or (action == sqlite3.SQLITE_PRAGMA and second is None
+                              and first.lower() in ("foreign_keys", "query_only"))
+        if not allowed:
+            denied = True
+        return sqlite3.SQLITE_OK if allowed else sqlite3.SQLITE_DENY
+
+    conn.set_authorizer(authorize)
+    try:
+        try:
+            guard(conn, phase)
+        except (ValueError, OSError, sqlite3.Error) as error:
+            raise Quarantined("capture_guard_write_forbidden" if denied else str(error)) from error
+        if denied:
+            raise Quarantined("capture_guard_write_forbidden")
+    finally:
+        conn.set_authorizer(None)
+
+
+def capture_batch(database, manifest, *, gate=DISABLED, transaction_guard=None):
     """Future explicit write boundary. Default returns before opening database.
 
     Requires the exact reviewed dry-run inputs still to match. Atomic per batch,
     restartable through manifest cursor, never repairs source evidence or awards.
-    No CLI exposes this gate in Phase 2A.
+    Optional operational guard runs under the writer lock before capture and
+    before commit with SQL writes/transaction control denied. Raising from either
+    phase rolls back the entire batch. Guards are trusted validation code, not
+    an arbitrary-Python sandbox; they must not replace connection configuration.
     """
     if not gate.capture:
         return None
     cohort = manifest["cohort"]
     with connection(database, write=True) as conn:
         conn.execute("BEGIN IMMEDIATE")
+        if transaction_guard is not None:
+            _validate_transaction(conn, transaction_guard, "before_capture")
         current = source_plan(conn, manifest["rule_key"],
                              through_assignment=cohort["through_assignment"],
                              after_assignment=cohort["after_assignment"], limit=cohort["limit"],
@@ -91,5 +123,7 @@ def capture_batch(database, manifest, *, gate=DISABLED):
             capture(conn, fact["assignment_id"], manifest["rule_key"], gate=gate, origin="backfill",
                     sqlite_utc_provenance=manifest["sqlite_utc_provenance"])
         run_id = record_run(conn, manifest, gate=gate)
+        if transaction_guard is not None:
+            _validate_transaction(conn, transaction_guard, "before_commit")
         conn.commit()
         return run_id
