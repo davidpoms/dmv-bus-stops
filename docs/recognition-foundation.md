@@ -17,6 +17,69 @@ unsupported families/scopes; a later approved migration must expand them.
 Threshold tier keys are numeric internal identifiers, not public badge names.
 Original completion text and timestamp provenance are retained in the ledger.
 
+## Read-only historical First Look report
+
+`src.review.recognition.first_looks.build_report()` is an isolated inspection
+API, not a capture/issuance command. It requires an explicit database path and
+an exclusive, explicitly offset completion cutoff. It opens `mode=ro` with
+`query_only`, scans all assignments and competing reviewers in one read snapshot,
+and reuses permanent `qualify()` validation. Recognition tables need not exist.
+No migration, completion capture, lease, award, witness or First Look claim is
+created. Existing Explorer and current-progress behavior are unchanged.
+
+For an authorized **offline copy**, an operator can run this from the repository
+root (replace the path and cutoff with reviewed values):
+
+```python
+from src.review.recognition.first_looks import build_report
+from src.review.recognition.rules import canonical
+
+report = build_report(
+    r"/absolute/path/to/offline-copy.db",
+    cutoff_utc="2026-10-01T00:00:00Z",
+    # sqlite_utc_provenance="reference-to-reviewed-writer-provenance",
+)
+print(canonical(report))
+```
+
+The date above is illustrative, not an approved cohort. Run as a local Python
+script or interactive session; this is not a new production command. Preserve
+output privately: it contains reviewer, assignment, observation and stop IDs.
+
+Without reconciliation evidence the result explicitly requires adjudication.
+The optional `reconciliation` object requires exactly `reference`,
+`clock_review_reference`, `identity_review_reference` (nonblank private audit
+references), and `expected_assignment_ids` (the complete reviewed inventory of
+all assignments present in the copy, including excluded and post-cutoff rows).
+These references attest reviewed historical completeness, timestamp-writer/clock
+assumptions and identity history; they are operator assertions, not facts this
+tool can independently establish. An inventory mismatch blocks all winners.
+Do not generate an inventory from an unreviewed copy and call that reconciliation.
+
+The canonical report includes all qualifying competitors, original and normalized
+completion times/provenance, rejected evidence, orphan community observations,
+identity lineage, ordering version and a report checksum. `earliest_candidate`
+is merely the first qualifying fact by parsed UTC instant and numeric assignment
+ID. `provisional_winner` is null when coverage or relevant evidence is unresolved.
+Invalid competitors are excluded from ordering but require review rather than
+silently improving another reviewer's claim. Inactive stops remain eligible;
+identity transitions are flagged and never transfer credit to successors.
+Completion time is not observation time, the submission response's `first_review`
+boolean, or current progress. Fractional/naive timestamps follow the existing
+permanent qualification policy, including explicit provenance for SQLite UTC.
+
+Supply a retained `previous_report` for the same cutoff/order version to detect
+new earlier competitors, corrected/backdated or removed evidence. Its canonical
+checksum is checked; it is not a signature. Known identity/correction/late-arrival
+anomalies remain unresolved on repeated comparisons. Optional existing immutable
+completion rows are compared to current qualification facts for conflicts.
+Missing external history or unrecorded clock regressions cannot be inferred from
+one snapshot; clock/provenance audit and controlled historical reconciliation
+remain prerequisites. `complete_projection` means a report consistent with the
+supplied reviewed inputs, **not** a sealed permanent winner or issuance approval.
+Permanent claims, correction policy, live closed-second adjudication and any
+cumulative First Look milestone thresholds remain separate future work.
+
 ## Explicit offline migration
 
 After separately authorized backup and rehearsal, use an explicit existing path:
