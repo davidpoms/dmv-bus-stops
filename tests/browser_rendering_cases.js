@@ -558,6 +558,32 @@
             assert(!text.querySelector('img, script, b, [onerror]'), 'Award values became markup');
         }
     });
+    await test('achievements_next_stop_action', async () => {
+        for (const signedIn of [false, true]) {
+            for (const response of [null, awardsResponse]) {
+                const env = await progressPage('reviewer_profile', signedIn, progressData(), 200, 200, null, response);
+                const card = env.doc.getElementById('privateAchievementsCard');
+                const link = card.querySelector('a.dashboard-button');
+                assert(link && link.textContent === 'Review your next stop →', 'Next-stop label missing or changed');
+                assert(link.getAttribute('href') === '/review/start?mode=opportunity', 'Next-stop target changed');
+                assert(!link.closest('details, #privateAchievementsContent'), 'Action inside replaceable content or disclosure');
+                assert(card.hidden === !signedIn, 'Card visibility does not match authentication');
+                assert(Boolean(link.closest('[hidden]')) === !signedIn, 'Action visibility does not match authentication');
+                assert(!env.calls.some(url => url.startsWith('/review/start')), 'Profile load started an assignment');
+                if (signedIn) {
+                    env.handlers.pagehide();
+                    assert(card.hidden && link.closest('[hidden]'), 'Page exit retained visible action');
+                    assert(env.doc.getElementById('privateAchievementsContent').textContent === '', 'Page exit retained awards');
+                    await env.handlers.pageshow({persisted: true});
+                    assert(!link.closest('[hidden]'), 'Authenticated restoration lost action');
+                    env.doc.querySelector('#accountStatus button').click();
+                    assert(card.hidden && link.closest('[hidden]'), 'Logout retained visible action');
+                    assert(env.doc.getElementById('privateAchievementsContent').textContent === '', 'Logout retained awards');
+                    assert(!env.calls.some(url => url.startsWith('/review/start')), 'Lifecycle started an assignment');
+                }
+            }
+        }
+    });
     await test('achievements_states', async () => {
         const signedOut = await progressPage('reviewer_profile', false, progressData());
         assert(!signedOut.calls.includes('/api/reviewer/achievements'), 'Signed-out awards fetched');

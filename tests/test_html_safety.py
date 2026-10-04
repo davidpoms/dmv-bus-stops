@@ -74,6 +74,9 @@ class HtmlSafetyTests(unittest.TestCase):
     def test_achievements_empty_failure_and_signed_out_states(self):
         self.check_case('achievements_states')
 
+    def test_achievements_next_stop_action_and_private_visibility(self):
+        self.check_case('achievements_next_stop_action')
+
     def test_achievements_private_lifecycle_and_stale_requests(self):
         self.check_case('achievements_privacy_lifecycle')
 
