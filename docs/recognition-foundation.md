@@ -82,6 +82,11 @@ cumulative First Look milestone thresholds remain separate future work.
 
 ## Explicit offline migration
 
+The separate [Geography Steward report](geography-steward-report.md) inspects
+explicit scope snapshots and ledger-backed coverage without this migration or
+any capture/issuance operation. It never certifies current geography projections
+or declares permanent geography issuance ready.
+
 After separately authorized backup and rehearsal, use an explicit existing path:
 
 ```
