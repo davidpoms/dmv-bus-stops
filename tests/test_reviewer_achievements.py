@@ -118,6 +118,21 @@ class AchievementsTests(unittest.TestCase):
         self.assertEqual(1, len(other))
         self.assertEqual('2026-09-23T12:00:25Z', other[0]['earned_at_utc'])
 
+    def test_additive_migration_preserves_explorer_rows_hashes_jobs_and_api(self):
+        from src.review.recognition.permanent_schema import migrate as migrate_private
+        from src.review.recognition.schema import TABLES
+        from src.review.recognition.rules import canonical
+        self.populate()
+        before_api = self.get().get_json()
+        def existing_rows():
+            with connection(self.path) as conn:
+                return {name: sorted(canonical(dict(r)) for r in conn.execute(f'SELECT * FROM {name}')) for name in TABLES}
+        before = existing_rows()
+        migrate_private(self.path, apply=True)
+        migrate_private(self.path, apply=True)
+        self.assertEqual(before, existing_rows())
+        self.assertEqual(before_api, self.get().get_json())
+
     def test_deterministic_order_uses_award_id_for_ties(self):
         self.populate(tied=True)
         with connection(self.path) as conn:

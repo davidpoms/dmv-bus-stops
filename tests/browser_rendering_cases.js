@@ -558,6 +558,30 @@
             assert(!text.querySelector('img, script, b, [onerror]'), 'Award values became markup');
         }
     });
+    await test('permanent_family_achievements', async () => {
+        for (const label of fixtures) {
+            const response = () => ({ok: true, status: 200, json: async () => ({available: true, achievements: [
+                {family: 'first_look', recognition_kind: 'claim', earned_at_utc: '2026-09-29T12:34:56Z'},
+                {family: 'geography_steward', recognition_kind: 'award', scope_label: label,
+                 tier_key: 'tier_2', numerator: 5, denominator: 10, percentage: 50, earned_at_utc: '2026-10-01T00:00:00Z'}
+            ]})});
+            const env = await progressPage('reviewer_profile', true, progressData(), 200, 200, null, response);
+            const content = env.doc.getElementById('privateAchievementsContent');
+            literal(content, 'First Look');
+            literal(content, 'Permanent private claim');
+            literal(content, `Geography Steward — ${label} — Tier 2`);
+            literal(content, '5 of 10 distinct stops');
+            literal(content, 'Present-day coverage at evaluation, not historical geography coverage.');
+            assert(content.querySelectorAll('time').length === 2, 'Permanent dates missing');
+            assert(!content.querySelector('img, script, b, [onerror]'), 'Scope label became markup');
+            literal(env.doc.getElementById('privateAchievementsCard'), 'does not automatically issue');
+            env.handlers.pagehide();
+            assert(env.doc.getElementById('privateAchievementsCard').hidden, 'Private families remain visible');
+            assert(!content.textContent, 'Private families not cleared');
+            const signedOut = await progressPage('reviewer_profile', false, progressData(), 200, 200, null, response);
+            assert(signedOut.doc.getElementById('privateAchievementsCard').hidden, 'Signed-out families visible');
+        }
+    });
     await test('achievements_next_stop_action', async () => {
         for (const signedIn of [false, true]) {
             for (const response of [null, awardsResponse]) {

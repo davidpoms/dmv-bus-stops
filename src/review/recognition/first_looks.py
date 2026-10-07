@@ -5,7 +5,7 @@ import json
 
 from .qualification import Quarantined, permanent_time, qualify
 from .rules import canonical, digest
-from .schema import connection
+from .report_connection import report_connection as connection
 
 
 ORDERING = {"version": "first-look-report-v1",
@@ -49,7 +49,8 @@ def build_report(database, *, cutoff_utc, sqlite_utc_provenance=None,
 
     qualified, excluded, source, identity_edges, ledger_conflicts = [], [], [], [], set()
     with connection(database) as conn:
-        conn.execute("BEGIN")
+        if not conn.in_transaction:
+            conn.execute("BEGIN")
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assignments = conn.execute("SELECT id,stop_id,reviewer_id,status,completed_at FROM stop_review_assignments ORDER BY id").fetchall()
         for row in assignments:
