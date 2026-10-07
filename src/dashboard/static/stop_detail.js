@@ -28,6 +28,7 @@ async function loadStopProfile() {
         }
 
         const reviewResponse = await fetch(`/review/${stopId}/info`);
+        if (reviewResponse.ok === false) throw new Error("Stop information unavailable");
         const review = await reviewResponse.json();
 
         const communityResponse =
@@ -507,6 +508,7 @@ const latestCommunity =
                 <strong>Location</strong><br>
 
                 ${text(stop.location || review.name || "Unknown")}
+                ${SafeRender.borderJurisdiction(review, stopId, render)}
 
                 <br><br>
 

@@ -37,6 +37,7 @@ from src.assessment.interpretation import (
 )
 
 from src.review.consensus import calculate_stop_consensus
+from src.dashboard.border_jurisdiction import operational_jurisdiction, BorderPolicyUnavailable
 from src.review.progress import build_progress
 from src.review.recognition.achievements import build_achievements
 from src.review.recognition.qualification import Quarantined
@@ -1973,6 +1974,12 @@ def review_page(stop_id):
 @app.route("/review/<int:stop_id>/info")
 def review_stop_info(stop_id):
 
+    try:
+        border_overlay = operational_jurisdiction(stop_id)
+    except BorderPolicyUnavailable:
+        return {"error": "Operational jurisdiction policy is unavailable",
+                "code": "border_policy_unavailable"}, 503
+
     stop = query_db(
         """
         SELECT
@@ -2477,6 +2484,7 @@ def review_stop_info(stop_id):
             "lon": row[3],
             "state": row[4],
             "jurisdiction": row[4],
+            **({"operational_jurisdiction": border_overlay} if border_overlay is not None else {}),
             "ward": row[5],
             "anc": row[6],
             "county": row[7],

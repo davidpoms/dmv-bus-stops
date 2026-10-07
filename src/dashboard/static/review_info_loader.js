@@ -43,6 +43,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         const response = await fetch(
             `/review/${stopId}/info${infoParams.toString() ? `?${infoParams}` : ""}`
         );
+        if (response.ok === false) throw new Error("Stop information unavailable");
         const info = await response.json();
         const status = Object.fromEntries(
             (info.amenity_status || []).map(item => [item.amenity_type, item.derived_status])
@@ -64,7 +65,7 @@ document.addEventListener("DOMContentLoaded", async () => {
                     ${info.wmata_rider_tools_url ? `${render.link(info.wmata_rider_tools_url, "Open WMATA Rider Tools", "stop-review-button", true)}` : ""}
                 </div>
                 <p>Street View imagery may be unavailable. Use Google Maps to locate the stop, then review in person or with another visual source.</p>
-                <p>${text([info.state, info.county, info.municipality].filter(Boolean).join(" · "))}</p>
+                ${info.operational_jurisdiction ? SafeRender.borderJurisdiction(info, stopId, render) : `<p>${text([info.state, info.county, info.municipality].filter(Boolean).join(" · "))}</p>`}
 
                 <details><summary>Current evidence and review context</summary>
                 ${percentile !== null && percentile !== undefined ? `
