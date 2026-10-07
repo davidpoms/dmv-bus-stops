@@ -95,6 +95,9 @@ class HtmlSafetyTests(unittest.TestCase):
     def test_recent_activity_safe_rows_links_and_local_times(self):
         self.check_case('recent_activity_content')
 
+    def test_permanent_family_safe_labels_claims_dates_and_privacy(self):
+        self.check_case('permanent_family_achievements')
+
     def test_recent_activity_loading_empty_failure_and_authentication(self):
         self.check_case('recent_activity_states')
 

@@ -1,5 +1,9 @@
 # Phase 2A global recognition foundation
 
+The additive private First Look / Geography Steward implementation and disposable
+rehearsal procedure are documented in [permanent-private-recognition.md](permanent-private-recognition.md).
+They do not replace or enable the Explorer infrastructure described here.
+
 This is private infrastructure, not a public launch. `RecognitionGate()` defaults
 capture and issuance to false. No application endpoint imports or invokes it.
 The operator processor has only a read-only planning mode; there is no worker,

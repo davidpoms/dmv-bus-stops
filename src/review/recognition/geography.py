@@ -6,7 +6,7 @@ import re
 from src.amenities.status_synthesis import canonical_dc_ward
 from .qualification import Quarantined, permanent_time, qualify
 from .rules import canonical, digest, load_rule
-from .schema import connection
+from .report_connection import report_connection as connection
 
 
 FORMAT = "geography-adjudication-report-v1"
@@ -167,7 +167,8 @@ def build_geography_report(database, *, scope_snapshot, cutoff_utc,
         global_issues.append("no_explicit_scopes")
     qualified, uncaptured, exclusions, source = [], [], [], []
     with connection(database) as conn:
-        conn.execute("BEGIN")
+        if not conn.in_transaction:
+            conn.execute("BEGIN")
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         owners = [r[0] for r in conn.execute("SELECT id FROM community_reviewers ORDER BY id")]
         physical_ids = {r[0] for r in conn.execute("SELECT id FROM physical_stops")}

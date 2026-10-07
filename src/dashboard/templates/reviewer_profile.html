@@ -41,6 +41,7 @@
 <div id="privateAchievementsContent" role="status">Loading achievements...</div>
 <p><a href="/review/start?mode=opportunity" class="dashboard-button">Review your next stop →</a></p>
 <p><strong>Currently available: Explorer</strong></p>
+<p>First Look claims and Geography Steward awards appear here only after separately reviewed historical issuance. They are permanent private records, separate from current progress. Completing a review does not automatically issue them.</p>
 <p>More recognition categories may be introduced as their rules and data requirements are finalized.</p>
 <details>
 <summary>How recognition works</summary>
@@ -241,6 +242,14 @@ async function loadAchievements(version) {
             title.textContent = award.family === "explorer" ? `Explorer — ${award.tier_key} stops` : "Achievement";
             const description = document.createElement("p");
             description.textContent = award.family === "explorer" ? `Reviewed ${award.numerator} distinct qualifying stops` : "Earned recognition";
+            if (award.family === "first_look") {
+                title.textContent = "First Look";
+                description.textContent = "Permanent private claim for the first qualifying review at a physical stop, established from a reviewed historical population.";
+            } else if (award.family === "geography_steward") {
+                const tier = {tier_1: "1", tier_2: "2", tier_3: "3", tier_4: "4"}[award.tier_key];
+                title.textContent = `Geography Steward — ${award.scope_label} — Tier ${tier || ""}`;
+                description.textContent = `Reviewed ${award.numerator} of ${award.denominator} distinct stops in the certified catch-up snapshot; ${award.percentage}% milestone. Present-day coverage at evaluation, not historical geography coverage.`;
+            }
             const date = document.createElement("p");
             const time = document.createElement("time");
             time.dateTime = award.earned_at_utc;
