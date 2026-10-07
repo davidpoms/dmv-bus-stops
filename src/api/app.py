@@ -1284,6 +1284,12 @@ def stop_detail(stop_id):
     if retired:
         return retired, 410
 
+    try:
+        border_overlay = operational_jurisdiction(stop_id)
+    except BorderPolicyUnavailable:
+        return {"error": "Operational jurisdiction policy is unavailable",
+                "code": "border_policy_unavailable"}, 503
+
     stop = query_db(
 """
 SELECT
@@ -1736,6 +1742,7 @@ GROUP BY ps.id
         {
             "stop_id": stop_id,
             "location": row[0],
+            **({"operational_jurisdiction": border_overlay} if border_overlay is not None else {}),
             "lat": row[1],
             "lon": row[2],
             "external_stop_id": row[3],

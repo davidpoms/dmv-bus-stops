@@ -103,6 +103,30 @@ class StreetViewRequestTests(unittest.TestCase):
     def test_stop_detail_without_road_index(self):
         self.check_endpoint('/stops/1')
 
+    def test_stop_detail_operational_jurisdiction(self):
+        overlay = {
+            'value': 'MD',
+            'jurisdiction_basis': 'border_centerline_convention',
+            'border_notice': True,
+            'border_review_required': False,
+            'border_notice_reasons': [],
+        }
+        with patch.object(api, 'operational_jurisdiction', return_value=overlay) as lookup:
+            response = self.client.get('/stops/1')
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(overlay, response.get_json()['operational_jurisdiction'])
+        lookup.assert_called_once_with(1)
+
+    def test_stop_detail_border_policy_unavailable(self):
+        with patch.object(api, 'operational_jurisdiction',
+                          side_effect=api.BorderPolicyUnavailable('unavailable')):
+            response = self.client.get('/stops/1')
+        self.assertEqual(503, response.status_code)
+        self.assertEqual({
+            'error': 'Operational jurisdiction policy is unavailable',
+            'code': 'border_policy_unavailable',
+        }, response.get_json())
+
     def test_review_info_without_road_index(self):
         self.check_endpoint('/review/1/info')
 
