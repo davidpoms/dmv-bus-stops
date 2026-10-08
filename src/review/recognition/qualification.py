@@ -64,12 +64,11 @@ def require_transaction(conn):
         raise ValueError("recognition_requires_transaction_and_foreign_keys")
 
 
-def capture(conn, assignment_id, rule_key, *, gate=DISABLED, origin="live", sqlite_utc_provenance=None):
-    """Caller-owned transaction; disabled returns before any SQL.
+def capture_completion(conn, assignment_id, rule_key, *, gate=DISABLED, origin="live", sqlite_utc_provenance=None):
+    """Capture shared immutable evidence only, without creating any family job.
 
-    Future integration order: evidence commit -> derived refresh -> assignment
-    completion -> this capture, with the last two in ONE short transaction.
-    Never call before refresh, use retry payloads, commit, or close caller state.
+    Caller owns the transaction. The qualification rule/sequence/provenance are
+    identical to Explorer capture; disabled returns before any SQL.
     """
     if not gate.capture:
         return None
@@ -87,6 +86,20 @@ def capture(conn, assignment_id, rule_key, *, gate=DISABLED, origin="live", sqli
             VALUES(?,?,?,?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%SZ','now'),
                    (SELECT COALESCE(MAX(ledger_sequence),0)+1 FROM recognition_completions))""",
             (*fact.values(), rule_key, origin))
+    return fact
+
+
+def capture(conn, assignment_id, rule_key, *, gate=DISABLED, origin="live", sqlite_utc_provenance=None):
+    """Capture evidence and an Explorer job in the caller-owned transaction.
+
+    Future integration order: evidence commit -> derived refresh -> assignment
+    completion -> this capture, with the last two in ONE short transaction.
+    Never call before refresh, use retry payloads, commit, or close caller state.
+    """
+    if not gate.capture:
+        return None
+    fact = capture_completion(conn, assignment_id, rule_key, gate=gate, origin=origin,
+                              sqlite_utc_provenance=sqlite_utc_provenance)
     job = conn.execute("SELECT rule_key FROM recognition_jobs WHERE assignment_id=?", (assignment_id,)).fetchone()
     if job is None:
         conn.execute("""INSERT INTO recognition_jobs(assignment_id,rule_key,updated_at_utc)

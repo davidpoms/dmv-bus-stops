@@ -1,6 +1,7 @@
 # Generated exports
 *.csv
 *.json
+!src/dashboard/border_jurisdiction_policy.json
 *.html
 !src/dashboard/templates/*.html
 exports/

@@ -316,6 +316,44 @@ capture creates the production capture state **but does not issue awards**; the
 separately reviewed four-candidate manifest and issuance authorization are still
 required for the issuance command.
 
+### Test-only disposable historical issuance rehearsal
+
+`scripts/active/rehearse_explorer_issuance.py` is a separate, explicitly authorized
+test harness for the reviewed 55-completion, four-candidate cohort. It does not
+invoke the production issuance wrapper, create a production binding, or relax
+production authorization. It never captures completions or installs target schema.
+
+```text
+python -B scripts/active/rehearse_explorer_issuance.py --test-only --source-db <verified-captured-offline-copy.db> --source-sha256 <reviewed-source-hash> --manifest <reviewed-four-candidate-manifest.json> --manifest-sha256 <reviewed-file-hash> --destination .tmp/explorer-issuance-rehearsals/disposable-<unique-name>.db
+```
+
+The source must be quiescent, without SQLite sidecars. All source connections are
+read-only and closed before copying. The destination must be a new file directly
+inside the repository's reserved `.tmp/explorer-issuance-rehearsals/` directory,
+named `disposable-*.db`; existing files, aliases, redirected output directories
+and configured application destinations are rejected. The source and manifest
+hashes, exact source/ledger evidence and full candidates are verified before copying.
+The copy is validated again before leasing. No production configuration is changed.
+
+Only the disposable transaction uses `RecognitionGate(capture=False, issuance=True)`.
+Existing lease/evaluation/finalization/integrity services process all 55 jobs in
+one transaction. Failure before commit rolls back the entire award group. A later
+API/post-commit failure may leave a completed disposable result; it never authorizes
+using that result as an application database. No failed artifact is automatically
+deleted, overwritten or installed. A new invocation requires a new destination.
+
+Successful postchecks require four awards, 35 witness rows spanning 30 assignments,
+55 done jobs with one attempt and no leases, unchanged application/immutable data,
+and valid award evidence. An internal retry must lease nothing and leave the file
+hash unchanged. The Flask test client verifies owner-only achievements and earned
+timestamps without a network server. Source hashes and the original pending state
+are checked again on exit. Machine-readable output identifies the disposable path
+and hash. Retain it privately; ignored `.tmp` artifacts must not be committed.
+
+This harness has no general processing or production mode. CLI network connection
+attempts are blocked. Synthetic tests create their own fixtures; they do not grant
+authorization for a real cohort or substitute a synthetic production binding.
+
 ### One-time historical Explorer issuance
 
 `scripts/active/issue_historical_explorer.py` is a separate, explicitly authorized

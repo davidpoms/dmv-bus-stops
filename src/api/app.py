@@ -41,6 +41,8 @@ from src.dashboard.border_jurisdiction import operational_jurisdiction, BorderPo
 from src.review.progress import build_progress
 from src.review.recognition.achievements import build_achievements
 from src.review.recognition.qualification import Quarantined
+from src.review.recognition import DISABLED, RecognitionGate
+from src.review.recognition import live_first_looks
 from src.review.recent_activity import build_recent_activity
 from src.review.context import build_review_context
 from src.review.auth import (
@@ -70,6 +72,8 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "0") == "1",
     PERMANENT_SESSION_LIFETIME=timedelta(days=30),
+    LIVE_FIRST_LOOK_GATE=DISABLED,
+    LIVE_FIRST_LOOK_CONFIGURATION=live_first_looks.Configuration(),
 )
 
 
@@ -3312,16 +3316,29 @@ def submit_review():
             ).fetchone()
             consensus = dict(saved_consensus) if saved_consensus else None
         else:
+            # In-process reviewed configuration only; no request/env activation.
+            first_look_gate = app.config["LIVE_FIRST_LOOK_GATE"]
+            if not isinstance(first_look_gate, RecognitionGate) or first_look_gate.issuance:
+                raise Quarantined("invalid_submission_recognition_gate")
+            if first_look_gate.capture:
+                refresh_conn.execute("PRAGMA foreign_keys=ON")
             # Rebuild only from persisted observations, never the replacement payload.
             consensus = calculate_stop_consensus(stop_id, DATABASE_PATH)
             refresh_after_community_mutation(refresh_conn, stop_id)
             with refresh_conn:
-                refresh_conn.execute(
+                completed = refresh_conn.execute(
                     "UPDATE stop_review_assignments SET status='completed', "
                     "completed_at=COALESCE(completed_at, CURRENT_TIMESTAMP) "
                     "WHERE id=? AND reviewer_id=? AND stop_id=?",
                     (assignment_id, reviewer_id, stop_id),
                 )
+                if first_look_gate.capture:
+                    if completed.rowcount != 1:
+                        raise Quarantined("assignment_completion_update_failed")
+                    live_first_looks.enqueue(
+                        refresh_conn, int(assignment_id), gate=first_look_gate,
+                        configuration=app.config["LIVE_FIRST_LOOK_CONFIGURATION"],
+                    )
     except Exception:
         app.logger.exception("Saved review refresh failed for stop %s", stop_id)
         return {

@@ -1,9 +1,13 @@
 """Reuse report reads inside a caller-owned, locked validation transaction."""
 
 from contextlib import contextmanager
+from contextvars import ContextVar
 import sqlite3
 
 from .schema import connection
+
+
+_authorizers = ContextVar("recognition_report_authorizers", default=())
 
 
 @contextmanager
@@ -23,8 +27,12 @@ def report_connection(database):
                                  arg1.lower() in {"table_info"}):
             return sqlite3.SQLITE_OK
         return sqlite3.SQLITE_DENY
+    stack = _authorizers.get()
+    previous = next((callback for conn, callback in reversed(stack) if conn is database), None)
+    token = _authorizers.set((*stack, (database, authorize)))
     database.set_authorizer(authorize)
     try:
         yield database
     finally:
-        database.set_authorizer(None)
+        database.set_authorizer(previous)
+        _authorizers.reset(token)

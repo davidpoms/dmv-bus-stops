@@ -11,7 +11,7 @@ from . import RecognitionGate
 from .first_looks import build_report
 from .geography import DEFAULT_THRESHOLDS, _utc, build_geography_report
 from .permanent_schema import check_schema
-from .qualification import Quarantined
+from .qualification import Quarantined, require_transaction
 from .rules import canonical, digest, load_rule
 from .schema import connection
 
@@ -157,6 +157,10 @@ def prepare(database, *, family, inputs, evaluation_at_utc, authorization_refere
 
 
 def _validate_manifest(manifest):
+    if manifest.get("format") == "live-first-look-operation-v1":
+        from .live_first_looks import validate_operation_manifest
+        validate_operation_manifest(manifest)
+        return
     require(manifest.get("format") == "private-recognition-operation-v1", "invalid_manifest")
     family = manifest.get("family")
     require(family in DEFINITIONS and manifest["rule"] == DEFINITIONS[family] and
@@ -244,6 +248,36 @@ def check_geography_integrity(conn, award_id):
     return candidate
 
 
+def _insert_operation(conn, manifest):
+    """Shared immutable operation storage; caller owns transaction/authorization."""
+    require_transaction(conn)
+    _validate_manifest(manifest)
+    rule = manifest["rule"]
+    old = conn.execute("SELECT * FROM recognition_private_rules WHERE rule_key=?", (rule["rule_key"],)).fetchone()
+    if old:
+        require(old["definition_json"] == canonical(rule) and old["definition_sha256"] == digest(rule), "stored_rule_mismatch")
+    else:
+        conn.execute("INSERT INTO recognition_private_rules VALUES(?,?,?,?)",
+                     (rule["rule_key"], manifest["family"], canonical(rule), digest(rule)))
+    sealed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    require(sealed_at >= manifest["evaluation_at_utc"], "future_evaluation_not_authorized")
+    operation_id = digest(manifest)
+    conn.execute("INSERT INTO recognition_private_operations VALUES(?,?,?,?,?,?)",
+                 (operation_id, rule["rule_key"], canonical(manifest), operation_id,
+                  manifest["authorization_reference"], sealed_at))
+    return operation_id
+
+
+def _insert_first_look_claim(conn, candidate, operation_id):
+    """Shared uniqueness-protected claim insert, never opens/commits a connection."""
+    require_transaction(conn)
+    require(conn.execute("SELECT 1 FROM recognition_first_look_claims WHERE physical_stop_id=?",
+                         (candidate["physical_stop_id"],)).fetchone() is None, "existing_claim_requires_discrepancy")
+    conn.execute("INSERT INTO recognition_first_look_claims VALUES(?,?,?,?,?,?,?)",
+                 (candidate["physical_stop_id"], candidate["reviewer_id"], candidate["assignment_id"],
+                  operation_id, candidate["completed_at_utc"], canonical(candidate), digest(candidate)))
+
+
 def finalize(database, manifest, *, manifest_sha256, authorization_reference=None,
              gate=RecognitionGate()):
     """Explicit one-operation transaction. No leasing, Explorer writes or capture."""
@@ -251,6 +285,7 @@ def finalize(database, manifest, *, manifest_sha256, authorization_reference=Non
         return {"issued": False, "reason": "issuance_disabled"}
     require(not gate.capture, "capture_must_remain_disabled")
     manifest = json.loads(canonical(manifest))
+    require(manifest.get("format") == "private-recognition-operation-v1", "historical_manifest_required")
     operation_id = digest(manifest)
     require(operation_id == manifest_sha256, "manifest_hash_mismatch")
     require(text(authorization_reference) and authorization_reference == manifest["authorization_reference"],
@@ -268,26 +303,10 @@ def finalize(database, manifest, *, manifest_sha256, authorization_reference=Non
         # regenerated inside the lock, before any new-family write.
         fresh = _prepare(conn, manifest["family"], manifest["inputs"], manifest["evaluation_at_utc"], authorization_reference)
         require(fresh == manifest, "reviewed_source_changed")
-        rule = manifest["rule"]
-        old_rule = conn.execute("SELECT * FROM recognition_private_rules WHERE rule_key=?", (rule["rule_key"],)).fetchone()
-        if old_rule:
-            require(old_rule["definition_json"] == canonical(rule) and old_rule["definition_sha256"] == digest(rule), "stored_rule_mismatch")
-        else:
-            conn.execute("INSERT INTO recognition_private_rules VALUES(?,?,?,?)",
-                         (rule["rule_key"], manifest["family"], canonical(rule), digest(rule)))
-        sealed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        require(sealed_at >= manifest["evaluation_at_utc"], "future_evaluation_not_authorized")
-        conn.execute("INSERT INTO recognition_private_operations VALUES(?,?,?,?,?,?)",
-                     (operation_id, rule["rule_key"], canonical(manifest), operation_id,
-                      authorization_reference, sealed_at))
+        _insert_operation(conn, manifest)
         if manifest["family"] == "first_look":
             for candidate in manifest["candidates"]:
-                # A previously sealed stop is never silently reassigned.
-                require(conn.execute("SELECT 1 FROM recognition_first_look_claims WHERE physical_stop_id=?",
-                                     (candidate["physical_stop_id"],)).fetchone() is None, "existing_claim_requires_discrepancy")
-                conn.execute("INSERT INTO recognition_first_look_claims VALUES(?,?,?,?,?,?,?)",
-                             (candidate["physical_stop_id"], candidate["reviewer_id"], candidate["assignment_id"],
-                              operation_id, candidate["completed_at_utc"], canonical(candidate), digest(candidate)))
+                _insert_first_look_claim(conn, candidate, operation_id)
         else:
             for item in manifest["report"]["scopes"]:
                 scope = item["snapshot_scope"]

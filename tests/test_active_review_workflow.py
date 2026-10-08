@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -620,6 +621,111 @@ class ActiveReviewWorkflowTests(unittest.TestCase):
             response = self.submit_photo_review()
         self.assertEqual(200, response.status_code)
         self.assertEqual(1, len(self.saved_review_state()[1]))
+
+    def prepare_first_look_submission(self):
+        from src.review.recognition.schema import migrate
+        from src.review.recognition.permanent_schema import migrate as permanent_migrate
+        from src.review.recognition.live_first_look_schema import migrate as live_migrate
+        self.prepare_submission()
+        migrate(self.db, apply=True)
+        permanent_migrate(self.db, apply=True)
+        live_migrate(self.db, apply=True)
+
+    def first_look_settings(self, enabled=True):
+        from src.review.recognition import RecognitionGate
+        from src.review.recognition.live_first_looks import Configuration
+        return patch.dict(review_api.app.config, {
+            "LIVE_FIRST_LOOK_GATE": RecognitionGate(capture=enabled),
+            "LIVE_FIRST_LOOK_CONFIGURATION": Configuration(
+                activation_at_utc="2000-01-02T00:00:00Z",
+                historical_cutoff_utc="2000-01-01T00:00:00Z",
+                policy_reference="synthetic-submission", policy_sha256="a" * 64,
+                sqlite_utc_provenance="synthetic-test-writer"),
+        })
+
+    def recognition_counts(self):
+        with closing(sqlite3.connect(self.db)) as conn:
+            return [conn.execute("SELECT COUNT(*) FROM " + name).fetchone()[0] for name in (
+                "recognition_completions", "recognition_first_look_pending",
+                "recognition_jobs", "recognition_awards", "recognition_first_look_claims")]
+
+    def test_submission_first_look_disabled_is_noop(self):
+        self.prepare_first_look_submission()
+        with self.first_look_settings(False), \
+             patch.object(review_api.live_first_looks, "enqueue") as enqueue, \
+             patch.object(review_api, "calculate_stop_consensus", return_value={}), \
+             patch.object(review_api, "refresh_after_community_mutation"):
+            self.assertEqual(200, self.submit_photo_review().status_code)
+        enqueue.assert_not_called()
+        self.assertEqual([0, 0, 0, 0, 0], self.recognition_counts())
+
+    def test_submission_first_look_atomic_capture_retry_and_same_stop(self):
+        self.prepare_first_look_submission()
+        original = review_api.live_first_looks.enqueue
+        def checked(conn, assignment, **kwargs):
+            self.assertTrue(conn.in_transaction)
+            self.assertEqual("completed", conn.execute(
+                "SELECT status FROM stop_review_assignments WHERE id=?", (assignment,)).fetchone()[0])
+            with closing(sqlite3.connect(self.db)) as observer:
+                self.assertEqual("assigned", observer.execute(
+                    "SELECT status FROM stop_review_assignments WHERE id=?", (assignment,)).fetchone()[0])
+            return original(conn, assignment, **kwargs)
+        with self.first_look_settings(), \
+             patch.object(review_api, "calculate_stop_consensus", return_value={}), \
+             patch.object(review_api, "refresh_after_community_mutation"), \
+             patch.object(review_api.live_first_looks, "enqueue", side_effect=checked) as enqueue:
+            self.assertEqual(200, self.submit_photo_review().status_code)
+            before = self.saved_review_state()
+            self.assertEqual(200, self.submit_photo_review().status_code)
+            self.assertEqual(before, self.saved_review_state())
+            self.assertEqual(1, enqueue.call_count)
+            with closing(sqlite3.connect(self.db)) as conn, conn:
+                conn.execute("INSERT INTO stop_review_assignments VALUES(22,1,1,'opportunity',NULL,'assigned',NULL)")
+            self.assertEqual(200, self.submit_photo_review(assignment_id=22).status_code)
+        self.assertEqual([2, 2, 0, 0, 0], self.recognition_counts())
+
+    def test_submission_first_look_failure_rolls_back_completion_and_capture(self):
+        self.prepare_first_look_submission()
+        original = review_api.live_first_looks.enqueue
+        for error in (review_api.Quarantined("synthetic-quarantine"), sqlite3.OperationalError("database is locked")):
+            def failing(conn, assignment, **kwargs):
+                original(conn, assignment, **kwargs)
+                raise error
+            with self.subTest(error=type(error).__name__), self.first_look_settings(), \
+                 patch.object(review_api, "calculate_stop_consensus", return_value={}), \
+                 patch.object(review_api, "refresh_after_community_mutation"), \
+                 patch.object(review_api.live_first_looks, "enqueue", side_effect=failing):
+                response = self.submit_photo_review()
+            self.assertEqual(500, response.status_code)
+            self.assertTrue(response.json["evidence_saved"])
+            self.assertEqual(("assigned", None), self.saved_review_state()[2])
+            self.assertEqual(1, len(self.saved_review_state()[0]))
+            self.assertEqual([0, 0, 0, 0, 0], self.recognition_counts())
+        with self.first_look_settings(), \
+             patch.object(review_api, "calculate_stop_consensus", return_value={}), \
+             patch.object(review_api, "refresh_after_community_mutation"):
+            self.assertEqual(200, self.submit_photo_review().status_code)
+        self.assertEqual([1, 1, 0, 0, 0], self.recognition_counts())
+
+    def test_submission_first_look_refresh_failure_and_invalid_configuration(self):
+        from src.review.recognition import RecognitionGate
+        from src.review.recognition.live_first_looks import Configuration
+        self.prepare_first_look_submission()
+        with self.first_look_settings(), \
+             patch.object(review_api, "calculate_stop_consensus", return_value={}), \
+             patch.object(review_api, "refresh_after_community_mutation", side_effect=RuntimeError("synthetic refresh")), \
+             patch.object(review_api.live_first_looks, "enqueue") as enqueue:
+            self.assertEqual(500, self.submit_photo_review().status_code)
+        enqueue.assert_not_called()
+        for changes in ({"LIVE_FIRST_LOOK_CONFIGURATION": Configuration()},
+                        {"LIVE_FIRST_LOOK_GATE": RecognitionGate(capture=True, issuance=True)}):
+            with self.subTest(changes=changes), self.first_look_settings(), \
+                 patch.dict(review_api.app.config, changes), \
+                 patch.object(review_api, "calculate_stop_consensus", return_value={}), \
+                 patch.object(review_api, "refresh_after_community_mutation"):
+                self.assertEqual(500, self.submit_photo_review().status_code)
+            self.assertEqual(("assigned", None), self.saved_review_state()[2])
+            self.assertEqual([0, 0, 0, 0, 0], self.recognition_counts())
 
     def test_completion_exposure_reports_zero_missing_and_coverage(self):
         self.prepare_submission()
