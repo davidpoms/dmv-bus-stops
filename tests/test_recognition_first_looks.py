@@ -154,6 +154,33 @@ class FirstLookReportTests(unittest.TestCase):
         self.sql("DELETE FROM stop_review_assignments WHERE id=2")
         self.assertEqual([1], [s["physical_stop_id"] for s in self.report()["stops"]])
 
+    def test_current_ordinary_curb_split_successor_retains_only_direct_review(self):
+        self.facility_split()
+        self.sql("UPDATE physical_stop_identity_events SET reason_code='ordinary_curb_split'")
+        self.review(1, stop=1, time="2026-09-20T12:00:00Z")
+        self.review(2, owner=2, stop=2)
+        report = self.report()
+        predecessor, successor = report["stops"]
+        self.assertIn("physical_identity_changed", predecessor["reasons"])
+        self.assertIsNone(predecessor["provisional_winner"])
+        self.assertNotIn("physical_identity_changed", successor["reasons"])
+        self.assertEqual(2, successor["provisional_winner"]["assignment_id"])
+        self.assertEqual([2], [f["assignment_id"] for f in successor["qualifying_completions"]])
+        self.assertEqual([2], report["resolved_split_successors"])
+
+    def test_ordinary_curb_split_non_split_event_and_manual_exception_blocked(self):
+        self.facility_split()
+        self.sql("UPDATE physical_stop_identity_events SET reason_code='ordinary_curb_split'")
+        self.review(2, stop=2)
+        for event_type, status in (("merge", "current"), ("split", "manual_exception")):
+            with self.subTest(event_type=event_type, status=status):
+                self.sql("UPDATE physical_stop_identity_events SET event_type=?", (event_type,))
+                self.sql("UPDATE physical_stop_identity_state SET identity_status=? WHERE physical_stop_id=2", (status,))
+                report = self.report()
+                self.assertIn("physical_identity_changed", report["stops"][0]["reasons"])
+                self.assertIsNone(report["stops"][0]["provisional_winner"])
+                self.assertEqual([], report["resolved_split_successors"])
+
     def test_split_exception_requires_exact_lineage_and_current_state(self):
         self.review(2, stop=2)
         changes = (

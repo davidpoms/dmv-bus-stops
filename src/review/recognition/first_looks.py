@@ -120,7 +120,7 @@ def build_report(database, *, cutoff_utc, sqlite_utc_provenance=None,
         affected.add(predecessor)
         if (edge.get("relationship_type") == "split_successor"
                 and event.get("event_type") == "split"
-                and event.get("reason_code") == "facility_bay_split"
+                and event.get("reason_code") in {"facility_bay_split", "ordinary_curb_split"}
                 and states.get(successor) == "current"):
             # Only direct evidence on this current successor is attributable.
             # This never copies predecessor facts or clears other lineage issues.
