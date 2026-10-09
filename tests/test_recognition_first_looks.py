@@ -31,7 +31,12 @@ class FirstLookReportTests(unittest.TestCase):
                 CREATE TABLE stop_observations(id INTEGER PRIMARY KEY,assignment_id INTEGER,
                     reviewer_id INTEGER,physical_stop_id INTEGER,source TEXT,observed_at TEXT);
                 CREATE TABLE physical_stop_identity_edges(event_id INTEGER,
-                    predecessor_physical_stop_id INTEGER,successor_physical_stop_id INTEGER);
+                    predecessor_physical_stop_id INTEGER,successor_physical_stop_id INTEGER,
+                    relationship_type TEXT);
+                CREATE TABLE physical_stop_identity_events(id INTEGER PRIMARY KEY,
+                    event_type TEXT,reason_code TEXT);
+                CREATE TABLE physical_stop_identity_state(physical_stop_id INTEGER PRIMARY KEY,
+                    identity_status TEXT);
             """)
 
     def sql(self, query, args=()):
@@ -118,11 +123,76 @@ class FirstLookReportTests(unittest.TestCase):
     def test_inactive_stops_retained_identity_changes_never_transfer_credit(self):
         self.review(1)
         self.assertEqual(1, self.report()["stops"][0]["provisional_winner"]["physical_stop_id"])
-        self.sql("INSERT INTO physical_stop_identity_edges VALUES(1,1,2)")
+        self.sql("INSERT INTO physical_stop_identity_edges VALUES(1,1,2,NULL)")
         report = self.report()
         self.assertEqual([1], [s["physical_stop_id"] for s in report["stops"]])
         self.assertIn("physical_identity_changed", report["stops"][0]["reasons"])
         self.assertIsNone(report["stops"][0]["provisional_winner"])
+
+    def facility_split(self):
+        self.sql("INSERT INTO physical_stop_identity_events VALUES(1,'split','facility_bay_split')")
+        self.sql("INSERT INTO physical_stop_identity_edges VALUES(1,1,2,'split_successor')")
+        self.sql("INSERT INTO physical_stop_identity_state VALUES(1,'retired'),(2,'current')")
+
+    def test_current_facility_split_successor_retains_only_direct_review(self):
+        self.facility_split()
+        self.review(1, stop=1, time="2026-09-20T12:00:00Z")
+        self.review(2, owner=2, stop=2)
+        before = hashlib.sha256(self.path.read_bytes()).hexdigest()
+        report = self.report()
+        predecessor, successor = report["stops"]
+        self.assertIn("physical_identity_changed", predecessor["reasons"])
+        self.assertIsNone(predecessor["provisional_winner"])
+        self.assertNotIn("physical_identity_changed", successor["reasons"])
+        self.assertEqual(2, successor["provisional_winner"]["assignment_id"])
+        self.assertEqual([2], [f["assignment_id"] for f in successor["qualifying_completions"]])
+        self.assertEqual([2], report["resolved_split_successors"])
+        self.assertEqual("facility_bay_split", report["identity_events"][0]["reason_code"])
+        self.assertEqual(report, self.report())
+        self.assertEqual(before, hashlib.sha256(self.path.read_bytes()).hexdigest())
+        self.sql("DELETE FROM stop_observations WHERE assignment_id=2")
+        self.sql("DELETE FROM stop_review_assignments WHERE id=2")
+        self.assertEqual([1], [s["physical_stop_id"] for s in self.report()["stops"]])
+
+    def test_split_exception_requires_exact_lineage_and_current_state(self):
+        self.review(2, stop=2)
+        changes = (
+            "UPDATE physical_stop_identity_events SET event_type='merge'",
+            "UPDATE physical_stop_identity_events SET event_type='move'",
+            "UPDATE physical_stop_identity_events SET reason_code='manual_exception'",
+            "UPDATE physical_stop_identity_events SET reason_code=NULL",
+            "UPDATE physical_stop_identity_edges SET relationship_type='unknown'",
+            "UPDATE physical_stop_identity_state SET identity_status='retired' WHERE physical_stop_id=2",
+            "UPDATE physical_stop_identity_state SET identity_status='manual_exception' WHERE physical_stop_id=2",
+            "DELETE FROM physical_stop_identity_state WHERE physical_stop_id=2",
+            "DELETE FROM physical_stop_identity_events",
+            # An allowed incoming split must not mask another problematic edge.
+            "INSERT INTO physical_stop_identity_edges VALUES(99,1,2,NULL)",
+            "INSERT INTO physical_stop_identity_edges VALUES(99,2,1,NULL)",
+        )
+        for change in changes:
+            with self.subTest(change=change):
+                self.sql("DELETE FROM physical_stop_identity_events")
+                self.sql("DELETE FROM physical_stop_identity_edges")
+                self.sql("DELETE FROM physical_stop_identity_state")
+                self.facility_split()
+                self.sql(change)
+                report = self.report()
+                self.assertIn("physical_identity_changed", report["stops"][0]["reasons"])
+                self.assertIsNone(report["stops"][0]["provisional_winner"])
+                self.assertEqual([], report["resolved_split_successors"])
+
+    def test_missing_identity_tables_do_not_resolve_split_or_clear_prior_issue(self):
+        self.facility_split()
+        self.review(2, stop=2)
+        self.sql("UPDATE physical_stop_identity_events SET reason_code='unknown'")
+        prior = self.report()
+        self.sql("UPDATE physical_stop_identity_events SET reason_code='facility_bay_split'")
+        self.assertIn("physical_identity_changed", self.report(previous_report=prior)["stops"][0]["reasons"])
+        self.sql("DROP TABLE physical_stop_identity_events")
+        self.assertIn("physical_identity_changed", self.report()["stops"][0]["reasons"])
+        self.sql("DROP TABLE physical_stop_identity_state")
+        self.assertIn("physical_identity_changed", self.report()["stops"][0]["reasons"])
 
     def test_unreviewed_coverage_clock_and_missing_competitors_block_winners(self):
         self.review(1)

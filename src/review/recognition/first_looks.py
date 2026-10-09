@@ -79,6 +79,8 @@ def build_report(database, *, cutoff_utc, sqlite_utc_provenance=None,
                 "SELECT * FROM physical_stop_identity_edges ORDER BY event_id,predecessor_physical_stop_id,successor_physical_stop_id")]
         identity_states = [dict(r) for r in conn.execute(
             "SELECT * FROM physical_stop_identity_state ORDER BY physical_stop_id")] if "physical_stop_identity_state" in tables else []
+        identity_events = [dict(r) for r in conn.execute(
+            "SELECT * FROM physical_stop_identity_events ORDER BY id")] if "physical_stop_identity_events" in tables else []
 
     reasons = []
     ids = [r["assignment"]["id"] for r in source]
@@ -109,8 +111,24 @@ def build_report(database, *, cutoff_utc, sqlite_utc_provenance=None,
             old = old_candidates.get(fact["physical_stop_id"])
             if fact["assignment_id"] not in old_source and old and _order(fact) < _order(old):
                 late_stops.add(fact["physical_stop_id"])
-    affected = {e[k] for e in identity_edges for k in ("predecessor_physical_stop_id", "successor_physical_stop_id")}
+    events = {e["id"]: e for e in identity_events}
+    states = {s["physical_stop_id"]: s["identity_status"] for s in identity_states}
+    affected, resolved_split_successors = set(), set()
+    for edge in identity_edges:
+        predecessor, successor = edge["predecessor_physical_stop_id"], edge["successor_physical_stop_id"]
+        event = events.get(edge["event_id"], {})
+        affected.add(predecessor)
+        if (edge.get("relationship_type") == "split_successor"
+                and event.get("event_type") == "split"
+                and event.get("reason_code") == "facility_bay_split"
+                and states.get(successor) == "current"):
+            # Only direct evidence on this current successor is attributable.
+            # This never copies predecessor facts or clears other lineage issues.
+            resolved_split_successors.add(successor)
+        else:
+            affected.add(successor)
     affected.update(s["physical_stop_id"] for s in identity_states if s["identity_status"] != "current")
+    resolved_split_successors.difference_update(affected)
     stops = []
     stop_ids = {f["physical_stop_id"] for f in qualified} | {e["physical_stop_id"] for e in excluded} | changed_stops
     for stop in sorted(stop_ids, key=lambda n: (n is None, n or 0)):
@@ -136,7 +154,8 @@ def build_report(database, *, cutoff_utc, sqlite_utc_provenance=None,
               "status": "requires_adjudication" if reasons or any(s["reasons"] for s in stops) else "complete_projection",
               "reasons": sorted(reasons), "source": source, "qualified": sorted(qualified, key=_order),
               "excluded": excluded, "orphan_observations": orphans, "identity_edges": identity_edges,
-              "identity_states": identity_states, "stops": stops,
+              "identity_states": identity_states, "identity_events": identity_events,
+              "resolved_split_successors": sorted(resolved_split_successors), "stops": stops,
               "limitations": ["Review references are operator assertions, not independently verified attestations.",
                               "Absent history and unrecorded clock regressions cannot be inferred from this copy.",
                               "Without a retained prior report, late discovery and source corrections may be undetectable.",
