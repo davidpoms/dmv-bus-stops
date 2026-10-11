@@ -649,6 +649,54 @@ class ActiveReviewWorkflowTests(unittest.TestCase):
                 "recognition_completions", "recognition_first_look_pending",
                 "recognition_jobs", "recognition_awards", "recognition_first_look_claims")]
 
+    def test_submission_live_recognition_capture_creates_pending_job_without_award(self):
+        from src.review.recognition import RecognitionGate
+
+        self.prepare_submission()
+        from src.review.recognition.schema import migrate
+        migrate(self.db, apply=True)
+
+        with patch.dict(review_api.app.config, {
+            "LIVE_RECOGNITION_GATE": RecognitionGate(capture=True, issuance=False),
+            "LIVE_RECOGNITION_SQLITE_UTC_PROVENANCE": "reviewed-submit-writer",
+        }), \
+             patch.object(review_api, "calculate_stop_consensus", return_value={}), \
+             patch.object(review_api, "refresh_after_community_mutation"):
+
+            response = self.submit_photo_review()
+
+        self.assertEqual(200, response.status_code)
+
+        with closing(sqlite3.connect(self.db)) as conn:
+            completion = conn.execute("""
+                SELECT assignment_id, reviewer_id, physical_stop_id,
+                       completed_at_utc, original_completed_at,
+                       timestamp_provenance, qualification_rule_key, origin
+                FROM recognition_completions
+            """).fetchone()
+
+            job = conn.execute("""
+                SELECT assignment_id, rule_key, state, attempts,
+                       lease_token, lease_until_utc
+                FROM recognition_jobs
+            """).fetchone()
+
+            awards = conn.execute(
+                "SELECT COUNT(*) FROM recognition_awards"
+            ).fetchone()[0]
+
+        self.assertIsNotNone(completion)
+        self.assertEqual(21, completion[0])
+        self.assertEqual("sqlite_current_timestamp_utc:reviewed-submit-writer", completion[5])
+        self.assertEqual("explorer:v1", completion[6])
+        self.assertEqual("live", completion[7])
+
+        self.assertEqual(
+            (completion[0], "explorer:v1", "pending", 0, None, None),
+            job,
+        )
+        self.assertEqual(0, awards)
+
     def test_submission_first_look_disabled_is_noop(self):
         self.prepare_first_look_submission()
         with self.first_look_settings(False), \

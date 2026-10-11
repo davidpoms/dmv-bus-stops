@@ -40,9 +40,10 @@ from src.review.consensus import calculate_stop_consensus
 from src.dashboard.border_jurisdiction import operational_jurisdiction, BorderPolicyUnavailable
 from src.review.progress import build_progress
 from src.review.recognition.achievements import build_achievements
-from src.review.recognition.qualification import Quarantined
+from src.review.recognition.qualification import Quarantined, capture
 from src.review.recognition import DISABLED, RecognitionGate
 from src.review.recognition import live_first_looks
+from src.review.recognition.rules import RULE_KEY
 from src.review.recent_activity import build_recent_activity
 from src.review.context import build_review_context
 from src.review.auth import (
@@ -74,6 +75,15 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(days=30),
     LIVE_FIRST_LOOK_GATE=DISABLED,
     LIVE_FIRST_LOOK_CONFIGURATION=live_first_looks.Configuration(),
+    LIVE_RECOGNITION_GATE=RecognitionGate(
+        capture=os.environ.get("LIVE_RECOGNITION_CAPTURE", "0") == "1",
+        issuance=False,
+    ),
+    LIVE_RECOGNITION_SQLITE_UTC_PROVENANCE=(
+        "live-review-submit"
+        if os.environ.get("LIVE_RECOGNITION_CAPTURE", "0") == "1"
+        else None
+    ),
 )
 
 
@@ -3316,11 +3326,18 @@ def submit_review():
             ).fetchone()
             consensus = dict(saved_consensus) if saved_consensus else None
         else:
-            # In-process reviewed configuration only; no request/env activation.
+            # Recognition activation is deployment configuration only; never request-controlled.
             first_look_gate = app.config["LIVE_FIRST_LOOK_GATE"]
-            if not isinstance(first_look_gate, RecognitionGate) or first_look_gate.issuance:
+            live_recognition_gate = app.config["LIVE_RECOGNITION_GATE"]
+
+            if (not isinstance(first_look_gate, RecognitionGate)
+                    or first_look_gate.issuance):
                 raise Quarantined("invalid_submission_recognition_gate")
-            if first_look_gate.capture:
+            if (not isinstance(live_recognition_gate, RecognitionGate)
+                    or live_recognition_gate.issuance):
+                raise Quarantined("invalid_live_recognition_gate")
+
+            if first_look_gate.capture or live_recognition_gate.capture:
                 refresh_conn.execute("PRAGMA foreign_keys=ON")
             # Rebuild only from persisted observations, never the replacement payload.
             consensus = calculate_stop_consensus(stop_id, DATABASE_PATH)
@@ -3332,12 +3349,26 @@ def submit_review():
                     "WHERE id=? AND reviewer_id=? AND stop_id=?",
                     (assignment_id, reviewer_id, stop_id),
                 )
-                if first_look_gate.capture:
+                if first_look_gate.capture or live_recognition_gate.capture:
                     if completed.rowcount != 1:
                         raise Quarantined("assignment_completion_update_failed")
+
+                if first_look_gate.capture:
                     live_first_looks.enqueue(
                         refresh_conn, int(assignment_id), gate=first_look_gate,
                         configuration=app.config["LIVE_FIRST_LOOK_CONFIGURATION"],
+                    )
+
+                if live_recognition_gate.capture:
+                    capture(
+                        refresh_conn,
+                        int(assignment_id),
+                        RULE_KEY,
+                        gate=live_recognition_gate,
+                        origin="live",
+                        sqlite_utc_provenance=app.config[
+                            "LIVE_RECOGNITION_SQLITE_UTC_PROVENANCE"
+                        ],
                     )
     except Exception:
         app.logger.exception("Saved review refresh failed for stop %s", stop_id)

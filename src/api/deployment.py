@@ -28,6 +28,10 @@ def validate_pilot_environment(env=None):
         errors.append("SESSION_COOKIE_SECURE must be 1 for the HTTPS pilot")
     if env.get("REVIEWER_AUTH_DEV_MODE") == "1":
         errors.append("REVIEWER_AUTH_DEV_MODE must be unset or 0")
+
+    recognition_capture = env.get("LIVE_RECOGNITION_CAPTURE", "0")
+    if recognition_capture not in ("0", "1"):
+        errors.append("LIVE_RECOGNITION_CAPTURE must be 0 or 1")
     support = env.get("PILOT_SUPPORT_CONTACT", "").strip()
     if not support or any(item in support.lower() for item in PLACEHOLDER_FRAGMENTS):
         errors.append("PILOT_SUPPORT_CONTACT must name the monitored pilot contact")
