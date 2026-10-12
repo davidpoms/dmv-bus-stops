@@ -76,7 +76,7 @@ def bounded(limit):
     return limit
 
 
-def lease_jobs(conn, rule_key, *, gate=DISABLED, limit=100):
+def lease_jobs(conn, rule_key, *, gate=DISABLED, limit=100, pending_assignment_id=None):
     if not gate.issuance:
         return []
     require_transaction(conn)
@@ -84,9 +84,14 @@ def lease_jobs(conn, rule_key, *, gate=DISABLED, limit=100):
     load_rule(conn, rule_key)
     now = conn.execute("SELECT strftime('%Y-%m-%dT%H:%M:%SZ','now')").fetchone()[0]
     until = (datetime.fromisoformat(now.replace("Z", "+00:00")) + timedelta(minutes=5)).isoformat().replace("+00:00", "Z")
-    rows = conn.execute("""SELECT assignment_id FROM recognition_jobs WHERE rule_key=?
+    if pending_assignment_id is not None:
+        # Explicit live processors must not reclaim leases or expand their cohort.
+        rows = conn.execute("""SELECT assignment_id FROM recognition_jobs WHERE rule_key=?
+            AND state='pending' AND assignment_id=?""", (rule_key, pending_assignment_id)).fetchall()
+    else:
+        rows = conn.execute("""SELECT assignment_id FROM recognition_jobs WHERE rule_key=?
         AND (state='pending' OR (state='leased' AND lease_until_utc<=?)) ORDER BY assignment_id LIMIT ?""",
-        (rule_key, now, limit)).fetchall()
+            (rule_key, now, limit)).fetchall()
     leased = []
     for row in rows:
         token = uuid.uuid4().hex
