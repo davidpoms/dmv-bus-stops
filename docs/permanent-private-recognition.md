@@ -2,9 +2,8 @@
 
 Authorization update: file-backed private migrations and writers now require the
 independent contract in [Recognition authorization hardening](recognition-authorization-hardening.md).
-Gates, hashes and reference strings alone no longer authorize them. The older
-disposable CLI issuance examples below are insufficient without separately
-provisioned disposable authority and approval-data provider; verification-only remains available.
+Gates, hashes and reference strings alone do not authorize them. The CLI supports
+verification-only use; it has no authority provisioning integration.
 Production authority provisioning is unavailable.
 
 This is an additive disposable-rehearsal release. No production migration,
@@ -51,8 +50,9 @@ separately reviewed extension preserving reviewer/scope/ordinal-tier uniqueness.
 ## Additive schema and transactions
 
 `permanent_schema.migrate(database)` rehearses in memory by default. Explicit
-`apply=True` installs only these new tables transactionally; compatible existing
-Explorer schema is required. Nothing imports migration into application startup.
+`apply=True` requests installation but additionally requires exact schema approval
+and a provisioned authority. Compatible existing Explorer schema is required.
+Nothing imports migration into application startup.
 
 | Table | Purpose / uniqueness |
 | --- | --- |
@@ -72,8 +72,9 @@ restrict account/stop deletion; future retention/correction policy requires
 explicit design. Retain manifests and external evidence privately.
 
 `prepare()` is read-only. `finalize()` defaults off and requires the reviewed
-canonical manifest hash, matching explicit authorization reference and
-`RecognitionGate(capture=False, issuance=True)`. It owns `BEGIN IMMEDIATE` and
+canonical manifest hash, matching explicit authorization reference,
+`RecognitionGate(capture=False, issuance=True)`, exact manifest `authorization`
+and provisioned `authority`. Only disposable authority is available. It owns `BEGIN IMMEDIATE` and
 validates schema/trigger definitions, then regenerates the complete report,
 identity history, ledger and candidate set before its first insert. Reports use
 a SELECT-only authorizer inside that connection. No Explorer job is leased or
@@ -120,27 +121,29 @@ review; the service cannot prove them by inspecting reference strings.
 
 Run from this checkout, replacing placeholders with reviewed offline artifacts.
 `--manifest-sha256` means exact-file SHA-256; the service separately verifies the
-canonical digest. PowerShell verification-only command (creates no output):
+canonical digest. PowerShell verification-only command (prints a report, creates
+no target or approval artifacts; use only reviewed non-production offline inputs):
 
 ```powershell
 python -B scripts/active/rehearse_private_recognition.py --source '<absolute-offline-copy.db>' --source-sha256 '<SHA256>' --manifest '<absolute-reviewed-manifest.json>' --manifest-sha256 '<FILE_SHA256>' --target "$PWD/.tmp/private-recognition-rehearsals/disposable-first-look.db"
 ```
 
-After review and explicit disposable issuance authorization:
+For synthetic migration and issuance, use the fixture-owned test procedure in
+[Recognition test deployment](recognition-test-deployment.md):
 
-```powershell
-python -B scripts/active/rehearse_private_recognition.py --source '<absolute-offline-copy.db>' --source-sha256 '<SHA256>' --manifest '<absolute-reviewed-manifest.json>' --manifest-sha256 '<FILE_SHA256>' --target "$PWD/.tmp/private-recognition-rehearsals/disposable-first-look.db" --apply-disposable --authorization-reference '<EXACT_REVIEW_REFERENCE>'
+```bash
+python -B -m unittest tests.test_recognition_deployment tests.test_recognition_authorization tests.test_live_first_looks tests.test_recognition_permanent tests.test_private_recognition_rehearsal tests.test_explorer_issuance_rehearsal
 ```
 
-Geography uses its own reviewed manifest and `disposable-geography.db`. Repeat the
-identical authorized command with `--retry-existing` to verify idempotency; it
-requires the original receipt and target filesystem identity. Never rename an
-application database into the reserved directory. There is **no production mode**,
-binding override, capture option or network use. The command exclusively creates
-a new byte-identical disposable copy, applies additive migration there, seals the
-reviewed candidates and confirms Explorer rows/source bytes remain unchanged.
+These tests create synthetic targets and provision only DisposableWorkspace
+capabilities; they exercise issuance and idempotency without production artifacts.
+`--apply-disposable` alone cannot authorize a write: the CLI supplies neither the
+required approval-data provider nor a provisioned authority. Do not bypass its
+guards. The Python rehearsal API additionally requires both, and enforces disposable
+target authorization. Never rename an application database into a disposable root.
+There is **no production mode**. Synthetic approvals do not authorize production.
 
-Only offline rollback-journal snapshots are accepted. Keep writers stopped and
+The offline verification API accepts only rollback-journal snapshots. Keep writers stopped and
 the private directory free of competing filesystem writers. Orderly failure
 rolls back sealing; the receipt supports retry. On a hard termination/hot journal
 the command stops: never delete journals or restore over a database. Retain the

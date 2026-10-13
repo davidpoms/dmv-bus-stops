@@ -1,0 +1,2 @@
+# Synthetic artifact verification only; not part of the hosted Flask runtime.
+cryptography==50.0.2

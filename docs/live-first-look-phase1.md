@@ -2,8 +2,10 @@
 
 Authorization update: admission, sealing and file-backed migration now require
 the independent contract in [Recognition authorization hardening](recognition-authorization-hardening.md).
-Finality callbacks remain separate from writer approval. Gate-only invocation
-examples below describe transaction flow and do not authorize writes by themselves.
+Finality callbacks remain separate from writer approval and cannot act as production
+authority. The transaction flow below describes current disposable/test behavior;
+production provisioning remains unavailable. The proposed Production Trust Contract
+in that document is not implemented and does not enable any gate.
 
 Review submission now has a disabled-by-default enqueue integration. It does not
 seal claims or invoke a processor, startup migration or scheduler. Both existing
@@ -17,8 +19,9 @@ not seal it and cannot use candidates as a sealed historical baseline.
 ## Storage and compatibility
 
 `live_first_look_schema.migrate(database)` rehearses in memory by default;
-`apply=True` is explicit migration authorization. It requires the existing
-Explorer and permanent-family schemas. It adds only
+`apply=True` requests migration; it is not authorization. File-backed migration
+also requires exact schema `authorization` and provisioned `authority`, as well as
+the existing Explorer and permanent-family schemas. It adds only
 `recognition_first_look_pending`, keyed by immutable completion assignment ID:
 
 - Immutable configuration JSON/hash binds admission to the activation boundary
@@ -37,8 +40,8 @@ This qualification-rule identity is not a First Look award rule.
 
 Existing permanent claim/operation tables retain their schemas and uniqueness.
 Live operations have a distinct manifest format and configuration-addressed rule
-key. Historical `prepare()`/`finalize()` remain historical-only. Small shared
-operation/claim insertion helpers accept the caller's connection; existing claim
+key. Historical `prepare()`/`finalize()` remain historical-only. Operation/claim
+insertion exists only inside complete finalization/sealing paths; existing claim
 integrity reads validate both historical and frozen live-operation evidence.
 
 ## Caller-owned submission transaction flow
@@ -47,14 +50,18 @@ integrity reads validate both historical and frozen live-operation evidence.
 Application configuration defaults `LIVE_FIRST_LOOK_GATE` to `DISABLED` and
 `LIVE_FIRST_LOOK_CONFIGURATION` to an empty `Configuration()`. There is no
 request or environment-variable activation. Future independently authorized
-configuration must supply a capture-only gate and reviewed configuration.
+configuration must supply a capture-only gate, reviewed configuration, exact
+capture approval and provisioned authority. These requirements do not constitute
+a production activation procedure.
 
 1. Save observations on `observation_conn` and commit as before.
 2. Perform derived refresh on `refresh_conn` as before.
 3. Update assignment completion in the existing `with refresh_conn` transaction.
 4. Only with capture enabled, after a successful one-row UPDATE, call
-   `live_first_looks.enqueue(refresh_conn, assignment_id,
-   configuration=reviewed_configuration, gate=RecognitionGate(capture=True))`.
+   `live_first_looks.enqueue()` with the connection and assignment ID,
+   `configuration`, capture-only `gate`, exact capture `authorization` and
+   provisioned `authority`. Synthetic fixtures obtain these from their own
+   DisposableWorkspace; application JSON or a callback cannot supply authority.
 5. Commit completion, shared immutable evidence and First Look pending state
    together. Foreign keys are enabled before refresh when capture is enabled.
    On failure, roll back completion/capture, preserving the already committed
@@ -73,11 +80,13 @@ requires reviewed configuration. Completions before activation are not enqueued;
 activation itself is inclusive. Repeated admission verifies immutable evidence
 and the identical configuration; it never resets a processed/quarantined row.
 
-A separately authorized caller would then:
+A separately authorized disposable test caller then:
 
 1. `BEGIN IMMEDIATE` with foreign keys enabled.
-2. Call `seal_pending(conn, assignment_id, gate=RecognitionGate(issuance=True),
-   finality_guard=reviewed_guard)`.
+2. Call `seal_pending()` with the connection and assignment ID, an issuance-only
+   `gate`, reviewed `finality_guard`, exact manifest `authorization`, exact
+   `delivery_authorization` and provisioned `authority`. Finality and delivery
+   permission cannot replace claim-issuance approval.
 3. Commit the returned pending/done/quarantined result, or roll back on an
    unexpected failure. The primitive never opens a connection or calls BEGIN,
    COMMIT or a full transaction rollback; savepoints make its writes atomic.
@@ -100,10 +109,12 @@ Return `None` to defer, or a reviewed decision with exactly:
   cutoff, complete-population reconciliation and reviewed timestamp provenance;
 - `reference`: retained evidence authorizing this finality decision.
 
-The configured policy hash identifies independently reviewed policy material; it
-does not authenticate arbitrary callback code. Callback provisioning and approval
-remain an operator responsibility. `first_look_launch.build_guard()` supplies a
-conservative optional implementation; no callback is selected by the application.
+The configured policy hash identifies policy material; it does not authenticate
+arbitrary callback code. `first_look_launch.build_guard()` is an unwired policy
+helper with a finality-verifier test seam; no callback is selected by the application.
+A callback cannot provision writer authority. Future production finality must use
+the same opaque-authority trust infrastructure, with separate finality, delivery
+and issuance approvals. That adaptation remains unimplemented.
 
 The sealer verifies the historical operation and its persisted claims, cutoff,
 all current qualifying competitors and captured evidence, identity history and
@@ -113,7 +124,7 @@ this phase makes no interactive-latency claim. Ordering is always completion UTC
 then numeric assignment ID, never queue delivery order. The cutoff must include
 the triggering completion; it is not a hard-coded waiting period.
 
-Without a guard or with a deferral, the row stays pending with an incremented
+With valid delivery authorization but without a guard or with a deferral, the row stays pending with an incremented
 attempt/reason. Known evidence/baseline conflicts quarantine the row; explicit
 `retry_quarantined=True` is required to retry it after review. Matching existing
 claims are integrity-checked and acknowledged without another claim. Conflicting
@@ -124,6 +135,9 @@ handling remains available, not automatically invoked from this transaction.
 A new claim, immutable operation and done outcome are atomic. A done retry checks
 claim integrity without re-earning from changing source data. Unexpected failures
 roll back the savepoint; the caller still owns commit/rollback and recovery.
+Authorization failures propagate without authorizing a quarantine mutation. The
+future production commit coordinator is not implemented; releasing this savepoint
+does not close the revocation/expiry gap before the outer caller commits.
 
 ## Still blocked
 
