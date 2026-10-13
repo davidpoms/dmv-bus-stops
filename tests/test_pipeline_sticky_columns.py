@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 import unittest
 
-from test_html_safety import browser_binary
+from tests.test_html_safety import browser_binary
 
 ROOT = Path(__file__).resolve().parents[1]
 

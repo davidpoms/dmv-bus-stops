@@ -11,7 +11,7 @@ from scripts.active import process_reviewer_recognition as historical
 from src.review.recognition import RecognitionGate
 from src.review.recognition.qualification import Quarantined
 from src.review.recognition.rules import RULE_KEY
-import test_recognition_foundation as foundation
+import tests.test_recognition_foundation as foundation
 
 
 class LiveProcessorTests(unittest.TestCase):
