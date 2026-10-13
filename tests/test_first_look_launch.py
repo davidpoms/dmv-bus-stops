@@ -9,9 +9,11 @@ from src.review.recognition import RecognitionGate, permanent
 from src.review.recognition.first_look_launch import (
     CANDIDATE_ARTIFACT_SHA256, FINALITY, HISTORICAL_CUTOFF, build_guard, configuration_for,
 )
-from src.review.recognition.live_first_looks import enqueue, seal_pending, delivery_status, record_retryable_failure
-from src.review.recognition.live_first_look_schema import migrate
-from src.review.recognition.permanent_schema import migrate as migrate_permanent
+from src.review.recognition.live_first_looks import delivery_status
+from tests.recognition_authorization_fixture import (
+    enqueue, seal_pending, record_retryable_failure, finalize,
+    migrate_live as migrate, migrate_private as migrate_permanent,
+)
 from src.review.recognition.qualification import capture_completion
 from src.review.recognition.report_connection import report_connection
 from src.review.recognition.rules import RULE_KEY, digest
@@ -56,7 +58,7 @@ class LaunchPolicyTests(unittest.TestCase):
                                  authorization_reference="synthetic-inspection-reference")
 
     def seal_baseline(self):
-        permanent.finalize(self.path, self.baseline, manifest_sha256=digest(self.baseline),
+        finalize(self.path, self.baseline, manifest_sha256=digest(self.baseline),
                            authorization_reference="synthetic-inspection-reference", gate=ISSUE)
 
     def add(self, number=60, *, stop=60, timestamp="2026-10-01T12:00:00Z"):

@@ -53,6 +53,10 @@ real sealed baseline with valid claims, exactly 55 pinned qualifying facts, and
 all those facts strictly before the historical cutoff. The actual historical
 cohort remains candidate-only until separately reviewed and authorized sealing.
 
+Writer authorization is additionally required by admission and sealing; see
+[Recognition authorization hardening](recognition-authorization-hardening.md).
+The launch guard's approval does not replace that independent writer boundary.
+
 `build_guard(policy, reviewed_population, authorization,
 authorization_verifier=...)` additionally requires:
 
@@ -64,10 +68,13 @@ authorization_verifier=...)` additionally requires:
    `reference`, `policy_sha256`, `population_sha256`, and
    `baseline_link_review_reference`. The last reference records independent
    review linking the candidate artifact to the sealed historical baseline.
-3. A trusted independent verifier accepting `(authorization, policy_hash,
+3. A reviewed finality-policy verifier accepting `(authorization, policy_hash,
    population_hash)` and returning exactly `True`. Hashes and self-supplied
    references alone are not approval. No permissive production verifier ships.
    Verification runs at construction and again before each guarded processing.
+   This callback is not writer authority: the sealer separately requires a
+   provisioned capability, exact delivery approval, and operation approval.
+   Production authority provisioning remains unavailable.
 
 Missing inputs produce no guard; invalid inputs fail closed. The guard supplies
 its immutable admission `configuration`, but never opens a database, selects a

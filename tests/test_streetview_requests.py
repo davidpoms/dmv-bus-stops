@@ -130,6 +130,35 @@ class StreetViewRequestTests(unittest.TestCase):
     def test_review_info_without_road_index(self):
         self.check_endpoint('/review/1/info')
 
+    def test_border_overlay_preserves_stored_geography_and_database(self):
+        with sqlite3.connect(api.DATABASE_PATH) as conn:
+            for stop_id in (545, 6920, 1064, 999999):
+                conn.execute("INSERT INTO physical_stops SELECT ?,primary_name,latitude,longitude,state,dc_ward,dc_anc,county,municipality FROM physical_stops WHERE id=1", (stop_id,))
+        conn.close()
+        before = Path(api.DATABASE_PATH).read_bytes()
+        ordinary = self.client.get('/review/1/info').get_json()
+        self.assertNotIn('operational_jurisdiction', ordinary)
+        for stop_id, expected in ((545,'DC'),(6920,'MD'),(1064,None),(999999,'absent')):
+            response = self.client.get(f'/review/{stop_id}/info')
+            self.assertEqual(200, response.status_code)
+            payload = response.get_json()
+            self.assertEqual('DC', payload['state'])
+            self.assertEqual('DC', payload['jurisdiction'])
+            self.assertNotIn('stored_geography', payload)
+            if expected == 'absent':
+                self.assertNotIn('operational_jurisdiction', payload)
+            else:
+                self.assertEqual(expected, payload['operational_jurisdiction']['value'])
+        self.assertEqual(before, Path(api.DATABASE_PATH).read_bytes())
+
+    def test_invalid_border_policy_explicitly_unavailable(self):
+        from src.dashboard import border_jurisdiction
+        with patch.object(border_jurisdiction, '_POLICY', None), \
+             patch.object(api, 'query_db', side_effect=AssertionError('No query before failure')):
+            response = self.client.get('/review/6920/info')
+        self.assertEqual(503, response.status_code)
+        self.assertEqual('border_policy_unavailable', response.get_json()['code'])
+
     def test_requests_without_scientific_imports(self):
         # A fresh interpreter avoids cached modules and global import mocking.
         source = """

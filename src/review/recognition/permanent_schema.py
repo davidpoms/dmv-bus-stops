@@ -7,6 +7,7 @@ import sqlite3
 
 from .qualification import Quarantined
 from .schema import TABLES as EXPLORER_TABLES, connection
+from .authorization import verify, verify_migration, migration_binding
 
 
 TABLES = {
@@ -100,9 +101,10 @@ def check_schema(conn):
             raise Quarantined("unexpected_private_trigger")
 
 
-def install(conn):
+def install(conn, *, authorization=None, authority=None):
     if not conn.in_transaction or conn.execute("PRAGMA foreign_keys").fetchone()[0] != 1:
         raise ValueError("migration_requires_transaction_and_foreign_keys")
+    verify_migration(conn, 'private_recognition', definitions(), authorization, authority)
     for name, body in EXPLORER_TABLES.items():
         row = conn.execute("SELECT sql FROM sqlite_master WHERE name=?", (name,)).fetchone()
         if row is None or not _same(row[0], f"CREATE TABLE {name} ({body})"):
@@ -118,12 +120,15 @@ def install(conn):
         raise Quarantined("foreign_key_check_failed")
 
 
-def migrate(database, *, apply=False):
-    """Default rehearses DDL in memory; explicit apply is caller authorization."""
+def migrate(database, *, apply=False, authorization=None, authority=None):
+    """Default rehearses in memory; file-backed DDL requires independent approval."""
     if apply:
+        verify(database, authorization, authority,
+               **migration_binding('private_recognition', definitions()))
         with connection(database, write=True) as conn:
             conn.execute("BEGIN IMMEDIATE")
-            install(conn)
+            install(conn, authorization=authorization, authority=authority)
+            verify_migration(conn, 'private_recognition', definitions(), authorization, authority)
             conn.commit()
     else:
         with connection(database) as source:

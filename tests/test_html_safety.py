@@ -65,6 +65,9 @@ class HtmlSafetyTests(unittest.TestCase):
         self.assertIn(name, self.results)
         self.assertEqual('ok', self.results[name])
 
+    def test_border_jurisdiction_presentation(self):
+        self.check_case('border_jurisdiction')
+
     def test_private_progress_authentication_and_failures(self):
         self.check_case('progress_auth')
 

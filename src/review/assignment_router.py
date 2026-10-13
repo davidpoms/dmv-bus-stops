@@ -2,6 +2,7 @@ import os
 import sqlite3
 import uuid
 from pathlib import Path
+from src.api.deployment import configured_database
 
 from src.review.context import WORKFLOW_CAMPAIGN
 from src.review.opportunity_cohorts import (
@@ -13,10 +14,7 @@ from src.review.opportunity_cohorts import (
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 
-DB = Path(os.environ.get(
-    "DMV_BUS_STOPS_DB",
-    BASE_DIR / "src" / "database" / "dmv_bus_stops.db",
-))
+DB = configured_database()
 
 CAMPAIGN_WORKFLOW = {
     "presence_verification": "verify_presence",

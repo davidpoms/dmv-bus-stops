@@ -8,6 +8,7 @@ from scripts.active import rehearse_private_recognition as rehearsal
 from src.review.recognition.qualification import Quarantined
 from src.review.recognition.rules import canonical
 from tests import test_recognition_permanent as fixture
+from tests.recognition_authorization_fixture import FixtureAuthority, workspace_for
 
 
 class PrivateRehearsalTests(unittest.TestCase):
@@ -29,7 +30,11 @@ class PrivateRehearsalTests(unittest.TestCase):
                            manifest_path=self.manifest, manifest_sha256=rehearsal.file_hash(self.manifest), target=self.target)
 
     def run_rehearsal(self, **kwargs):
-        return rehearsal.run(**{**self.kwargs, **kwargs})
+        authority = FixtureAuthority()
+        def provider(target, binding):
+            return authority.approve(target, **binding)
+        return rehearsal.run(**{**self.kwargs, 'authorization_provider': provider,
+                                'authority': workspace_for(self.path).authority, **kwargs})
 
     def test_verification_default_no_files_or_database_writes(self):
         before = self.path.read_bytes()
@@ -57,6 +62,13 @@ class PrivateRehearsalTests(unittest.TestCase):
         self.assertEqual(first["target_sha256"], second["target_sha256"])
         self.assertEqual(before, self.path.read_bytes())
         self.assertTrue(second["explorer_unchanged"])
+
+    def test_disposable_reference_alone_cannot_authorize_migration_or_issuance(self):
+        for missing in ('authorization_provider', 'authority'):
+            with self.subTest(missing=missing), self.assertRaisesRegex(Quarantined, 'independent_disposable_authorization_required'):
+                self.run_rehearsal(apply_disposable=True, authorization_reference='synthetic-authorization',
+                                   **{missing: None})
+            self.assertFalse(self.target.exists())
 
     def test_failed_sealing_can_retry_disposable_without_source_changes(self):
         kwargs = dict(apply_disposable=True, authorization_reference="synthetic-authorization")

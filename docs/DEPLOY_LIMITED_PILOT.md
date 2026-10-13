@@ -1,5 +1,9 @@
 # Deploying the limited volunteer pilot
 
+For recognition disposable/test-only work, use
+[the separate test-deployment checklist](recognition-test-deployment.md).
+The production migration and backup procedures below are not rehearsal commands.
+
 This is the supported operational path for the current small pilot. The Flask
 development server is local-only. Production uses Waitress behind an operator-managed
 HTTPS terminator. The repository does not provide DNS, certificates, firewall rules,

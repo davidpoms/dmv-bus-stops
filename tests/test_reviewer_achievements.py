@@ -19,7 +19,8 @@ from src.review.recognition.schema import connection, migrate
 
 class AchievementsTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
+        from tests.recognition_authorization_fixture import DisposableWorkspace
+        self.temp = DisposableWorkspace()
         self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name) / 'achievements.db'
         with closing(sqlite3.connect(self.path)) as conn:
@@ -119,7 +120,7 @@ class AchievementsTests(unittest.TestCase):
         self.assertEqual('2026-09-23T12:00:25Z', other[0]['earned_at_utc'])
 
     def test_additive_migration_preserves_explorer_rows_hashes_jobs_and_api(self):
-        from src.review.recognition.permanent_schema import migrate as migrate_private
+        from tests.recognition_authorization_fixture import migrate_private
         from src.review.recognition.schema import TABLES
         from src.review.recognition.rules import canonical
         self.populate()

@@ -10,6 +10,19 @@ from pathlib import Path
 PLACEHOLDER_FRAGMENTS = ("replace-with", "example.invalid")
 
 
+def configured_database(env=None):
+    """Resolve only an explicitly configured absolute web-runtime target.
+
+    No fallback, SQLite connection, file creation, or migration. An unconfigured
+    import remains possible for tooling; serving requests fails closed.
+    """
+    env = os.environ if env is None else env
+    raw = env.get('DMV_BUS_STOPS_DB', '')
+    if not raw or not Path(raw).is_absolute():
+        return None
+    return Path(raw).resolve()
+
+
 def validate_pilot_environment(env=None):
     env = os.environ if env is None else env
     errors = []

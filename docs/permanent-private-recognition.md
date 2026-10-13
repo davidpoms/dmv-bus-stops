@@ -1,5 +1,12 @@
 # Controlled private First Look and Geography Steward
 
+Authorization update: file-backed private migrations and writers now require the
+independent contract in [Recognition authorization hardening](recognition-authorization-hardening.md).
+Gates, hashes and reference strings alone no longer authorize them. The older
+disposable CLI issuance examples below are insufficient without separately
+provisioned disposable authority and approval-data provider; verification-only remains available.
+Production authority provisioning is unavailable.
+
 This is an additive disposable-rehearsal release. No production migration,
 capture, issuance, worker, scheduler or HTTP writer is enabled. Explorer's seven
 tables, rules, jobs, services, witnesses and production binding are unchanged.

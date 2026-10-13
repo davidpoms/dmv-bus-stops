@@ -658,6 +658,35 @@
         assert(card.hidden && content.textContent === '', 'Logout retained awards');
     });
     // Encode results, not fixture markup, into the only active document.
+    await test('border_jurisdiction', async () => {
+        for (const page of [stopPage, reviewPage]) {
+            const ordinary = await page(data());
+            assert(!ordinary.doc.querySelector('.border-jurisdiction-notice'), 'Ordinary stop changed');
+            for (const value of ['DC', 'MD', null]) {
+                const info = data();
+                info.state = 'DC'; info.municipality = 'District of Columbia';
+                info.operational_jurisdiction = {value,
+                    jurisdiction_basis: value ? 'border_centerline_convention' : 'unresolved_border_review',
+                    border_review_required: true, border_notice: true};
+                const env = await page(info);
+                const notice = env.doc.querySelector('.border-jurisdiction-notice');
+                assert(notice, 'Border notice absent');
+                assert(notice.textContent.includes(value === null ? 'Jurisdiction needs confirmation'
+                    : `Likely jurisdiction: ${value === 'DC' ? 'District of Columbia' : 'Maryland'}`), 'Wrong jurisdiction');
+                assert(notice.textContent.includes('Stored geography: DC'), 'Stored geography lost');
+                assert(notice.textContent.includes('not a legal boundary determination'), 'Convention missing');
+                const link = notice.querySelector('a');
+                assert(link.href.includes('/feedback?stop_id=42'), 'Feedback stop context missing');
+                assert(link.href.includes('page=%2Fstop%2F42'), 'Feedback page context missing');
+                assert(!notice.querySelector('form,button'), 'Must not submit or mutate geography');
+            }
+        }
+        const info = data();
+        info.identity_status = 'retired'; info.successors = [{stop_id: 999999,url:'/stop/999999'}];
+        info.operational_jurisdiction = {value:'MD',jurisdiction_basis:'border_centerline_convention'};
+        const retired = await stopPage(info, true);
+        assert(!retired.doc.querySelector('.border-jurisdiction-notice'), 'Retired view inherited policy');
+    });
     document.getElementById('results').textContent = [...new TextEncoder().encode(JSON.stringify(results))]
         .map(byte => byte.toString(16).padStart(2, '0')).join('');
 })();

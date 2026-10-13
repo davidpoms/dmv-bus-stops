@@ -18,9 +18,10 @@ from src.review import export_review_tasks
 
 class ActiveReviewWorkflowTests(unittest.TestCase):
     def setUp(self):
-        handle = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-        handle.close()
-        self.db = Path(handle.name)
+        from tests.recognition_authorization_fixture import DisposableWorkspace
+        workspace = DisposableWorkspace()
+        self.addCleanup(workspace.cleanup)
+        self.db = Path(workspace.name) / 'workflow.db'
         self.export = self.db.with_suffix(".json")
         conn = sqlite3.connect(self.db)
         conn.executescript(
@@ -624,8 +625,7 @@ class ActiveReviewWorkflowTests(unittest.TestCase):
 
     def prepare_first_look_submission(self):
         from src.review.recognition.schema import migrate
-        from src.review.recognition.permanent_schema import migrate as permanent_migrate
-        from src.review.recognition.live_first_look_schema import migrate as live_migrate
+        from tests.recognition_authorization_fixture import migrate_private as permanent_migrate, migrate_live as live_migrate
         self.prepare_submission()
         migrate(self.db, apply=True)
         permanent_migrate(self.db, apply=True)
@@ -634,13 +634,19 @@ class ActiveReviewWorkflowTests(unittest.TestCase):
     def first_look_settings(self, enabled=True):
         from src.review.recognition import RecognitionGate
         from src.review.recognition.live_first_looks import Configuration
+        from dataclasses import asdict
+        from src.review.recognition.authorization import admission_binding
+        from tests.recognition_authorization_fixture import approval
+        config = Configuration(
+            activation_at_utc="2000-01-02T00:00:00Z", historical_cutoff_utc="2000-01-01T00:00:00Z",
+            policy_reference="synthetic-submission", policy_sha256="a" * 64,
+            sqlite_utc_provenance="synthetic-test-writer")
+        authorized = approval(self.db, **admission_binding(asdict(config)))
         return patch.dict(review_api.app.config, {
             "LIVE_FIRST_LOOK_GATE": RecognitionGate(capture=enabled),
-            "LIVE_FIRST_LOOK_CONFIGURATION": Configuration(
-                activation_at_utc="2000-01-02T00:00:00Z",
-                historical_cutoff_utc="2000-01-01T00:00:00Z",
-                policy_reference="synthetic-submission", policy_sha256="a" * 64,
-                sqlite_utc_provenance="synthetic-test-writer"),
+            "LIVE_FIRST_LOOK_CONFIGURATION": config,
+            "LIVE_FIRST_LOOK_AUTHORIZATION": authorized['authorization'],
+            "LIVE_FIRST_LOOK_AUTHORITY": authorized['authority'],
         })
 
     def recognition_counts(self):
@@ -705,6 +711,18 @@ class ActiveReviewWorkflowTests(unittest.TestCase):
              patch.object(review_api, "refresh_after_community_mutation"):
             self.assertEqual(200, self.submit_photo_review().status_code)
         enqueue.assert_not_called()
+        self.assertEqual([0, 0, 0, 0, 0], self.recognition_counts())
+
+    def test_submission_first_look_enabled_without_independent_approval_fails_closed(self):
+        self.prepare_first_look_submission()
+        with self.first_look_settings(), \
+             patch.dict(review_api.app.config, {'LIVE_FIRST_LOOK_AUTHORIZATION': None}), \
+             patch.object(review_api, 'calculate_stop_consensus', return_value={}), \
+             patch.object(review_api, 'refresh_after_community_mutation'):
+            response = self.submit_photo_review()
+        self.assertEqual(500, response.status_code)
+        self.assertTrue(response.json['evidence_saved'])
+        self.assertEqual(('assigned', None), self.saved_review_state()[2])
         self.assertEqual([0, 0, 0, 0, 0], self.recognition_counts())
 
     def test_submission_first_look_atomic_capture_retry_and_same_stop(self):

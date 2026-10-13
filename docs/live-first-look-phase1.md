@@ -1,5 +1,10 @@
 # Live First Look: Phase 1 infrastructure only
 
+Authorization update: admission, sealing and file-backed migration now require
+the independent contract in [Recognition authorization hardening](recognition-authorization-hardening.md).
+Finality callbacks remain separate from writer approval. Gate-only invocation
+examples below describe transaction flow and do not authorize writes by themselves.
+
 Review submission now has a disabled-by-default enqueue integration. It does not
 seal claims or invoke a processor, startup migration or scheduler. Both existing
 `RecognitionGate` flags still default off. No production

@@ -13,11 +13,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.active.rehearse_recognition_capture import file_hash, offline_file
+from src.review.recognition.authority import Authority
 from src.review.recognition import RecognitionGate
 from src.review.recognition.permanent import finalize, prepare, require
 from src.review.recognition.permanent_schema import migrate
 from src.review.recognition.rules import canonical, digest
 from src.review.recognition.schema import TABLES as EXPLORER_TABLES, connection
+from src.review.recognition.authorization import verify, manifest_binding, migration_binding
+from src.review.recognition.permanent_schema import definitions
 
 
 def _target(path):
@@ -39,7 +42,8 @@ def _explorer_rows(path):
 
 
 def run(*, source, source_sha256, manifest_path, manifest_sha256, target,
-        apply_disposable=False, retry_existing=False, authorization_reference=None):
+        apply_disposable=False, retry_existing=False, authorization_reference=None,
+        authorization_provider=None, authority=None):
     source = offline_file(source)
     target = _target(target)
     manifest_path = Path(manifest_path).resolve(strict=True)
@@ -65,6 +69,8 @@ def run(*, source, source_sha256, manifest_path, manifest_sha256, target,
         return result
     require(authorization_reference == manifest["authorization_reference"] and bool(authorization_reference),
             "explicit_authorization_required")
+    require(callable(authorization_provider) and type(authority) is Authority,
+            'independent_disposable_authorization_required')
     before = _explorer_rows(source)
     receipt_path = target.with_suffix(".receipt.json")
     identity = {"source_sha256": source_sha256.lower(), "manifest_file_sha256": manifest_sha256.lower(),
@@ -87,10 +93,16 @@ def run(*, source, source_sha256, manifest_path, manifest_sha256, target,
         with receipt_path.open("x", encoding="utf-8") as stream:
             stream.write(canonical({**identity, "device": stat.st_dev, "inode": stat.st_ino}))
     require(file_hash(manifest_path) == manifest_sha256.lower(), "manifest_changed")
-    migrate(target, apply=True)
+    schema_binding = migration_binding('private_recognition', definitions())
+    schema_approval = authorization_provider(target, schema_binding)
+    operation_approval = authorization_provider(target, manifest_binding(manifest))
+    verify(target, schema_approval, authority, environment='disposable', **schema_binding)
+    verify(target, operation_approval, authority, environment='disposable', **manifest_binding(manifest))
+    migrate(target, apply=True, authorization=schema_approval, authority=authority)
     issued = finalize(target, manifest, manifest_sha256=digest(manifest),
                       authorization_reference=authorization_reference,
-                      gate=RecognitionGate(capture=False, issuance=True))
+                      gate=RecognitionGate(capture=False, issuance=True),
+                      authorization=operation_approval, authority=authority)
     require(_explorer_rows(target) == before, "explorer_records_changed")
     with connection(target) as conn:
         require(conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok", "target_integrity_failed")

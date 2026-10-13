@@ -18,7 +18,8 @@ from src.review.recognition.schema import connection, migrate
 
 class GeographyReportTests(unittest.TestCase):
     def setUp(self):
-        temp = tempfile.TemporaryDirectory()
+        from tests.recognition_authorization_fixture import DisposableWorkspace
+        temp = DisposableWorkspace()
         self.addCleanup(temp.cleanup)
         self.path = Path(temp.name) / "offline.db"
         with closing(sqlite3.connect(self.path)) as conn:

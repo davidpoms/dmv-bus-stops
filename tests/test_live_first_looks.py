@@ -6,9 +6,10 @@ from unittest.mock import patch
 
 from src.review.recognition import RecognitionGate
 from src.review.recognition import permanent
-from src.review.recognition.live_first_looks import Configuration, enqueue, seal_pending
-from src.review.recognition.live_first_look_schema import migrate
-from src.review.recognition.permanent_schema import migrate as migrate_permanent
+from src.review.recognition.live_first_looks import Configuration
+from tests.recognition_authorization_fixture import (
+    enqueue, seal_pending, finalize, migrate_live as migrate, migrate_private as migrate_permanent,
+)
 from src.review.recognition.rules import canonical, digest
 from src.review.recognition.schema import connection, migrate as migrate_explorer
 from tests import test_recognition_geography as fixture
@@ -38,7 +39,7 @@ class LiveFirstLookTests(unittest.TestCase):
         migrate(self.path, apply=True)
 
     def seal_baseline(self):
-        permanent.finalize(self.path, self.baseline, manifest_sha256=self.baseline_id,
+        finalize(self.path, self.baseline, manifest_sha256=self.baseline_id,
                            authorization_reference="synthetic-historical", gate=ISSUE)
 
     def add_live(self, number=2, *, stop=2, owner=1, time="2026-10-01T12:00:00Z"):

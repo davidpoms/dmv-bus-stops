@@ -14,6 +14,7 @@ from .permanent_schema import check_schema
 from .qualification import Quarantined, require_transaction
 from .rules import canonical, digest, load_rule
 from .schema import connection
+from .authorization import verify, manifest_binding
 
 
 DEFINITIONS = {
@@ -248,38 +249,8 @@ def check_geography_integrity(conn, award_id):
     return candidate
 
 
-def _insert_operation(conn, manifest):
-    """Shared immutable operation storage; caller owns transaction/authorization."""
-    require_transaction(conn)
-    _validate_manifest(manifest)
-    rule = manifest["rule"]
-    old = conn.execute("SELECT * FROM recognition_private_rules WHERE rule_key=?", (rule["rule_key"],)).fetchone()
-    if old:
-        require(old["definition_json"] == canonical(rule) and old["definition_sha256"] == digest(rule), "stored_rule_mismatch")
-    else:
-        conn.execute("INSERT INTO recognition_private_rules VALUES(?,?,?,?)",
-                     (rule["rule_key"], manifest["family"], canonical(rule), digest(rule)))
-    sealed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    require(sealed_at >= manifest["evaluation_at_utc"], "future_evaluation_not_authorized")
-    operation_id = digest(manifest)
-    conn.execute("INSERT INTO recognition_private_operations VALUES(?,?,?,?,?,?)",
-                 (operation_id, rule["rule_key"], canonical(manifest), operation_id,
-                  manifest["authorization_reference"], sealed_at))
-    return operation_id
-
-
-def _insert_first_look_claim(conn, candidate, operation_id):
-    """Shared uniqueness-protected claim insert, never opens/commits a connection."""
-    require_transaction(conn)
-    require(conn.execute("SELECT 1 FROM recognition_first_look_claims WHERE physical_stop_id=?",
-                         (candidate["physical_stop_id"],)).fetchone() is None, "existing_claim_requires_discrepancy")
-    conn.execute("INSERT INTO recognition_first_look_claims VALUES(?,?,?,?,?,?,?)",
-                 (candidate["physical_stop_id"], candidate["reviewer_id"], candidate["assignment_id"],
-                  operation_id, candidate["completed_at_utc"], canonical(candidate), digest(candidate)))
-
-
 def finalize(database, manifest, *, manifest_sha256, authorization_reference=None,
-             gate=RecognitionGate()):
+             gate=RecognitionGate(), authorization=None, authority=None):
     """Explicit one-operation transaction. No leasing, Explorer writes or capture."""
     if not gate.issuance:
         return {"issued": False, "reason": "issuance_disabled"}
@@ -291,9 +262,11 @@ def finalize(database, manifest, *, manifest_sha256, authorization_reference=Non
     require(text(authorization_reference) and authorization_reference == manifest["authorization_reference"],
             "explicit_authorization_required")
     _validate_manifest(manifest)
+    verify(database, authorization, authority, **manifest_binding(manifest))
     with connection(database, write=True) as conn:
         conn.execute("BEGIN IMMEDIATE")
         check_schema(conn)
+        verify(conn, authorization, authority, **manifest_binding(manifest))
         existing = conn.execute("SELECT 1 FROM recognition_private_operations WHERE operation_id=?", (operation_id,)).fetchone()
         if existing:
             _verify_operation_records(conn, operation_id)
@@ -303,10 +276,26 @@ def finalize(database, manifest, *, manifest_sha256, authorization_reference=Non
         # regenerated inside the lock, before any new-family write.
         fresh = _prepare(conn, manifest["family"], manifest["inputs"], manifest["evaluation_at_utc"], authorization_reference)
         require(fresh == manifest, "reviewed_source_changed")
-        _insert_operation(conn, manifest)
+        rule = manifest["rule"]
+        old = conn.execute("SELECT * FROM recognition_private_rules WHERE rule_key=?", (rule["rule_key"],)).fetchone()
+        if old:
+            require(old["definition_json"] == canonical(rule) and old["definition_sha256"] == digest(rule), "stored_rule_mismatch")
+        else:
+            conn.execute("INSERT INTO recognition_private_rules VALUES(?,?,?,?)",
+                         (rule["rule_key"], manifest["family"], canonical(rule), digest(rule)))
+        sealed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        require(sealed_at >= manifest["evaluation_at_utc"], "future_evaluation_not_authorized")
+        operation_id = digest(manifest)
+        conn.execute("INSERT INTO recognition_private_operations VALUES(?,?,?,?,?,?)",
+                     (operation_id, rule["rule_key"], canonical(manifest), operation_id,
+                      manifest["authorization_reference"], sealed_at))
         if manifest["family"] == "first_look":
             for candidate in manifest["candidates"]:
-                _insert_first_look_claim(conn, candidate, operation_id)
+                require(conn.execute("SELECT 1 FROM recognition_first_look_claims WHERE physical_stop_id=?",
+                                     (candidate["physical_stop_id"],)).fetchone() is None, "existing_claim_requires_discrepancy")
+                conn.execute("INSERT INTO recognition_first_look_claims VALUES(?,?,?,?,?,?,?)",
+                             (candidate["physical_stop_id"], candidate["reviewer_id"], candidate["assignment_id"],
+                              operation_id, candidate["completed_at_utc"], canonical(candidate), digest(candidate)))
         else:
             for item in manifest["report"]["scopes"]:
                 scope = item["snapshot_scope"]
@@ -329,6 +318,7 @@ def finalize(database, manifest, *, manifest_sha256, authorization_reference=Non
                                  [(digest(candidate), f["assignment_id"]) for f in candidate["witnesses"]])
         _verify_operation_records(conn, operation_id)
         require(conn.execute("PRAGMA foreign_key_check").fetchone() is None, "foreign_key_check_failed")
+        verify(conn, authorization, authority, **manifest_binding(manifest))
         conn.commit()
     return {"issued": True, "operation_id": operation_id, "records": len(manifest["candidates"])}
 
@@ -359,17 +349,23 @@ def _verify_operation_records(conn, operation_id):
 
 
 def append_discrepancy(database, *, physical_stop_id, evidence, review_reference,
-                       reviewed_at_utc, gate=RecognitionGate()):
+                       reviewed_at_utc, gate=RecognitionGate(), authorization=None, authority=None):
     if not gate.issuance:
         return {"recorded": False, "reason": "issuance_disabled"}
     require(not gate.capture and text(review_reference), "discrepancy_authorization_required")
     _utc(reviewed_at_utc)
     require(isinstance(evidence, dict) and text(evidence.get("reason")), "discrepancy_evidence_required")
+    evidence = json.loads(canonical(evidence))
     body = {"physical_stop_id": physical_stop_id, "evidence": evidence,
             "review_reference": review_reference, "reviewed_at_utc": reviewed_at_utc}
     key = digest(body)
+    binding = dict(family='first_look', permission='issuance', action='append_discrepancy',
+                   operation_sha256=key, policy_sha256=digest(DEFINITIONS['first_look']),
+                   population_sha256=None, reference=review_reference)
+    verify(database, authorization, authority, **binding)
     with connection(database, write=True) as conn:
         conn.execute("BEGIN IMMEDIATE")
+        verify(conn, authorization, authority, **binding)
         check_schema(conn)
         check_claim_integrity(conn, physical_stop_id)
         old = conn.execute("SELECT * FROM recognition_first_look_discrepancies WHERE discrepancy_id=?", (key,)).fetchone()

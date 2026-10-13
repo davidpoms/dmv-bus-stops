@@ -27,6 +27,7 @@ from src.review.assignment_router import (
     assign_stop,
     normalize_campaign,
 )
+from src.api.deployment import configured_database
 
 from src.assessment.interpretation import (
     interpret_ddot_evidence,
@@ -75,6 +76,8 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(days=30),
     LIVE_FIRST_LOOK_GATE=DISABLED,
     LIVE_FIRST_LOOK_CONFIGURATION=live_first_looks.Configuration(),
+    LIVE_FIRST_LOOK_AUTHORIZATION=None,
+    LIVE_FIRST_LOOK_AUTHORITY=None,
     LIVE_RECOGNITION_GATE=RecognitionGate(
         capture=os.environ.get("LIVE_RECOGNITION_CAPTURE", "0") == "1",
         issuance=False,
@@ -110,6 +113,14 @@ def require_deployment_secret():
             "error": "FLASK_SECRET_KEY must be configured before serving requests",
             "code": "server_configuration_required",
         }, 503
+    if not app.testing:
+        from src.review.assignment_router import DB as assignment_database
+        if (DATABASE_PATH is None or not DATABASE_PATH.is_file()
+                or assignment_database != DATABASE_PATH):
+            return {
+                "error": "DMV_BUS_STOPS_DB must select one existing absolute database for API and assignments",
+                "code": "server_database_configuration_required",
+            }, 503
 
 
 @app.after_request
@@ -123,12 +134,7 @@ def log_operational_failure(response):
         )
     return response
 
-DATABASE_PATH = Path(
-    os.environ.get(
-        "DMV_BUS_STOPS_DB",
-        BASE_DIR / "src" / "database" / "dmv_bus_stops.db",
-    )
-)
+DATABASE_PATH = configured_database()
 
 
 
@@ -3357,6 +3363,8 @@ def submit_review():
                     live_first_looks.enqueue(
                         refresh_conn, int(assignment_id), gate=first_look_gate,
                         configuration=app.config["LIVE_FIRST_LOOK_CONFIGURATION"],
+                        authorization=app.config["LIVE_FIRST_LOOK_AUTHORIZATION"],
+                        authority=app.config["LIVE_FIRST_LOOK_AUTHORITY"],
                     )
 
                 if live_recognition_gate.capture:

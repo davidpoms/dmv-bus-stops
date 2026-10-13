@@ -10,7 +10,10 @@ from unittest.mock import patch
 from src.review.recognition import RecognitionGate
 from src.review.recognition import permanent
 from src.review.recognition.geography import build_geography_report
-from src.review.recognition.permanent_schema import TABLES, check_schema, install, migrate
+from src.review.recognition.permanent_schema import TABLES, check_schema
+from tests.recognition_authorization_fixture import (
+    migrate_private as migrate, install_private as install, finalize, append_discrepancy,
+)
 from src.review.recognition.qualification import Quarantined
 from src.review.recognition.rules import canonical, digest
 from src.review.recognition.schema import connection, migrate as explorer_migrate
@@ -50,7 +53,7 @@ class PermanentFamilyTests(unittest.TestCase):
                                  evaluation_at_utc=NOW, authorization_reference="synthetic-authorization")
 
     def seal(self, manifest):
-        return permanent.finalize(self.path, manifest, manifest_sha256=digest(manifest),
+        return finalize(self.path, manifest, manifest_sha256=digest(manifest),
                                   authorization_reference="synthetic-authorization", gate=ISSUE)
 
     def counts(self):
@@ -167,7 +170,7 @@ class PermanentFamilyTests(unittest.TestCase):
             self.seal(self.first())
         kwargs = dict(physical_stop_id=1, evidence={"reason": "late_earlier_completion", "assignment_id": 2},
                       review_reference="synthetic-discrepancy-review", reviewed_at_utc=NOW, gate=ISSUE)
-        self.assertEqual(permanent.append_discrepancy(self.path, **kwargs), permanent.append_discrepancy(self.path, **kwargs))
+        self.assertEqual(append_discrepancy(self.path, **kwargs), append_discrepancy(self.path, **kwargs))
         self.assertEqual([(1, 1)], self.sql("SELECT physical_stop_id,reviewer_id FROM recognition_first_look_claims"))
         self.assertEqual(1, self.counts()["recognition_first_look_discrepancies"])
         self.assertTrue(self.seal(manifest)["idempotent"])

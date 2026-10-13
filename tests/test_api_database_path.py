@@ -22,19 +22,22 @@ class ApiDatabasePathTests(unittest.TestCase):
             [
                 sys.executable,
                 "-c",
+                "from unittest.mock import patch; "
+                "patch('dotenv.load_dotenv', return_value=False).start(); "
                 "from src.api.app import DATABASE_PATH; print(DATABASE_PATH)",
             ],
             cwd=ROOT,
             env=env,
             text=True,
         )
-        return Path(output.strip())
+        value = output.strip()
+        return None if value == 'None' else Path(value)
 
-    def test_default_database_path_remains_repo_relative(self):
-        self.assertEqual(
-            ROOT / "src" / "database" / "dmv_bus_stops.db",
-            self.imported_database_path(),
-        )
+    def test_missing_database_configuration_has_no_repository_fallback(self):
+        self.assertIsNone(self.imported_database_path())
+
+    def test_relative_database_configuration_fails_closed(self):
+        self.assertIsNone(self.imported_database_path('relative.db'))
 
     def test_environment_override_is_honored(self):
         override = ROOT / "configured" / "override.db"

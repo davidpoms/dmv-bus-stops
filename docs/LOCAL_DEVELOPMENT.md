@@ -20,8 +20,12 @@ The file is local and ignored by Git. Keep the value persistent between starts;
 changing it invalidates browser sessions but does not remove reviewer identity or
 review history.
 
-The default local database is `src/database/dmv_bus_stops.db`. Prefer setting an
-absolute `DMV_BUS_STOPS_DB` path to a copy when testing migrations or rebuilds.
+Set `DMV_BUS_STOPS_DB` to the explicit absolute path of an existing local database
+before starting the API. The web runtime has no repository-database fallback;
+missing, relative or nonexistent targets fail closed. Use a disposable copy for
+migrations or rebuilds, and never copy production environment settings into a test
+deployment. For synthetic recognition tests, follow the
+[disposable rehearsal checklist](recognition-test-deployment.md).
 
 ## Start and verify
 

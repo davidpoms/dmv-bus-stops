@@ -5,6 +5,7 @@ import sqlite3
 from .permanent_schema import check_schema as check_permanent_schema
 from .qualification import Quarantined, require_transaction
 from .schema import connection
+from .authorization import verify, verify_migration, migration_binding
 
 
 TABLE = "recognition_first_look_pending"
@@ -43,8 +44,9 @@ def check_schema(conn):
         raise Quarantined("unexpected_live_first_look_trigger")
 
 
-def install(conn):
+def install(conn, *, authorization=None, authority=None):
     require_transaction(conn)
+    verify_migration(conn, 'first_look', OBJECTS, authorization, authority)
     check_permanent_schema(conn)
     for name, sql in OBJECTS.items():
         if conn.execute("SELECT 1 FROM sqlite_master WHERE name=?", (name,)).fetchone() is None:
@@ -54,12 +56,14 @@ def install(conn):
         raise Quarantined("foreign_key_check_failed")
 
 
-def migrate(database, *, apply=False):
+def migrate(database, *, apply=False, authorization=None, authority=None):
     """Default is an in-memory rehearsal; no application startup migration."""
     if apply:
+        verify(database, authorization, authority, **migration_binding('first_look', OBJECTS))
         with connection(database, write=True) as conn:
             conn.execute("BEGIN IMMEDIATE")
-            install(conn)
+            install(conn, authorization=authorization, authority=authority)
+            verify_migration(conn, 'first_look', OBJECTS, authorization, authority)
             conn.commit()
     else:
         with connection(database) as source:

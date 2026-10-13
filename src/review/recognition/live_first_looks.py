@@ -7,6 +7,7 @@ population is final enough to seal. Delivery order is never ordering.
 
 from dataclasses import asdict, dataclass
 import json
+from datetime import datetime, timezone
 import re
 import sqlite3
 
@@ -17,6 +18,7 @@ from . import permanent
 from .qualification import Quarantined, capture_completion, qualify, require_transaction
 from .report_connection import report_connection
 from .rules import RULE_KEY, canonical, digest
+from .authorization import AuthorizationError, verify, admission_binding, manifest_binding
 
 
 @dataclass(frozen=True)
@@ -45,7 +47,8 @@ def _rule(config):
             "identity_transfer": False, "late_discoveries": "quarantine-no-reassignment"}
 
 
-def enqueue(conn, assignment_id, *, configuration=Configuration(), gate=DISABLED):
+def enqueue(conn, assignment_id, *, configuration=Configuration(), gate=DISABLED,
+            authorization=None, authority=None):
     """After completed-assignment UPDATE, within that caller's transaction.
 
     Captures shared evidence and only First Look delivery state. Does not commit,
@@ -53,9 +56,11 @@ def enqueue(conn, assignment_id, *, configuration=Configuration(), gate=DISABLED
     """
     if not gate.capture:
         return None
+    permanent.require(not gate.issuance, 'issuance_must_remain_disabled')
     require_transaction(conn)
     check_schema(conn)
     config = _configuration(asdict(configuration))
+    verify(conn, authorization, authority, **admission_binding(config))
     conn.execute("SAVEPOINT first_look_enqueue")
     try:
         fact = qualify(conn, assignment_id, sqlite_utc_provenance=config["sqlite_utc_provenance"])
@@ -132,7 +137,8 @@ def delivery_status(conn, assignment_id):
             "reason": row["last_error_code"], "outcome": row["outcome"]}
 
 
-def record_retryable_failure(conn, assignment_id, error, *, gate=DISABLED):
+def record_retryable_failure(conn, assignment_id, error, *, gate=DISABLED,
+                             authorization=None, authority=None):
     """After failed processing has rolled back, in a NEW caller transaction.
 
     Only SQLite BUSY/LOCKED errors are classified automatically. Other failures
@@ -147,12 +153,41 @@ def record_retryable_failure(conn, assignment_id, error, *, gate=DISABLED):
     code = getattr(error, "sqlite_errorcode", None)
     permanent.require(isinstance(error, sqlite3.OperationalError) and type(code) is int and
                       (code & 255) in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED), "failure_not_retryable")
+    row = conn.execute('SELECT configuration_json FROM recognition_first_look_pending WHERE assignment_id=?',
+                       (assignment_id,)).fetchone()
+    permanent.require(row is not None, 'missing_live_first_look_pending')
+    binding = {**delivery_binding(conn, assignment_id), 'action': 'record_retryable_failure'}
+    verify(conn, authorization, authority, **binding)
     conn.execute("UPDATE recognition_first_look_pending SET attempts=attempts+1,last_error_code='retryable_sqlite_lock' "
                  "WHERE assignment_id=? AND state='pending'", (assignment_id,))
     return delivery_status(conn, assignment_id)
 
 
-def seal_pending(conn, assignment_id, *, gate=DISABLED, finality_guard=None, retry_quarantined=False):
+def delivery_binding(conn, assignment_id):
+    """Read-only, exact delivery-state operation for independent review.
+
+    Separate from permission to insert a claim. Includes the stored claim for
+    completed acknowledgements and the entire current evidence population.
+    """
+    row = conn.execute('SELECT * FROM recognition_first_look_pending WHERE assignment_id=?',
+                       (assignment_id,)).fetchone()
+    permanent.require(row is not None, 'missing_live_first_look_pending')
+    config = json.loads(row['configuration_json'])
+    ledger = permanent._ledger(conn)
+    fact = next((f for f in ledger if f['assignment_id'] == assignment_id), None)
+    claim = None if fact is None else conn.execute(
+        'SELECT * FROM recognition_first_look_claims WHERE physical_stop_id=?',
+        (fact['physical_stop_id'],)).fetchone()
+    population = {'ledger': ledger, 'identity': permanent._identity(conn)}
+    operation = {'delivery': dict(row), 'population': population,
+                 'claim': None if claim is None else dict(claim)}
+    return dict(family='first_look', permission='issuance', action='process_delivery',
+                operation_sha256=digest(operation), policy_sha256=config['policy_sha256'],
+                population_sha256=digest(population), reference=config['policy_reference'])
+
+
+def seal_pending(conn, assignment_id, *, gate=DISABLED, finality_guard=None, retry_quarantined=False,
+                 authorization=None, delivery_authorization=None, authority=None):
     """Process one First Look delivery inside a caller-owned writer transaction.
 
     Guard(conn, context) is trusted reviewed validation code with SQL writes
@@ -166,11 +201,15 @@ def seal_pending(conn, assignment_id, *, gate=DISABLED, finality_guard=None, ret
     permanent.require(not gate.capture, "capture_must_remain_disabled")
     require_transaction(conn)
     check_schema(conn)
+    delivery_authorized = False
     conn.execute("SAVEPOINT first_look_seal")
     try:
         # Acquire SQLite's writer lock before reading candidate evidence, even
         # for a caller that used deferred BEGIN. No independent BEGIN/COMMIT.
-        conn.execute("UPDATE recognition_first_look_pending SET attempts=attempts WHERE assignment_id=? AND state<>'done'", (assignment_id,))
+        conn.execute("UPDATE recognition_first_look_pending SET attempts=attempts WHERE 0")
+        binding = delivery_binding(conn, assignment_id)
+        verify(conn, delivery_authorization, authority, **binding)
+        delivery_authorized = True
         row = conn.execute("SELECT * FROM recognition_first_look_pending WHERE assignment_id=?", (assignment_id,)).fetchone()
         permanent.require(row is not None, "missing_live_first_look_pending")
         config = _configuration(json.loads(row["configuration_json"]))
@@ -181,6 +220,7 @@ def seal_pending(conn, assignment_id, *, gate=DISABLED, finality_guard=None, ret
         stop = stored["physical_stop_id"]
         if row["state"] == "done":
             permanent.check_claim_integrity(conn, stop)
+            # An idempotent delivery has no new writes; approval must still be current.
             conn.execute("RELEASE first_look_seal")
             return {"state": "done", "idempotent": True, "outcome": row["outcome"]}
         if row["state"] == "quarantined" and not retry_quarantined:
@@ -198,6 +238,7 @@ def seal_pending(conn, assignment_id, *, gate=DISABLED, finality_guard=None, ret
                     "identity_sha256": digest(identity)})
         if decision is None:
             reason = "finality_not_ready" if finality_guard is not None else "reviewed_finality_guard_required"
+            verify(conn, delivery_authorization, authority, **binding)
             conn.execute("UPDATE recognition_first_look_pending SET last_error_code=? WHERE assignment_id=?", (reason, assignment_id))
             conn.execute("RELEASE first_look_seal")
             return {"state": "pending", "reason": reason}
@@ -209,25 +250,48 @@ def seal_pending(conn, assignment_id, *, gate=DISABLED, finality_guard=None, ret
         permanent.require(len(winners) == 1, "live_stop_requires_adjudication")
         candidate = winners[0]
         permanent.require(fact["completed_at_utc"] < prepared["report"]["cutoff_utc"], "late_arrival_guard_not_final")
+        manifest = {**prepared, "format": "live-first-look-operation-v1", "configuration": config,
+                    "rule": _rule(config), "rule_sha256": digest(_rule(config)), "candidates": winners,
+                    "finality_decision": decision, "historical_baseline": baseline, "trigger_completion": fact}
+        manifest = json.loads(canonical(manifest))
+        candidate = manifest['candidates'][0]
+        verify(conn, authorization, authority, **manifest_binding(manifest))
         old = conn.execute("SELECT 1 FROM recognition_first_look_claims WHERE physical_stop_id=?", (stop,)).fetchone()
         if old:
             permanent.require(permanent.check_claim_integrity(conn, stop) == candidate, "existing_claim_requires_discrepancy")
             outcome = "existing_claim"
         else:
-            manifest = {**prepared, "format": "live-first-look-operation-v1", "configuration": config,
-                        "rule": _rule(config), "rule_sha256": digest(_rule(config)), "candidates": winners,
-                        "finality_decision": decision, "historical_baseline": baseline, "trigger_completion": fact}
             validate_operation_manifest(manifest)
-            operation_id = permanent._insert_operation(conn, manifest)
-            permanent._insert_first_look_claim(conn, candidate, operation_id)
+            rule = manifest["rule"]
+            old = conn.execute("SELECT * FROM recognition_private_rules WHERE rule_key=?", (rule["rule_key"],)).fetchone()
+            if old:
+                permanent.require(old["definition_json"] == canonical(rule) and old["definition_sha256"] == digest(rule), "stored_rule_mismatch")
+            else:
+                conn.execute("INSERT INTO recognition_private_rules VALUES(?,?,?,?)",
+                             (rule["rule_key"], manifest["family"], canonical(rule), digest(rule)))
+            sealed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            permanent.require(sealed_at >= manifest["evaluation_at_utc"], "future_evaluation_not_authorized")
+            operation_id = digest(manifest)
+            conn.execute("INSERT INTO recognition_private_operations VALUES(?,?,?,?,?,?)",
+                         (operation_id, rule["rule_key"], canonical(manifest), operation_id,
+                          manifest["authorization_reference"], sealed_at))
+            permanent.require(conn.execute("SELECT 1 FROM recognition_first_look_claims WHERE physical_stop_id=?",
+                                 (candidate["physical_stop_id"],)).fetchone() is None, "existing_claim_requires_discrepancy")
+            conn.execute("INSERT INTO recognition_first_look_claims VALUES(?,?,?,?,?,?,?)",
+                         (candidate["physical_stop_id"], candidate["reviewer_id"], candidate["assignment_id"],
+                          operation_id, candidate["completed_at_utc"], canonical(candidate), digest(candidate)))
             permanent.check_claim_integrity(conn, stop)
             outcome = "claim_sealed"
+        verify(conn, authorization, authority, **manifest_binding(manifest))
+        verify(conn, delivery_authorization, authority, **binding)
         conn.execute("UPDATE recognition_first_look_pending SET state='done',last_error_code=NULL,outcome=? WHERE assignment_id=?", (outcome, assignment_id))
         conn.execute("RELEASE first_look_seal")
         return {"state": "done", "outcome": outcome}
     except Quarantined as error:
         conn.execute("ROLLBACK TO first_look_seal")
         conn.execute("RELEASE first_look_seal")
+        if isinstance(error, AuthorizationError) or not delivery_authorized:
+            raise  # No delivery mutation is authorized by a rejected approval.
         current = conn.execute("SELECT state FROM recognition_first_look_pending WHERE assignment_id=?", (assignment_id,)).fetchone()
         if current is None or current[0] == "done":
             # Missing work or corruption of finalized evidence cannot truthfully
@@ -235,6 +299,7 @@ def seal_pending(conn, assignment_id, *, gate=DISABLED, finality_guard=None, ret
             raise
         # Durable only when the caller commits. The failed claim/operation has
         # already rolled back; this neither deletes nor replaces any claim.
+        verify(conn, delivery_authorization, authority, **binding)
         conn.execute("UPDATE recognition_first_look_pending SET state='quarantined',attempts=attempts+1,last_error_code=?,outcome=NULL WHERE assignment_id=? AND state<>'done'",
                      (str(error), assignment_id))
         return {"state": "quarantined", "reason": str(error)}
