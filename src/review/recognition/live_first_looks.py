@@ -1,6 +1,6 @@
 """Disabled, caller-owned First Look delivery/sealing infrastructure.
 
-No application caller, dispatcher, scheduler or activation instant is supplied.
+No application issuance caller, dispatcher, scheduler or activation instant is supplied.
 An independently reviewed guard must establish that the complete competitor
 population is final enough to seal. Delivery order is never ordering.
 """
@@ -15,6 +15,7 @@ from . import DISABLED
 from .geography import _utc
 from .live_first_look_schema import check_schema
 from . import permanent
+from .writer_boundary import production_guard
 from .qualification import Quarantined, capture_completion, qualify, require_transaction
 from .report_connection import report_connection
 from .rules import RULE_KEY, canonical, digest
@@ -56,6 +57,7 @@ def enqueue(conn, assignment_id, *, configuration=Configuration(), gate=DISABLED
     """
     if not gate.capture:
         return None
+    production_guard(authorization)
     permanent.require(not gate.issuance, 'issuance_must_remain_disabled')
     require_transaction(conn)
     check_schema(conn)
@@ -147,6 +149,7 @@ def record_retryable_failure(conn, assignment_id, error, *, gate=DISABLED,
     """
     if not gate.issuance:
         return {"state": "disabled"}
+    production_guard(authorization)
     permanent.require(not gate.capture, "capture_must_remain_disabled")
     require_transaction(conn)
     check_schema(conn)
@@ -198,6 +201,8 @@ def seal_pending(conn, assignment_id, *, gate=DISABLED, finality_guard=None, ret
     """
     if not gate.issuance:
         return {"state": "disabled"}
+    production_guard(authorization)
+    production_guard(delivery_authorization)
     permanent.require(not gate.capture, "capture_must_remain_disabled")
     require_transaction(conn)
     check_schema(conn)

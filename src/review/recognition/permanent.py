@@ -5,6 +5,7 @@ and re-prepares the complete reviewed population under BEGIN IMMEDIATE.
 """
 
 import json
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from . import RecognitionGate
@@ -15,6 +16,7 @@ from .qualification import Quarantined, require_transaction
 from .rules import canonical, digest, load_rule
 from .schema import connection
 from .authorization import verify, manifest_binding
+from . import writer_boundary
 
 
 DEFINITIONS = {
@@ -249,11 +251,21 @@ def check_geography_integrity(conn, award_id):
     return candidate
 
 
+@contextmanager
+def _writer_connection(database, manifest, execution_context):
+    if execution_context is None:
+        with connection(database, write=True) as conn:
+            yield conn
+    else:
+        yield writer_boundary.acquire(execution_context, database, manifest)
+
+
 def finalize(database, manifest, *, manifest_sha256, authorization_reference=None,
-             gate=RecognitionGate(), authorization=None, authority=None):
-    """Explicit one-operation transaction. No leasing, Explorer writes or capture."""
+             gate=RecognitionGate(), authorization=None, authority=None, execution_context=None):
+    """Historical writer; owns commit unless leased into the coordinator transaction."""
     if not gate.issuance:
         return {"issued": False, "reason": "issuance_disabled"}
+    writer_boundary.production_guard(authorization)
     require(not gate.capture, "capture_must_remain_disabled")
     manifest = json.loads(canonical(manifest))
     require(manifest.get("format") == "private-recognition-operation-v1", "historical_manifest_required")
@@ -262,11 +274,14 @@ def finalize(database, manifest, *, manifest_sha256, authorization_reference=Non
     require(text(authorization_reference) and authorization_reference == manifest["authorization_reference"],
             "explicit_authorization_required")
     _validate_manifest(manifest)
-    verify(database, authorization, authority, **manifest_binding(manifest))
-    with connection(database, write=True) as conn:
-        conn.execute("BEGIN IMMEDIATE")
+    if not writer_boundary.verify_local(execution_context, database, manifest):
+        verify(database, authorization, authority, **manifest_binding(manifest))
+    with _writer_connection(database, manifest, execution_context) as conn:
+        if execution_context is None:
+            conn.execute("BEGIN IMMEDIATE")
         check_schema(conn)
-        verify(conn, authorization, authority, **manifest_binding(manifest))
+        if not writer_boundary.verify_local(execution_context, database, manifest, conn=conn):
+            verify(conn, authorization, authority, **manifest_binding(manifest))
         existing = conn.execute("SELECT 1 FROM recognition_private_operations WHERE operation_id=?", (operation_id,)).fetchone()
         if existing:
             _verify_operation_records(conn, operation_id)
@@ -318,8 +333,10 @@ def finalize(database, manifest, *, manifest_sha256, authorization_reference=Non
                                  [(digest(candidate), f["assignment_id"]) for f in candidate["witnesses"]])
         _verify_operation_records(conn, operation_id)
         require(conn.execute("PRAGMA foreign_key_check").fetchone() is None, "foreign_key_check_failed")
-        verify(conn, authorization, authority, **manifest_binding(manifest))
-        conn.commit()
+        if not writer_boundary.verify_local(execution_context, database, manifest, conn=conn):
+            verify(conn, authorization, authority, **manifest_binding(manifest))
+        if execution_context is None:
+            conn.commit()
     return {"issued": True, "operation_id": operation_id, "records": len(manifest["candidates"])}
 
 
@@ -352,6 +369,7 @@ def append_discrepancy(database, *, physical_stop_id, evidence, review_reference
                        reviewed_at_utc, gate=RecognitionGate(), authorization=None, authority=None):
     if not gate.issuance:
         return {"recorded": False, "reason": "issuance_disabled"}
+    writer_boundary.production_guard(authorization)
     require(not gate.capture and text(review_reference), "discrepancy_authorization_required")
     _utc(reviewed_at_utc)
     require(isinstance(evidence, dict) and text(evidence.get("reason")), "discrepancy_evidence_required")

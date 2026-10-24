@@ -44,6 +44,7 @@ from src.review.recognition.achievements import build_achievements
 from src.review.recognition.qualification import Quarantined, capture
 from src.review.recognition import DISABLED, RecognitionGate
 from src.review.recognition import live_first_looks
+from src.review.recognition.admin_routes import register_admin_routes, record_admin_login, revoke_admin_login
 from src.review.recognition.rules import RULE_KEY
 from src.review.recent_activity import build_recent_activity
 from src.review.context import build_review_context
@@ -74,6 +75,8 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "0") == "1",
     PERMANENT_SESSION_LIFETIME=timedelta(days=30),
+    RECOGNITION_ADMIN_CONTROL=os.environ.get("RECOGNITION_ADMIN_CONTROL"),
+    RECOGNITION_ADMIN_KEY_FILE=os.environ.get("RECOGNITION_ADMIN_KEY_FILE"),
     LIVE_FIRST_LOOK_GATE=DISABLED,
     LIVE_FIRST_LOOK_CONFIGURATION=live_first_looks.Configuration(),
     LIVE_FIRST_LOOK_AUTHORIZATION=None,
@@ -135,6 +138,7 @@ def log_operational_failure(response):
     return response
 
 DATABASE_PATH = configured_database()
+register_admin_routes(app)
 
 
 
@@ -5103,11 +5107,16 @@ def reviewer_verify():
     finally:
         if conn is not None:
             conn.close()
+    try:
+        revoke_admin_login()
+    except (ValueError, OSError, sqlite3.Error):
+        return {"error": "Administrative logout is temporarily unavailable"}, 503
     session.clear()
     session["reviewer_key"] = reviewer[0]
     session["authenticated_reviewer_id"] = reviewer_id
     session["auth_csrf"] = secrets.token_urlsafe(24)
     session.permanent = True
+    record_admin_login(reviewer_id, reviewer[0])
     return redirect("/reviewer/profile")
 
 
@@ -5116,6 +5125,10 @@ def reviewer_sign_out():
     data = request.get_json(silent=True) or request.form
     if data.get("csrf_token") != session.get("auth_csrf"):
         return {"error": "Invalid request token"}, 400
+    try:
+        revoke_admin_login()
+    except (ValueError, OSError, sqlite3.Error):
+        return {"error": "Administrative logout is temporarily unavailable"}, 503
     session.clear()
     return {"success": True}
 

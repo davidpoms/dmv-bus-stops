@@ -23,6 +23,18 @@ def configured_database(env=None):
     return Path(raw).resolve()
 
 
+def recognition_admin_configuration(target, control, key_file):
+    """Explicit local control configuration; no reads, install or permission grant."""
+    if not control and not key_file:
+        return None
+    from src.review.recognition.administration import AdminError, LocalAdministration
+    if not target or not control or not key_file:
+        raise AdminError("complete_administrative_configuration_required", 503)
+    result = LocalAdministration(Path(target), Path(control), Path(key_file))
+    result.paths()
+    return result
+
+
 def validate_pilot_environment(env=None):
     env = os.environ if env is None else env
     errors = []
