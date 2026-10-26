@@ -1,10 +1,10 @@
-"""Local approval -> fixed historical writer bridge, production provisioning OFF.
+"""Local approval -> fixed historical writer bridge with trusted-owner admission.
 
-Only newly created, registered disposable workspaces can exercise mutation.
 No authority/status/enrollment/activation provider is accepted by this module.
 """
 
 from dataclasses import asdict
+from datetime import datetime, timezone
 from contextlib import closing
 from pathlib import Path
 import sqlite3
@@ -141,6 +141,11 @@ def _fault(point):
     """Deterministic test seam, never a request/env callback."""
 
 
+def _utc_now():
+    """Trusted server clock for final production checks; never caller-selected."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _read(conn, table, operation_id):
     row = conn.execute(f"SELECT body_json,body_sha256 FROM {table} WHERE operation_id=?", (operation_id,)).fetchone()
     return events._read(row) if row else None
@@ -175,11 +180,12 @@ def _verify(control, target, binding, session_token, approval_id, now, *, contex
     a.need(not journal._stop(control)["active"], "emergency_stop")
     if e["format"] == operations.LOCAL_CONTRACT:
         if not _production_fixture(context):
-            production_operations.activation_guard()
+            production_operations.activation_guard(control, target, binding)
         from . import local_readiness
         a.need(local_readiness._state(control, binding)["state"] == "ACTIVATED", "activation_not_permitted")
         a.need(local_readiness._assess(control, target, binding, now, config=_context(context)["config"], exclude_operation_id=e["operation_id"])["activation_ready"], "local_execution_readiness_not_satisfied")
-    a.need(_enabled(control, binding), "activation_not_permitted")
+    if type(context) is not production_operations.ProductionOperationContext:
+        a.need(_enabled(control, binding), "activation_not_permitted")
     # Same whole-population regeneration as the actual writer, under its lock.
     fresh = permanent._prepare(target, e["family"], manifest["inputs"], manifest["evaluation_at_utc"], manifest["authorization_reference"])
     a.need(fresh == manifest, "writer_preconditions_changed")
@@ -206,7 +212,7 @@ def verify_approved_operation(context, session_token, approval_id, *, now):
 
 
 def _receipt(conn, claim, manifest, result, now):
-    if claim.get("execution_scope") == "disposable-production-contract-fixture":
+    if claim.get("execution_scope") in {"disposable-production-contract-fixture", "trusted-local-production"}:
         from .production_receipts import build
         return build(conn, claim, manifest, result, now)
     e = claim["operation"]
@@ -224,7 +230,7 @@ def _receipt(conn, claim, manifest, result, now):
 
 def _seal(conn, operation_id, value):
     claim = _read(conn, "recognition_execution_claims", operation_id)
-    if claim and claim.get("execution_scope") == "disposable-production-contract-fixture":
+    if claim and claim.get("execution_scope") in {"disposable-production-contract-fixture", "trusted-local-production"}:
         from .production_receipts import evidence
         return evidence(conn, operation_id, value)
     seal = _read(conn, "recognition_execution_seals", operation_id)
@@ -256,7 +262,7 @@ def _existing(conn, operation_id, value):
     if history and history[-1]["state"] == "FAILED_BEFORE_COMMIT":
         return Result("BLOCKED", "FAILED_BEFORE_COMMIT", "terminal_failure_new_operation_required")
     seal = _seal(conn, operation_id, value)
-    if seal and claim.get("execution_scope") == "disposable-production-contract-fixture":
+    if seal and claim.get("execution_scope") in {"disposable-production-contract-fixture", "trusted-local-production"}:
         from .production_receipts import projection_status
         status = projection_status(conn, operation_id, seal)
         if status == "CONFLICT":
@@ -315,13 +321,24 @@ def execute_approved_operation(context, session_token, approval_id, *, now):
                 target.commit()
                 return Result("WAITING_FOR_VERIFICATION" if temporary else "BLOCKED", "WAITING" if temporary else "FAILED_BEFORE_COMMIT", str(error))
             _fault("B")
+            if type(context) is production_operations.ProductionOperationContext:
+                from .local_readiness import require_activated
+                require_activated(control, binding)
+                # Lock waits and preparation can outlive the request's timestamp.
+                now = _utc_now()
+                value, op, manifest = _verify(control, target, binding, session_token, approval_id, now, context=context)
             e = op["envelope"]
             claim = dict(format="recognition-local-execution-claim-v1", claim_id=str(uuid4()), operation=e,
                 operation_id=oid, writer_sha256=digest(manifest), binding=value["approval"]["binding"],
                 approval_id=approval_id, approval_sha256=value["approval_sha256"], actor_id=value["approval"]["actor_id"], claimed_at_utc=now)
             if e["format"] == operations.LOCAL_CONTRACT:
-                a.need(_production_fixture(context), "production_writer_provisioning_unavailable")
-                claim.update(execution_scope="disposable-production-contract-fixture", approval_reason=value["approval"]["reason"])
+                real = type(context) is production_operations.ProductionOperationContext
+                a.need(real or _production_fixture(context), "production_writer_provisioning_unavailable")
+                if real:
+                    from .local_readiness import require_activated
+                    claim["activation_sha256"] = digest(require_activated(control, binding))
+                claim.update(execution_scope="trusted-local-production" if real else "disposable-production-contract-fixture",
+                             approval_reason=value["approval"]["reason"])
             events._insert(target, "recognition_execution_claims", "operation_id", (oid,), claim)
             journal._append(target, oid, "EXECUTING", "local_approval_finally_verified", now, "ADMISSION")
             claimed = True  # Commit errors are uncertain, never safe retry instructions.
@@ -329,6 +346,8 @@ def execute_approved_operation(context, session_token, approval_id, *, now):
             _fault("C")
             target.execute("BEGIN IMMEDIATE")
             a._verify(config, control, target, binding)
+            if type(context) is production_operations.ProductionOperationContext:
+                now = _utc_now()
             # A separate target transaction means ordinary target writers could
             # run after claim commit. Recheck immediately before minting a lease.
             _verify(control, target, binding, session_token, approval_id, now, context=context)
@@ -336,6 +355,7 @@ def execute_approved_operation(context, session_token, approval_id, *, now):
             # One-use registry admission is produced only at this protected
             # final-check boundary, not by possession of a context/claim alone.
             data["writer_admission"] = (target, digest(manifest), digest(claim))
+            data["writer_control"] = control
             with writer_boundary._local_lease(context, target, manifest, claim) as capability:
                 result = permanent.finalize(config.target, manifest, manifest_sha256=digest(manifest),
                     authorization_reference=manifest["authorization_reference"], gate=RecognitionGate(issuance=True),
@@ -349,7 +369,7 @@ def execute_approved_operation(context, session_token, approval_id, *, now):
             _fault("E")
             target.execute("BEGIN IMMEDIATE")
             a.need(_seal(target, oid, value) is not None, "committed_writer_evidence_missing")
-            if claim.get("execution_scope") == "disposable-production-contract-fixture":
+            if claim.get("execution_scope") in {"disposable-production-contract-fixture", "trusted-local-production"}:
                 from .production_receipts import project
                 project(target, oid, value, now=now, kind="EXECUTION")
             else:
@@ -406,7 +426,7 @@ def reconcile_operation(context, session_token, step_token, approval_id, *, now)
             seal = _seal(target, oid, value)
             history = journal._audit(target, oid)
             if seal:
-                if claim.get("execution_scope") == "disposable-production-contract-fixture":
+                if claim.get("execution_scope") in {"disposable-production-contract-fixture", "trusted-local-production"}:
                     from .production_receipts import project
                     project(target, oid, value, now=now)
                     target.commit()

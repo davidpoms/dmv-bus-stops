@@ -132,7 +132,7 @@ class ProductionOperationTests(unittest.TestCase):
         self.assertFalse(self.approval["approval"]["binding"]["synthetic_contract_only"])
         context = d.load_context(self.config, self.oid)
         preview = c.verify_approved_operation(context, self.session, self.aid, now=at(90))
-        self.assertEqual("production_activation_deployment_blocked", preview.reason)
+        self.assertEqual("local_readiness_install_required", preview.reason)
         with patch.object(permanent, "finalize", side_effect=AssertionError("production writer")):
             result = c.execute_approved_operation(context, self.session, self.aid, now=at(90))
         self.assertEqual("WAITING", result.state)
@@ -333,7 +333,7 @@ print(json.dumps(d.continue_pending(config,now=request['now'])))
         context = d.load_context(self.config, self.oid)
         with a.connect(self.path, write=True) as conn:
             conn.execute("BEGIN IMMEDIATE")
-            with self.assertRaisesRegex(Exception, "production_writer_provisioning_unavailable"):
+            with self.assertRaisesRegex(Exception, "protected_final_verification_required"):
                 with writer_boundary._local_lease(context, conn, {}, {}):
                     self.fail("production writer was provisioned")
 

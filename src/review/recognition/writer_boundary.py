@@ -27,15 +27,27 @@ class LocalExecutionCapability:
 
 @contextmanager
 def _local_lease(context, conn, manifest, claim):
-    # Only a registered fresh disposable workspace can currently reach this
-    # boundary. There is deliberately no production context factory.
-    from .local_execution import _context
+    from .local_execution import _context, _verify, _utc_now
     data = _context(context)
-    if "operation_id" in data:
-        raise AuthorizationError("production_writer_provisioning_unavailable")
     admission = data.pop("writer_admission", None)
+    control = data.pop("writer_control", None)
     if admission != (conn, digest(manifest), digest(claim)):
         raise AuthorizationError("protected_final_verification_required")
+    if "operation_id" in data:
+        from . import production_operations as p, administration as a
+        if (type(context) is not p.ProductionOperationContext or not data["consumed"]
+                or claim.get("execution_scope") != "trusted-local-production" or control is None or not control.in_transaction):
+            raise AuthorizationError("production_writer_provisioning_unavailable")
+        binding = a._binding(control)
+        from .local_readiness import require_activated
+        if digest(require_activated(control, binding)) != claim.get("activation_sha256"):
+            raise AuthorizationError("production_activation_claim_mismatch")
+        a._verify(data["config"], control, conn, binding)
+        value, operation, checked = _verify(control, conn, binding, p.continuation(context, claim["approval_id"]),
+                                           claim["approval_id"], _utc_now(), context=context)
+        p.bind_approval(data, value, binding)
+        if operation["envelope"] != claim["operation"] or checked != manifest:
+            raise AuthorizationError("production_writer_subject_mismatch")
     if (not conn.in_transaction or target_identity(conn) != target_identity(data["config"].target)
             or claim["writer_sha256"] != digest(manifest)):
         raise AuthorizationError("local_execution_claim_mismatch")

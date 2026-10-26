@@ -145,6 +145,8 @@ class ReadinessReceiptTests(unittest.TestCase):
     def test_geography_full_actual_outcome_evidence(self):
         for n in range(2, 6):
             self.fixture.review(n)
+        # G readiness requires stale pending approval authority to be reconciled.
+        self.assertEqual("INVALIDATED", b.get_approval(self.config, self.session, self.aid, now=at(90))["state"])
         # Supersede the now-stale unclaimed operation before a new frozen evaluation.
         request = self.request(True)
         self.create(request)
@@ -373,5 +375,5 @@ class ReadinessReceiptTests(unittest.TestCase):
         context = d.load_context(self.config, self.oid)
         with patch.object(d, "activation_guard", return_value=None), patch.object(permanent, "finalize", side_effect=AssertionError("provisioning bypass")):
             result = c.execute_approved_operation(context, self.session, self.aid, now=at(120))
-        self.assertEqual("production_writer_provisioning_unavailable", result.reason)
+        self.assertEqual("production_activation_deployment_blocked", result.reason)
         self.assertEqual((0, 0, 0, 0), self.counts())

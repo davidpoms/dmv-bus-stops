@@ -1,7 +1,7 @@
 """Versioned execution evidence and rebuildable operation projection.
 
 Historical seals retain full frozen population/outcomes. Projection never invokes
-a writer. Actual production capability provisioning remains unavailable.
+a writer. Provisioning remains exclusively in the local coordinator boundary.
 """
 
 from . import administration as a, events, operations, permanent, execution as journal
@@ -31,11 +31,16 @@ def _records(conn, manifest):
 
 
 def build(conn, claim, manifest, result, now):
+    a.need(claim.get("execution_scope") in {"disposable-production-contract-fixture", "trusted-local-production"}, "unsupported_execution_scope")
     e = claim["operation"]
     permanent._verify_operation_records(conn, digest(manifest))
     a.need(e["format"] == operations.LOCAL_CONTRACT and e["accounting_policy"] == operations.LOCAL_POLICY
            and result == dict(issued=True, operation_id=digest(manifest), records=len(e["member_ids"])), "invalid_production_writer_accounting")
-    return dict(format=FORMAT, execution_scope=claim["execution_scope"], outcome="COMPLETED",
+    activation = {}
+    if claim["execution_scope"] == "trusted-local-production":
+        a.need(operations._sha(claim.get("activation_sha256")), "production_activation_evidence_required")
+        activation["activation_sha256"] = claim["activation_sha256"]
+    return dict(format=FORMAT, execution_scope=claim["execution_scope"], outcome="COMPLETED", **activation,
         operation_id=e["operation_id"], operation_sha256=digest(e), event_id=e["event_id"], preparation_id=e["preparation_id"],
         approval_id=claim["approval_id"], approval_sha256=claim["approval_sha256"], actor_id=claim["actor_id"], reason=claim["approval_reason"],
         installation_id=e["local_target"]["installation_id"], target_id=e["local_target"]["target_id"],
@@ -148,7 +153,7 @@ def recovery_binding(control, target, oid):
     if not target.execute("SELECT 1 FROM sqlite_master WHERE name='recognition_execution_claims'").fetchone():
         return None
     claim = journal._read(target, "recognition_execution_claims", oid)
-    if not claim or claim.get("execution_scope") != "disposable-production-contract-fixture" or not journal._read(target, "recognition_execution_seals", oid):
+    if not claim or claim.get("execution_scope") not in {"disposable-production-contract-fixture", "trusted-local-production"} or not journal._read(target, "recognition_execution_seals", oid):
         return None
     from . import approvals
     value = approvals._read(control, claim["approval_id"])

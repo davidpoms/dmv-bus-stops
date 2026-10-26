@@ -1,4 +1,4 @@
-"""Local control/approval orchestration; production execution remains blocked."""
+"""Local owner control, activation ceremony and fixed approval orchestration."""
 
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -150,10 +150,17 @@ def register_admin_routes(app):
     @routes.post("/activation")
     def activation():
         from . import local_readiness
-        value = data(("state", "step_up_token", "reason"))
+        value = data(("state", "step_up_token", "reason", "confirmation_token"))
         result = local_readiness.change_state(context(administrative=True), session["recognition_admin"], value["step_up_token"],
-            state=value["state"], reason=value["reason"], now=now_utc())
+            state=value["state"], reason=value["reason"], confirmation_token=value["confirmation_token"], now=now_utc())
         return jsonify(result), 409 if result.get("result") == "BLOCKED" else 200
+
+    @routes.post("/activation/confirmations")
+    def activation_confirmation():
+        from . import local_readiness
+        value = data(("step_up_token",))
+        return jsonify(local_readiness.begin_activation_confirmation(context(administrative=True),
+            session["recognition_admin"], value["step_up_token"], now=now_utc()))
 
     @routes.post("/operations/<operation_id>/approve")
     def approve(operation_id):

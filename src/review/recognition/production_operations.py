@@ -224,10 +224,12 @@ def actor_session(control, target, binding, reference, now):
     return auth._session_hash(control, target, binding, value["approval"]["session_sha256"], now)
 
 
-def activation_guard():
-    # Deliberately unconditional: neither DB activation flags, disposable fixture
-    # readiness, environment variables nor a descriptor can enable production.
-    raise a.AdminError("production_activation_deployment_blocked", 503)
+def activation_guard(control=None, target=None, binding=None):
+    """Trusted local ceremony evidence under the coordinator's existing locks."""
+    a.need(control is not None and target is not None and binding is not None
+           and control.in_transaction and target.in_transaction, "production_activation_deployment_blocked", 503)
+    from .local_readiness import require_activated
+    return require_activated(control, binding)
 
 
 def inspect_operation(config, operation_id):
