@@ -15,7 +15,7 @@ from src.review.recognition.rules import canonical, digest
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("preview", "install", "install-approvals", "install-readiness", "readiness", "install-contracts", "create-operation", "inspect-operation", "scan-approved", "advance-restore", "reset-mfa"))
+    parser.add_argument("action", choices=("preview", "install", "install-approvals", "install-readiness", "readiness", "install-contracts", "create-operation", "inspect-operation", "scan-approved", "advance-restore", "rebind-filesystem-identity", "reset-mfa"))
     parser.add_argument("--target", type=Path, required=True)
     parser.add_argument("--control", type=Path, required=True)
     parser.add_argument("--key-file", type=Path, required=True, help="existing host-held Fernet key file; never generated here")
@@ -88,10 +88,11 @@ def main(argv=None):
     elif args.action == "install-approvals":
         from src.review.recognition import approvals
         approvals.install(config, operator=args.operator, reason=args.reason, now=now)
-    elif args.action == "advance-restore":
+    elif args.action in ("advance-restore", "rebind-filesystem-identity"):
         if args.expected_generation is None or not args.target_sha256:
             parser.error("--expected-generation and --target-sha256 from preview are required")
-        a.advance_restore_generation(config, expected_generation=args.expected_generation,
+        ceremony = a.rebind_filesystem_identity if args.action == "rebind-filesystem-identity" else a.advance_restore_generation
+        ceremony(config, expected_generation=args.expected_generation,
             expected_target_sha256=args.target_sha256, operator=args.operator, reason=args.reason, now=now)
     else:
         if args.expected_generation is None or not args.confirm_mfa_reset:

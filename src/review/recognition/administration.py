@@ -225,6 +225,64 @@ def advance_restore_generation(config, *, expected_generation, expected_target_s
         return generation
 
 
+def rebind_filesystem_identity(config, *, expected_generation, expected_target_sha256, operator, reason, now):
+    """Trusted-host device-number drift only; no target writes or authority.
+
+    Unlike restore/rebind, inode/path/host/schema/installation must all survive.
+    Normal transaction/authorization identity comparisons remain exact.
+    """
+    need(type(config) is LocalAdministration, "local_administration_required", 503)
+    config.paths()
+    need(type(operator) is str and bool(operator.strip()) and type(reason) is str and bool(reason.strip()),
+         "filesystem_rebind_ceremony_required")
+    timestamp(now)
+    with connect(config.control, write=True) as control, connect(config.target, write=True) as target:
+        control.execute("BEGIN IMMEDIATE")
+        schema.check_control(control)
+        _audit_head(control)
+        old = _binding(control)
+        need(type(expected_generation) is int and expected_generation == old["generation"], "filesystem_rebind_generation_conflict")
+        need(str(config.control) == old["control_identity"]["database"]
+             and str(config.target) == old["target"]["observation"]["database"], "filesystem_rebind_path_mismatch")
+        target.execute("BEGIN IMMEDIATE")
+        current_control = asdict(target_identity(control))
+        current_target = observe_target(target)
+        for previous, current in ((old["control_identity"], current_control),
+                                  (old["target"]["observation"], current_target["observation"])):
+            need(set(previous) == set(current) == {"hostname", "database", "device", "inode"}
+                 and all(previous[key] == current[key] for key in ("hostname", "database", "inode")),
+                 "filesystem_rebind_non_device_mismatch")
+        need(current_control != old["control_identity"] or current_target["observation"] != old["target"]["observation"],
+             "filesystem_rebind_device_unchanged")
+        need(digest(current_target) == expected_target_sha256, "filesystem_rebind_preview_mismatch")
+        need(current_target["schema_sha256"] == old["target"]["schema_sha256"], "filesystem_rebind_schema_mismatch")
+        schema.check_target(target)  # Validate existing definitions; never install/migrate.
+        row = target.execute(f"SELECT * FROM {schema.TARGET_TABLE}").fetchone()
+        need(row is not None and row["installation_id"] == old["installation_id"]
+             and row["target_id"] == old["target_id"] and row["owner_id"] == old["owner_id"],
+             "installation_target_mismatch")
+        owner = target.execute("SELECT role,email_verified_at FROM community_reviewers WHERE id=?", (old["owner_id"],)).fetchone()
+        need(owner is not None and owner["role"] == "owner" and owner["email_verified_at"], "verified_project_owner_required")
+        generation = old["generation"] + 1
+        body = dict(old, generation=generation, control_identity=current_control, target=current_target,
+                    previous_sha256=digest(old), at_utc=now, production_state="NOT_ACTIVATED")
+        _invalidate(control)
+        if control.execute("SELECT 1 FROM sqlite_master WHERE name='recognition_approvals'").fetchone():
+            from .approvals import _invalidate_all
+            _invalidate_all(control, operator, now, "filesystem-identity-rebound")
+        control.execute("INSERT INTO recognition_admin_bindings VALUES(?,?,?)", (generation, canonical(body), digest(body)))
+        _audit(control, "filesystem_identity_rebound", operator, now, dict(reason=reason,
+            previous_generation=old["generation"], generation=generation, expected_target_sha256=expected_target_sha256,
+            old_control_identity=old["control_identity"], control_identity=current_control,
+            old_target=old["target"], target=current_target))
+        # Detect another observation change before committing the sole modified
+        # store. Host operators must quiesce filesystem replacement as well.
+        need(asdict(target_identity(control)) == current_control and observe_target(target) == current_target,
+             "filesystem_rebind_observation_changed")
+        control.commit()  # Keep target writer reservation until this commit ends.
+        return generation
+
+
 def reset_mfa(config, *, expected_generation, operator, reason, now):
     """Explicit trusted deployment recovery; email/login alone cannot reset MFA."""
     need(bool(operator.strip()) and bool(reason.strip()), "mfa_reset_ceremony_required")
