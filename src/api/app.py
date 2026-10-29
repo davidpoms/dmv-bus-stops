@@ -28,6 +28,7 @@ from src.review.assignment_router import (
     normalize_campaign,
 )
 from src.api.deployment import configured_database
+from src.api.recognition_wsgi_diagnostic import register as register_wsgi_identity_diagnostic
 
 from src.assessment.interpretation import (
     interpret_ddot_evidence,
@@ -139,6 +140,7 @@ def log_operational_failure(response):
 
 DATABASE_PATH = configured_database()
 register_admin_routes(app)
+register_wsgi_identity_diagnostic(app, lambda: DATABASE_PATH)
 
 
 
