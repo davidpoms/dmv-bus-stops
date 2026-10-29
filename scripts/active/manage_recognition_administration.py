@@ -15,7 +15,7 @@ from src.review.recognition.rules import canonical, digest
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("preview", "install", "install-approvals", "install-readiness", "readiness", "install-contracts", "create-operation", "inspect-operation", "scan-approved", "advance-restore", "rebind-filesystem-identity", "migrate-runtime-profile-contract", "reset-mfa"))
+    parser.add_argument("action", choices=("preview", "install", "install-approvals", "install-readiness", "readiness", "install-contracts", "create-operation", "inspect-operation", "scan-approved", "advance-restore", "rebind-filesystem-identity", "migrate-runtime-profile-contract", "issue-runtime-challenge", "reset-mfa"))
     parser.add_argument("--target", type=Path, required=True)
     parser.add_argument("--control", type=Path, required=True)
     parser.add_argument("--key-file", type=Path, required=True, help="existing host-held Fernet key file; never generated here")
@@ -24,6 +24,10 @@ def main(argv=None):
     parser.add_argument("--installation-id")
     parser.add_argument("--owner-id", type=int)
     parser.add_argument("--expected-generation", type=int)
+    parser.add_argument("--target-id")
+    parser.add_argument("--source-binding-sha256")
+    parser.add_argument("--confirm-issue-runtime-challenge", action="store_true",
+                        help="confirm local challenge issuance only; stdout contains a one-time nonce")
     parser.add_argument("--target-sha256")
     parser.add_argument("--create-control", action="store_true")
     parser.add_argument("--confirm-mfa-reset", action="store_true")
@@ -41,6 +45,19 @@ def main(argv=None):
     if not args.operator or not args.reason:
         parser.error("--operator and --reason are required for an administrative ceremony")
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if args.action == 'issue-runtime-challenge':
+        if (args.expected_generation is None or not args.installation_id or not args.target_id
+                or args.owner_id is None or not args.source_binding_sha256
+                or not args.confirm_issue_runtime_challenge):
+            parser.error('--expected-generation, --installation-id, --target-id, --owner-id, '
+                         '--source-binding-sha256 and --confirm-issue-runtime-challenge are required; '
+                         'stdout returns the nonce once: do not redirect it to persistent logs')
+        from src.review.recognition.runtime_challenges import issue_challenge
+        print(canonical(issue_challenge(config, expected_generation=args.expected_generation,
+            installation_id=args.installation_id, target_id=args.target_id, owner_id=args.owner_id,
+            source_binding_sha256=args.source_binding_sha256, operator=args.operator,
+            reason=args.reason, now=now)))
+        return
     if args.action == 'migrate-runtime-profile-contract':
         if args.expected_generation is None:
             parser.error('--expected-generation is required')
