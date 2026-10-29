@@ -77,6 +77,8 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(days=30),
     RECOGNITION_ADMIN_CONTROL=os.environ.get("RECOGNITION_ADMIN_CONTROL"),
     RECOGNITION_ADMIN_KEY_FILE=os.environ.get("RECOGNITION_ADMIN_KEY_FILE"),
+    RECOGNITION_RUNTIME_CHALLENGE_ID=os.environ.get("RECOGNITION_RUNTIME_CHALLENGE_ID"),
+    RECOGNITION_RUNTIME_CHALLENGE_SHA256=os.environ.get("RECOGNITION_RUNTIME_CHALLENGE_SHA256"),
     LIVE_FIRST_LOOK_GATE=DISABLED,
     LIVE_FIRST_LOOK_CONFIGURATION=live_first_looks.Configuration(),
     LIVE_FIRST_LOOK_AUTHORIZATION=None,
@@ -139,6 +141,8 @@ def log_operational_failure(response):
 
 DATABASE_PATH = configured_database()
 register_admin_routes(app)
+from src.review.recognition.runtime_evidence import register_runtime_evidence
+register_runtime_evidence(app, lambda: DATABASE_PATH)
 
 
 
