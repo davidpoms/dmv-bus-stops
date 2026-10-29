@@ -40,9 +40,38 @@ def check_control(conn):
     if "recognition_local_activation" in actual:
         from .local_readiness import definitions as readiness_definitions
         expected.update(readiness_definitions())
+    from . import runtime_profile_schema as runtime
+    extended = any(n.startswith('recognition_runtime_') or n == 'recognition_admin_runtime_binding_guard' for n in actual)
+    if 'recognition_admin_bindings' in actual:
+        extended = extended or bool(conn.execute(
+            "SELECT 1 FROM recognition_admin_bindings WHERE json_extract(body_json,'$.format')=?",
+            (runtime.V3,)).fetchone())
+    if extended:
+        expected.update(runtime.definitions())
     require(set(actual) == set(expected) and all(" ".join(actual[n].split()) == " ".join(s.split())
             for n, s in expected.items()), "administration_schema_mismatch")
     require(len(conn.execute("PRAGMA database_list").fetchall()) == 1, "isolated_admin_control_required")
+    if extended:
+        runtime.check_rows(conn)
+
+
+def install_runtime_extension(conn):
+    """Explicit Slice 1 DDL only; ordinary access never calls this installer."""
+    require(conn.in_transaction and conn.execute('PRAGMA foreign_keys').fetchone()[0] == 1,
+            'runtime_migration_transaction_required')
+    from . import runtime_profile_schema as runtime
+    check_control(conn)  # Never repair a partial or malformed extension.
+    conn.execute('SAVEPOINT install_runtime_extension')
+    try:
+        for name, sql in runtime.definitions().items():
+            if not conn.execute('SELECT 1 FROM sqlite_master WHERE name=?', (name,)).fetchone():
+                conn.execute(sql)
+        check_control(conn)
+    except BaseException:
+        conn.execute('ROLLBACK TO install_runtime_extension')
+        raise
+    finally:
+        conn.execute('RELEASE install_runtime_extension')
 
 
 def install_control(conn):

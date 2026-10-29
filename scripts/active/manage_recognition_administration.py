@@ -15,7 +15,7 @@ from src.review.recognition.rules import canonical, digest
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("preview", "install", "install-approvals", "install-readiness", "readiness", "install-contracts", "create-operation", "inspect-operation", "scan-approved", "advance-restore", "rebind-filesystem-identity", "reset-mfa"))
+    parser.add_argument("action", choices=("preview", "install", "install-approvals", "install-readiness", "readiness", "install-contracts", "create-operation", "inspect-operation", "scan-approved", "advance-restore", "rebind-filesystem-identity", "migrate-runtime-profile-contract", "reset-mfa"))
     parser.add_argument("--target", type=Path, required=True)
     parser.add_argument("--control", type=Path, required=True)
     parser.add_argument("--key-file", type=Path, required=True, help="existing host-held Fernet key file; never generated here")
@@ -41,6 +41,13 @@ def main(argv=None):
     if not args.operator or not args.reason:
         parser.error("--operator and --reason are required for an administrative ceremony")
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if args.action == 'migrate-runtime-profile-contract':
+        if args.expected_generation is None:
+            parser.error('--expected-generation is required')
+        generation = a.migrate_runtime_profile_contract(config, expected_generation=args.expected_generation,
+            operator=args.operator, reason=args.reason, now=now)
+        print(canonical(dict(generation=generation, production_state='NOT_ACTIVATED', runtime_access='BLOCKED')))
+        return
     if args.action == "install-readiness":
         from src.review.recognition import local_readiness
         local_readiness.install(config, operator=args.operator, reason=args.reason, now=now)

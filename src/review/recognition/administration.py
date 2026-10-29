@@ -83,6 +83,9 @@ def _binding(conn):
         need(row["generation"] == index and body["generation"] == index and digest(body) == row["body_sha256"]
              and body["previous_sha256"] == previous, "installation_history_integrity_failure", 503)
         previous = row["body_sha256"]
+    # Slice 1 installs storage only. No ordinary administrative/execution path
+    # may interpret a v3 binding until its separate runtime contract is implemented.
+    need(body.get('format') != 'recognition-local-control-v3', 'runtime_profile_contract_not_enabled', 503)
     return body
 
 
@@ -280,6 +283,49 @@ def rebind_filesystem_identity(config, *, expected_generation, expected_target_s
         need(asdict(target_identity(control)) == current_control and observe_target(target) == current_target,
              "filesystem_rebind_observation_changed")
         control.commit()  # Keep target writer reservation until this commit ends.
+        return generation
+
+
+def migrate_runtime_profile_contract(config, *, expected_generation, operator, reason, now):
+    """Explicit deployment-only v2 -> v3 migration; no profiles or runtime authority.
+
+    The entire ceremony has a savepoint so even a caller catching a failure
+    cannot commit partial DDL, revocations, binding or audit changes.
+    Repetition with the old generation is rejected; inspect history after lost ACK.
+    """
+    need(type(operator) is str and bool(operator.strip()) and len(operator) <= 200
+         and type(reason) is str and bool(reason.strip()) and len(reason) <= 2000,
+         'runtime_migration_ceremony_required')
+    timestamp(now)
+    with transaction(config, lock_target=True) as (control, target, old):
+        need(type(expected_generation) is int and expected_generation == old['generation'], 'runtime_migration_generation_conflict')
+        need(old['format'] == 'recognition-local-control-v2', 'runtime_migration_source_format')
+        owner = target.execute('SELECT role,email_verified_at FROM community_reviewers WHERE id=?', (old['owner_id'],)).fetchone()
+        need(owner is not None and owner['role'] == 'owner' and owner['email_verified_at'], 'verified_project_owner_required')
+        if control.execute("SELECT 1 FROM sqlite_master WHERE name='recognition_local_activation'").fetchone():
+            from .local_readiness import _state
+            need(_state(control, old)['state'] == 'NOT_ACTIVATED', 'runtime_migration_requires_not_activated')
+        need(old['production_state'] == 'NOT_ACTIVATED', 'runtime_migration_requires_not_activated')
+        control.execute('SAVEPOINT migrate_runtime_contract')
+        try:
+            schema.install_runtime_extension(control)
+            generation = old['generation'] + 1
+            body = dict(old, format='recognition-local-control-v3', generation=generation,
+                        runtime_profile_sha256=None, previous_sha256=digest(old), at_utc=now,
+                        production_state='NOT_ACTIVATED')
+            _invalidate(control)
+            if control.execute("SELECT 1 FROM sqlite_master WHERE name='recognition_approvals'").fetchone():
+                from .approvals import _invalidate_all
+                _invalidate_all(control, operator, now, 'runtime-contract-migrated')
+            control.execute('INSERT INTO recognition_admin_bindings VALUES(?,?,?)', (generation, canonical(body), digest(body)))
+            _audit(control, 'runtime_profile_contract_migrated', operator, now,
+                   dict(reason=reason, previous_generation=old['generation'], generation=generation))
+            schema.check_control(control)
+        except BaseException:
+            control.execute('ROLLBACK TO migrate_runtime_contract')
+            raise
+        finally:
+            control.execute('RELEASE migrate_runtime_contract')
         return generation
 
 
