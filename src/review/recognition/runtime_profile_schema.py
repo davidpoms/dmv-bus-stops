@@ -171,6 +171,13 @@ def _check_decimal(value, *, inode=False):
             and (not inode or value != '0'), 'runtime_profile_decimal_format_mismatch')
 
 
+def _check_path(value):
+    p=Path(value)
+    require(p.is_absolute() and str(p.resolve())==value,'runtime_profile_path_mismatch')
+    from .runtime_history_validation import record_path
+    record_path(value,'profile')
+
+
 def check_rows(conn):
     """Supplement SQL constraints with canonical paths, digests and audit links."""
     for table, hash_key in ((CHALLENGES, 'challenge_sha256'), (PROFILES, 'profile_sha256')):
@@ -189,8 +196,7 @@ def check_rows(conn):
                     _check_decimal(row[prefix+'_device'])
                     _check_decimal(row[prefix+'_inode'], inode=True)
                 for key in ('target_path','control_path'):
-                    p = Path(row[key])
-                    require(p.is_absolute() and str(p.resolve()) == row[key], 'runtime_profile_path_mismatch')
+                    _check_path(row[key])
             audit = conn.execute('SELECT body_json FROM recognition_admin_audit WHERE sequence=?', (row['audit_sequence'],)).fetchone()
             require(audit is not None, 'runtime_profile_audit_missing')
             body = load(audit[0])

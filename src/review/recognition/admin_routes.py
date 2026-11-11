@@ -29,11 +29,30 @@ def revoke_admin_login():
         auth.invalidate_primary(config, token, now=now_utc())
 
 
+def authentication_backend(config):
+    """Durable format dispatch for authentication only; no fallback on failure."""
+    from . import administration_schema, runtime_profile_schema
+    from .trust import load
+    with a.connect(config.control) as conn:
+        administration_schema.check_control(conn)
+        rows = conn.execute('SELECT body_json FROM recognition_admin_bindings ORDER BY generation').fetchall()
+        a.need(bool(rows), 'installation_not_initialized', 503)
+        bodies = [load(row[0]) for row in rows]
+        a.need(all(type(body) is dict for body in bodies), 'installation_history_integrity_failure', 503)
+        formats = [body.get('format') for body in bodies]
+        a.need(all(value in ('recognition-local-control-v2', runtime_profile_schema.V3) for value in formats),
+               'installation_history_integrity_failure', 503)
+    if runtime_profile_schema.V3 in formats:
+        from . import runtime_auth
+        return runtime_auth
+    return auth
+
+
 def record_admin_login(actor_id, reviewer_key):
     try:
         config = configuration()
         if config is not None:
-            session["recognition_primary"] = auth.record_primary_authentication(config,
+            session["recognition_primary"] = authentication_backend(config).record_primary_authentication(config,
                 actor_id=actor_id, reviewer_key=reviewer_key, now=now_utc())
     except (a.AdminError, ValueError, OSError, sqlite3.Error):
         # Reviewer login stays available; no administrative authentication is minted.
@@ -59,7 +78,7 @@ def register_admin_routes(app):
     for error_type in (OSError, sqlite3.Error, ValueError, ImportError):
         routes.register_error_handler(error_type, unavailable)
 
-    def context(*, administrative=False):
+    def context(*, administrative=False, authentication_only=False):
         config = configuration()
         a.need(config is not None, "administrative_control_not_configured", 503)
         from src.review.admin_dashboard import owner_access
@@ -67,12 +86,16 @@ def register_admin_routes(app):
             allowed, _ = owner_access(conn, session.get("authenticated_reviewer_id"), session.get("reviewer_key"))
         a.need(allowed, "recognition_owner_required", 403)
         primary = session.get("recognition_primary")
-        identity = auth.get_admin_identity(config, primary, now=now_utc())
+        backend = authentication_backend(config) if authentication_only else auth
+        identity = backend.get_admin_identity(config, primary, now=now_utc())
         a.need(identity.actor_id == session.get("authenticated_reviewer_id"), "owner_identity_mismatch")
         if administrative:
-            with a.transaction(config) as (conn, target, binding):
-                row, _ = auth._session(conn, target, binding, session.get("recognition_admin"), now_utc())
-                a.need(row["primary_hash"] == a.token_hash(primary), "administrative_browser_session_mismatch")
+            if backend is auth:
+                with a.transaction(config) as (conn, target, binding):
+                    row, _ = auth._session(conn, target, binding, session.get("recognition_admin"), now_utc())
+                    a.need(row["primary_hash"] == a.token_hash(primary), "administrative_browser_session_mismatch")
+            else:
+                backend.require_recognition_admin(config, session.get('recognition_admin'), primary_token=primary, now=now_utc())
         return config
 
     def data(fields):
@@ -85,34 +108,36 @@ def register_admin_routes(app):
 
     @routes.get("/identity")
     def identity():
-        config = context()
-        return jsonify(asdict(auth.get_admin_identity(config, session["recognition_primary"], now=now_utc())))
+        config = context(authentication_only=True)
+        return jsonify(asdict(authentication_backend(config).get_admin_identity(config, session["recognition_primary"], now=now_utc())))
 
     @routes.post("/mfa/enrollment")
     def enrollment():
         data(())
-        config = context()
-        uri = auth.begin_enrollment(config, session["recognition_primary"], now=now_utc())
+        config = context(authentication_only=True)
+        uri = authentication_backend(config).begin_enrollment(config, session["recognition_primary"], now=now_utc())
         return {"provisioning_uri": uri, "state": "PENDING_CONFIRMATION"}
 
     @routes.post("/mfa/verify")
     def verify():
         value = data(("code",))
-        config = context()
-        auth.finish_enrollment(config, session["recognition_primary"], value["code"], now=now_utc())
+        config = context(authentication_only=True)
+        authentication_backend(config).finish_enrollment(config, session["recognition_primary"], value["code"], now=now_utc())
         return {"state": "ENROLLED"}
 
     @routes.post("/session")
     def open_session():
         value = data(("code",))
-        config = context()
-        session["recognition_admin"] = auth.open_admin_session(config, session["recognition_primary"], value["code"], now=now_utc())
+        config = context(authentication_only=True)
+        session["recognition_admin"] = authentication_backend(config).open_admin_session(config, session["recognition_primary"], value["code"], now=now_utc())
         return {"state": "ADMINISTRATIVELY_AUTHENTICATED", "lifetime_seconds": auth.SESSION_SECONDS}
 
     @routes.get("/session")
     def session_status():
-        config = context(administrative=True)
-        return jsonify(asdict(auth.require_recognition_admin(config, session["recognition_admin"], now=now_utc())))
+        config = context(administrative=True, authentication_only=True)
+        backend = authentication_backend(config)
+        kwargs = {} if backend is auth else dict(primary_token=session['recognition_primary'])
+        return jsonify(asdict(backend.require_recognition_admin(config, session["recognition_admin"], now=now_utc(), **kwargs)))
 
     @routes.post("/step-up")
     def step_up():

@@ -260,6 +260,57 @@ def _writer_connection(database, manifest, execution_context):
         yield writer_boundary.acquire(execution_context, database, manifest)
 
 
+def _insert_family_effects(conn, manifest, *, sealed_at=None):
+    """Private fixed INSERT kernel. Caller owns authorization and transaction.
+
+    No commit, capability creation, schema change or idempotent adoption.
+    Both legacy and runtime owners must regenerate and verify the full manifest.
+    """
+    require(conn.in_transaction, "family_transaction_required")
+    rule = manifest["rule"]
+    old = conn.execute("SELECT * FROM recognition_private_rules WHERE rule_key=?", (rule["rule_key"],)).fetchone()
+    if old:
+        require(old["definition_json"] == canonical(rule) and old["definition_sha256"] == digest(rule), "stored_rule_mismatch")
+    else:
+        conn.execute("INSERT INTO recognition_private_rules VALUES(?,?,?,?)",
+                     (rule["rule_key"], manifest["family"], canonical(rule), digest(rule)))
+    sealed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if sealed_at is None else sealed_at
+    _utc(sealed_at)
+    require(sealed_at >= manifest["evaluation_at_utc"], "future_evaluation_not_authorized")
+    operation_id = digest(manifest)
+    conn.execute("INSERT INTO recognition_private_operations VALUES(?,?,?,?,?,?)",
+                 (operation_id, rule["rule_key"], canonical(manifest), operation_id,
+                  manifest["authorization_reference"], sealed_at))
+    if manifest["family"] == "first_look":
+        for candidate in manifest["candidates"]:
+            require(conn.execute("SELECT 1 FROM recognition_first_look_claims WHERE physical_stop_id=?",
+                                 (candidate["physical_stop_id"],)).fetchone() is None, "existing_claim_requires_discrepancy")
+            conn.execute("INSERT INTO recognition_first_look_claims VALUES(?,?,?,?,?,?,?)",
+                         (candidate["physical_stop_id"], candidate["reviewer_id"], candidate["assignment_id"],
+                          operation_id, candidate["completed_at_utc"], canonical(candidate), digest(candidate)))
+    else:
+        for item in manifest["report"]["scopes"]:
+            scope = item["snapshot_scope"]
+            # Initial launch is one catch-up per scope. A later snapshot or
+            # denominator shrink needs a new reviewed implementation/policy.
+            require(conn.execute("SELECT 1 FROM recognition_geography_scope_identities WHERE scope_key=?",
+                                 (scope["scope_key"],)).fetchone() is None, "scope_catch_up_already_sealed")
+            conn.execute("INSERT INTO recognition_geography_scope_identities VALUES(?,?,?,?)",
+                         tuple(scope[k] for k in ("scope_key", "dimension", "canonical_geography_id", "display_label")))
+            conn.execute("INSERT INTO recognition_geography_snapshots VALUES(?,?,?,?,?)",
+                         (digest(scope), scope["scope_key"], operation_id, canonical(scope), digest(scope)))
+            conn.executemany("INSERT INTO recognition_geography_members VALUES(?,?)",
+                             [(digest(scope), n) for n in item["member_physical_stop_ids"]])
+        for candidate in manifest["candidates"]:
+            conn.execute("INSERT INTO recognition_geography_awards VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                         (digest(candidate), candidate["reviewer_id"], candidate["scope_key"], candidate["tier_key"],
+                          candidate["snapshot_id"], operation_id, candidate["earned_at_utc"], candidate["numerator"],
+                          candidate["denominator"], candidate["percentage"], candidate["size_band"], canonical(candidate), digest(candidate)))
+            conn.executemany("INSERT INTO recognition_geography_witnesses VALUES(?,?)",
+                             [(digest(candidate), f["assignment_id"]) for f in candidate["witnesses"]])
+    return operation_id
+
+
 def finalize(database, manifest, *, manifest_sha256, authorization_reference=None,
              gate=RecognitionGate(), authorization=None, authority=None, execution_context=None):
     """Historical writer; owns commit unless leased into the coordinator transaction."""
@@ -291,46 +342,7 @@ def finalize(database, manifest, *, manifest_sha256, authorization_reference=Non
         # regenerated inside the lock, before any new-family write.
         fresh = _prepare(conn, manifest["family"], manifest["inputs"], manifest["evaluation_at_utc"], authorization_reference)
         require(fresh == manifest, "reviewed_source_changed")
-        rule = manifest["rule"]
-        old = conn.execute("SELECT * FROM recognition_private_rules WHERE rule_key=?", (rule["rule_key"],)).fetchone()
-        if old:
-            require(old["definition_json"] == canonical(rule) and old["definition_sha256"] == digest(rule), "stored_rule_mismatch")
-        else:
-            conn.execute("INSERT INTO recognition_private_rules VALUES(?,?,?,?)",
-                         (rule["rule_key"], manifest["family"], canonical(rule), digest(rule)))
-        sealed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        require(sealed_at >= manifest["evaluation_at_utc"], "future_evaluation_not_authorized")
-        operation_id = digest(manifest)
-        conn.execute("INSERT INTO recognition_private_operations VALUES(?,?,?,?,?,?)",
-                     (operation_id, rule["rule_key"], canonical(manifest), operation_id,
-                      manifest["authorization_reference"], sealed_at))
-        if manifest["family"] == "first_look":
-            for candidate in manifest["candidates"]:
-                require(conn.execute("SELECT 1 FROM recognition_first_look_claims WHERE physical_stop_id=?",
-                                     (candidate["physical_stop_id"],)).fetchone() is None, "existing_claim_requires_discrepancy")
-                conn.execute("INSERT INTO recognition_first_look_claims VALUES(?,?,?,?,?,?,?)",
-                             (candidate["physical_stop_id"], candidate["reviewer_id"], candidate["assignment_id"],
-                              operation_id, candidate["completed_at_utc"], canonical(candidate), digest(candidate)))
-        else:
-            for item in manifest["report"]["scopes"]:
-                scope = item["snapshot_scope"]
-                # Initial launch is one catch-up per scope. A later snapshot or
-                # denominator shrink needs a new reviewed implementation/policy.
-                require(conn.execute("SELECT 1 FROM recognition_geography_scope_identities WHERE scope_key=?",
-                                     (scope["scope_key"],)).fetchone() is None, "scope_catch_up_already_sealed")
-                conn.execute("INSERT INTO recognition_geography_scope_identities VALUES(?,?,?,?)",
-                             tuple(scope[k] for k in ("scope_key", "dimension", "canonical_geography_id", "display_label")))
-                conn.execute("INSERT INTO recognition_geography_snapshots VALUES(?,?,?,?,?)",
-                             (digest(scope), scope["scope_key"], operation_id, canonical(scope), digest(scope)))
-                conn.executemany("INSERT INTO recognition_geography_members VALUES(?,?)",
-                                 [(digest(scope), n) for n in item["member_physical_stop_ids"]])
-            for candidate in manifest["candidates"]:
-                conn.execute("INSERT INTO recognition_geography_awards VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                             (digest(candidate), candidate["reviewer_id"], candidate["scope_key"], candidate["tier_key"],
-                              candidate["snapshot_id"], operation_id, candidate["earned_at_utc"], candidate["numerator"],
-                              candidate["denominator"], candidate["percentage"], candidate["size_band"], canonical(candidate), digest(candidate)))
-                conn.executemany("INSERT INTO recognition_geography_witnesses VALUES(?,?)",
-                                 [(digest(candidate), f["assignment_id"]) for f in candidate["witnesses"]])
+        operation_id = _insert_family_effects(conn, manifest)
         _verify_operation_records(conn, operation_id)
         require(conn.execute("PRAGMA foreign_key_check").fetchone() is None, "foreign_key_check_failed")
         if not writer_boundary.verify_local(execution_context, database, manifest, conn=conn):

@@ -1,8 +1,8 @@
 """Authority provisioning, separate from approval data and writer APIs.
 
-Production is deliberately unavailable until an independently reviewed trust
-root is integrated. Disposable capabilities own fresh temporary workspaces;
-there is no API to enroll an existing directory or production database.
+Production requires the independently installed deployment trust input and
+authenticated original owner through runtime_production_governance. Unconfigured
+calls still deny. Disposable capabilities own only fresh temporary workspaces.
 This is an application boundary, not a sandbox against arbitrary Python/SQL.
 """
 
@@ -18,6 +18,9 @@ class Authority:
     def __new__(cls):
         raise TypeError('authority_requires_provisioning')
 
+    def __reduce_ex__(self, protocol):
+        raise TypeError('authority_nonserializable')
+
 
 def _provisioning():
     from weakref import WeakKeyDictionary
@@ -26,7 +29,8 @@ def _provisioning():
     def check(handle, authorization):
         from .authorization import AuthorizationError, target_identity
         if type(handle) is not Authority or handle not in provisioned:
-            raise AuthorizationError('provisioned_authority_required')
+            from .runtime_production_governance import check_registered
+            return check_registered(handle,authorization)
         root, root_identity, approved = provisioned[handle]
         path = Path(authorization.target.database)
         stat = root.stat()
@@ -73,7 +77,7 @@ check_authority, DisposableWorkspace = _provisioning()
 del _provisioning
 
 
-def provision_production_authority():
-    """Reserved deployment boundary: no local callback can provision production."""
-    from .authorization import AuthorizationError
-    raise AuthorizationError('production_authority_not_provisioned')
+def provision_production_authority(*args, **kwargs):
+    """Fixed signed-owner provisioning; never accepts a caller verifier callback."""
+    from .runtime_production_governance import provision
+    return provision(*args,**kwargs)

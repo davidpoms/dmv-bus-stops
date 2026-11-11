@@ -2,6 +2,7 @@
 
 import sqlite3
 import secrets
+from weakref import WeakKeyDictionary
 
 from . import administration as a, admin_auth as auth, approvals, execution as journal, execution_schema
 from . import events, operations, production_operations, local_execution, writer_boundary, permanent
@@ -94,6 +95,157 @@ def record_deployment_rehearsal(config, *, operator, reason, evidence, now):
 
 
 def _assess(control, target, binding, now, *, config, exclude_operation_id=None):
+    # Legacy callers, including the activation ceremony, keep the legacy domain.
+    return _assess_inventory(control, target, binding, now, config=config,
+                             exclude_operation_id=exclude_operation_id)
+
+
+def _assess_runtime(view, session_token, primary_token):
+    """Protected, fixed activated-owner adapter. Returns assessment DATA only.
+
+    No key/cipher/seed or raw connection crosses this interface. In particular
+    this adapter cannot be selected by the activation ceremony or a provider.
+    """
+    from . import runtime_activated_owner as owner, runtime_scope_validation as shared
+    context, (control, _, binding, _), _ = shared._view_parts(view)
+    state = owner._state(context)  # Exact separate activated registration.
+    view.validate_session(session_token, primary_token=primary_token)
+    return _assess_inventory(control, state.target, binding, owner.v._utc_now(), config=state.config,
+                             runtime=(view, session_token, primary_token))
+
+
+def _assess_authority_consent(view, session_token, primary_token):
+    """Fixed consent-owner adapter; assessment DATA only, no key material."""
+    from . import runtime_authority_consent_transaction as owner, runtime_scope_validation as shared
+    context, (control, _, binding, _), _ = shared._view_parts(view)
+    state = owner._state(context)
+    view.validate_session(session_token, primary_token=primary_token)
+    return _assess_inventory(control, state.target, binding, owner.v._utc_now(), config=state.config,
+                             runtime=(view, session_token, primary_token))
+
+
+def _assess_authority_issuance(view, session_token, primary_token):
+    """Fixed issuance-owner adapter. Readiness DATA, never authority."""
+    from . import runtime_activation_authority_issuance as owner, runtime_scope_validation as shared
+    context, (control, _, binding, _), _ = shared._view_parts(view)
+    state = owner._state(context)
+    view.validate_session(session_token, primary_token=primary_token)
+    return _assess_inventory(control, state.target, binding, owner.v._utc_now(), config=state.config,
+                             runtime=(view, session_token, primary_token))
+
+
+_coordinator_evidence = WeakKeyDictionary()
+
+
+def _assess_metadata(view, session_token, primary_token):
+    """Fixed metadata owner adapter. No readiness/activation authority issued."""
+    from . import runtime_target_entry_owner as owner, runtime_scope_validation as shared
+    context, (control, _, binding, _), _ = shared._view_parts(view)
+    state = owner._state(context)
+    view.validate_session(session_token, primary_token=primary_token)
+    return _assess_inventory(control,state.target,binding,owner.v._utc_now(),config=state.config,
+                             runtime=(view,session_token,primary_token))
+
+
+class _CoordinatorReadiness:
+    """Immutable assessment DATA, usable only in its original reserved phase."""
+    __slots__ = ('__weakref__',)
+
+    def __new__(cls):
+        raise TypeError('coordinator_readiness_requires_owner')
+
+    def __reduce_ex__(self, protocol):
+        raise TypeError('coordinator_readiness_cannot_be_restored')
+
+    @property
+    def canonical_json(self):
+        from . import runtime_execution_coordinator as owner
+        entry = _coordinator_evidence.get(self) if type(self) is _CoordinatorReadiness else None
+        a.need(entry is not None, 'coordinator_readiness_invalid', 503)
+        state = owner._state(entry['context'])
+        owner._read_parts(entry['context'])
+        a.need(state.control is entry['connections'][0] and state.target is entry['connections'][1]
+               and state.phase_id is entry['phase_id']
+               and (state.control_reservation_epoch,state.target_reservation_epoch) == entry['epochs'],
+               'coordinator_readiness_invalid', 503)
+        owner._time(state)
+        return entry['json']
+
+
+def _assess_coordinator(view, session_token, primary_token):
+    """Exact coordinator owner; key verification remains inside this subsystem."""
+    from . import runtime_execution_coordinator as owner, runtime_scope_validation as shared
+    context, (control, _, binding, _), _ = shared._view_parts(view)
+    state = owner._state(context)
+    view.validate_session(session_token, primary_token=primary_token)
+    value = _assess_inventory(control, state.target, binding, owner.v._utc_now(), config=state.config,
+                              runtime=(view, session_token, primary_token))
+    result = object.__new__(_CoordinatorReadiness)
+    _coordinator_evidence[result] = dict(context=context, connections=state.connections,
+        phase_id=state.phase_id, epochs=(state.control_reservation_epoch,state.target_reservation_epoch),
+        json=canonical(value))
+    result.canonical_json  # Validate scope/deadlines again before publication.
+    return result
+
+
+def _runtime_inventory(control, target, runtime):
+    from . import runtime_approval_contract as approved, runtime_operation_contract as contract
+    from . import runtime_proposal_records as records, dependencies
+    from .trust import load
+    view, session, primary = runtime
+    pending, issues, ids = [], [], set()
+    for row in target.execute('SELECT operation_id,body_json FROM recognition_operation_contracts ORDER BY operation_id'):
+        if load(row['body_json']).get('format') != contract.OPERATION_FORMAT:
+            continue
+        oid = row['operation_id']
+        ids.add(oid)
+        approval = control.execute('SELECT approval_id FROM recognition_approvals WHERE operation_id=?', (oid,)).fetchone()
+        value = approved._historical(control, approval[0]) if approval else None
+        if value is not None and value['state'] != 'APPROVED':
+            continue  # Same historical-invalidation policy, version-aware reader.
+        if value is not None:
+            value = approved.read_current(view, approval[0], session_token=session, primary_token=primary)
+            pair = records.read_approved_proposal(view, value['approval'], session_token=session, primary_token=primary)
+        else:
+            pair = records.read_acknowledged_proposal(view, oid, session_token=session, primary_token=primary)
+        op = pair['operation']
+        owned_effect = None
+        from . import runtime_scope_validation as shared
+        if view in shared._finalization_views:
+            from . import runtime_finalization as finalization
+            context, _ = shared._finalization_views[view]
+            candidate = finalization._state(context)
+            if (hasattr(candidate,'effect_before') and candidate.outer is not None
+                    and candidate.outer.reference['operation_id'] == oid):
+                owned_effect = candidate
+        dependency = (finalization._dependencies(owned_effect,op['event_id']) if owned_effect is not None
+                      else dependencies.recheck(target,op['event_id']))
+        if dependency != dict(state='READY', reasons=[]):
+            issues.append('pending_operation_dependencies_not_ready:'+oid)
+        frozen = events.get_event(target, op['event_id'])
+        manifest = frozen['preparation']['manifest']
+        a.need(op['dependencies_sha256'] == digest(frozen['preparation']['dependencies']),
+               'runtime_readiness_dependency_mismatch')
+        if owned_effect is None:
+            fresh = permanent._prepare(target, op['family'], manifest['inputs'], manifest['evaluation_at_utc'],
+                                       manifest['authorization_reference'])
+            a.need(fresh == manifest, 'runtime_readiness_writer_preconditions_changed')
+        else:
+            # This original owner has just proved the entire exact family delta
+            # and freshly checked all source predicates. Verify its actual effect;
+            # never reinterpret it as a second new operation. No other owner or
+            # public readiness/activation entry point accepts this exception.
+            permanent._verify_operation_records(target,op['writer_manifest_sha256'])
+        a.need(op['family'] in local_execution.SUPPORTED and op['action'] == 'finalize'
+               and op['accounting_policy'] == local_execution.POLICY, 'runtime_readiness_unsupported_operation')
+        a.need(control.execute('SELECT 1 FROM recognition_execution_blocks WHERE operation_id=?', (oid,)).fetchone() is None,
+               'runtime_readiness_execution_blocked')
+        pending.append(dict(operation_sha256=digest(op), reference=pair['reference'], dependency=dependency,
+                            approval=value))
+    return ids, pending, issues
+
+
+def _assess_inventory(control, target, binding, now, *, config, exclude_operation_id=None, runtime=None):
     issues, prerequisites, recovery = [], sorted(REHEARSAL_CHECKS), []
     state = _state(control, binding)
     activated = state["state"] == "ACTIVATED" and state.get("scope") == "trusted-local-production"
@@ -129,9 +281,10 @@ def _assess(control, target, binding, now, *, config, exclude_operation_id=None)
                 recovery.append(oid)
         except (ValueError, KeyError, TypeError):
             recovery.append(oid)
-    pending = []
+    runtime_ids, pending, runtime_issues = _runtime_inventory(control, target, runtime) if runtime is not None else (set(), [], [])
+    issues.extend(runtime_issues)
     for row in target.execute("SELECT operation_id FROM recognition_operation_contracts ORDER BY operation_id"):
-        if row[0] in claimed_ids:
+        if row[0] in claimed_ids or row[0] in runtime_ids:
             continue
         approval = control.execute("SELECT approval_id FROM recognition_approvals WHERE operation_id=?", (row[0],)).fetchone()
         if approval and approvals._read(control, approval[0])["state"] != "APPROVED":
@@ -224,6 +377,8 @@ def begin_activation_confirmation(config, session_token, step_token, *, now):
 
 def require_activated(control, binding):
     """A state name/boolean alone is never production authority."""
+    from .runtime_enrollment_transition_schema import require_no_pending
+    require_no_pending(control)
     state = _state(control, binding)
     a.need(state["state"] == "ACTIVATED" and state.get("scope") == "trusted-local-production",
            "production_activation_deployment_blocked", 503)

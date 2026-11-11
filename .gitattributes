@@ -1,0 +1,13 @@
+# Preserve the exact bytes pinned by the approved R30 deployment manifest.
+# This affects Git transport only; it does not change runtime source or policy.
+src/review/recognition/*.py -text whitespace=cr-at-eol
+requirements-pilot.txt -text whitespace=cr-at-eol
+src/amenities/status_synthesis.py -text whitespace=cr-at-eol
+tests/recognition_production_owner_ceremony.py -text whitespace=cr-at-eol
+tests/recognition_production_owner_fixture.py -text whitespace=cr-at-eol
+tests/runtime_owner_fault_probe.py -text whitespace=cr-at-eol
+tests/test_recognition_runtime_owner_failures.py -text whitespace=cr-at-eol
+tests/test_recognition_runtime_production_owner_lifecycle.py -text whitespace=cr-at-eol
+tests/test_recognition_runtime_production_journal.py -text whitespace=cr-at-eol
+tests/test_recognition_runtime_production_provisioning.py -text whitespace=cr-at-eol
+tests/test_recognition_runtime_finalization_lifecycle.py -text whitespace=cr-at-eol

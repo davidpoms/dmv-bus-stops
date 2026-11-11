@@ -40,6 +40,8 @@ def _deny(conn, code, now, actor=None, status=403):
 
 
 def _owner(conn, target, binding, now):
+    from .runtime_enrollment_transition_schema import require_no_pending
+    require_no_pending(conn)
     latest = conn.execute("SELECT body_json,body_sha256 FROM recognition_admin_audit ORDER BY sequence DESC LIMIT 1").fetchone()
     if latest:
         body = load(latest[0])
@@ -71,17 +73,21 @@ def _primary(conn, target, binding, token, now, *, recent=False):
     return row
 
 
+def _record_primary(conn, target, binding, *, actor_id, reviewer_key, now):
+    key, epoch = _owner(conn, target, binding, now)
+    a.need(type(actor_id) is int and actor_id == binding["owner_id"] and reviewer_key == key, "recognition_owner_required")
+    raw = secrets.token_urlsafe(32)
+    t = a.timestamp(now)
+    conn.execute("INSERT INTO recognition_admin_primary VALUES(?,?,?,?,?,?,?,0)",
+        (a.token_hash(raw), actor_id, _hash_key(key), epoch, binding["generation"], t, t + PRIMARY_SECONDS))
+    a._audit(conn, "owner_primary_authenticated", actor_id, now)
+    return raw
+
+
 def record_primary_authentication(config, *, actor_id, reviewer_key, now):
     """Trusted login hook after consume_login_token; never exposed as an HTTP API."""
     with a.transaction(config) as (conn, target, binding):
-        key, epoch = _owner(conn, target, binding, now)
-        a.need(type(actor_id) is int and actor_id == binding["owner_id"] and reviewer_key == key, "recognition_owner_required")
-        raw = secrets.token_urlsafe(32)
-        t = a.timestamp(now)
-        conn.execute("INSERT INTO recognition_admin_primary VALUES(?,?,?,?,?,?,?,0)",
-            (a.token_hash(raw), actor_id, _hash_key(key), epoch, binding["generation"], t, t + PRIMARY_SECONDS))
-        a._audit(conn, "owner_primary_authenticated", actor_id, now)
-        return raw
+        return _record_primary(conn, target, binding, actor_id=actor_id, reviewer_key=reviewer_key, now=now)
 
 
 def invalidate_primary(config, token, *, now):
@@ -122,21 +128,25 @@ def _totp(seed):
     return TOTP(seed, 6, SHA1(), 30)
 
 
+def _begin_enrollment(conn, target, binding, config, primary_token, *, now):
+    import base64
+    primary = _primary(conn, target, binding, primary_token, now, recent=True)
+    row = conn.execute("SELECT * FROM recognition_admin_mfa WHERE actor=?", (primary["actor"],)).fetchone()
+    t = a.timestamp(now)
+    a.need(row["state"] == "UNENROLLED" or (row["state"] == "PENDING" and row["pending_until"] <= t), "mfa_already_enrolled_or_pending")
+    seed = secrets.token_bytes(20)
+    body = dict(actor=primary["actor"], installation_id=binding["installation_id"], seed=base64.b64encode(seed).decode())
+    encrypted = _cipher(config).encrypt(canonical(body).encode()).decode()
+    conn.execute("UPDATE recognition_admin_mfa SET seed_ciphertext=?,state='PENDING',pending_primary=?,pending_until=?,last_counter=-1 WHERE actor=?",
+                 (encrypted, primary["token_hash"], t + RECENT_SECONDS, primary["actor"]))
+    a._audit(conn, "mfa_enrollment_begun", primary["actor"], now)
+    return _totp(seed).get_provisioning_uri("owner-" + str(primary["actor"]), "DMV Bus Stops")
+
+
 def begin_enrollment(config, primary_token, *, now):
     """Return provisioning URI ONCE during deliberate setup, never after enrollment."""
-    import base64
     with a.transaction(config) as (conn, target, binding):
-        primary = _primary(conn, target, binding, primary_token, now, recent=True)
-        row = conn.execute("SELECT * FROM recognition_admin_mfa WHERE actor=?", (primary["actor"],)).fetchone()
-        t = a.timestamp(now)
-        a.need(row["state"] == "UNENROLLED" or (row["state"] == "PENDING" and row["pending_until"] <= t), "mfa_already_enrolled_or_pending")
-        seed = secrets.token_bytes(20)
-        body = dict(actor=primary["actor"], installation_id=binding["installation_id"], seed=base64.b64encode(seed).decode())
-        encrypted = _cipher(config).encrypt(canonical(body).encode()).decode()
-        conn.execute("UPDATE recognition_admin_mfa SET seed_ciphertext=?,state='PENDING',pending_primary=?,pending_until=?,last_counter=-1 WHERE actor=?",
-                     (encrypted, primary["token_hash"], t + RECENT_SECONDS, primary["actor"]))
-        a._audit(conn, "mfa_enrollment_begun", primary["actor"], now)
-        return _totp(seed).get_provisioning_uri("owner-" + str(primary["actor"]), "DMV Bus Stops")
+        return _begin_enrollment(conn, target, binding, config, primary_token, now=now)
 
 
 def _code(conn, config, binding, row, code, now):
@@ -171,29 +181,37 @@ def _code(conn, config, binding, row, code, now):
     conn.execute("UPDATE recognition_admin_mfa SET last_counter=? WHERE actor=?", (counter, row["actor"]))
 
 
+def _finish_enrollment(conn, target, binding, config, primary_token, code, *, now):
+    primary = _primary(conn, target, binding, primary_token, now, recent=True)
+    row = conn.execute("SELECT * FROM recognition_admin_mfa WHERE actor=?", (primary["actor"],)).fetchone()
+    a.need(row["state"] == "PENDING" and row["pending_primary"] == primary["token_hash"]
+           and a.timestamp(now) < row["pending_until"], "pending_enrollment_required")
+    _code(conn, config, binding, row, code, now)
+    conn.execute("UPDATE recognition_admin_mfa SET state='ENROLLED',pending_primary=NULL,pending_until=NULL WHERE actor=?", (primary["actor"],))
+    a._audit(conn, "mfa_enrollment_completed", primary["actor"], now)
+
+
 def finish_enrollment(config, primary_token, code, *, now):
     with a.transaction(config) as (conn, target, binding):
-        primary = _primary(conn, target, binding, primary_token, now, recent=True)
-        row = conn.execute("SELECT * FROM recognition_admin_mfa WHERE actor=?", (primary["actor"],)).fetchone()
-        a.need(row["state"] == "PENDING" and row["pending_primary"] == primary["token_hash"]
-               and a.timestamp(now) < row["pending_until"], "pending_enrollment_required")
-        _code(conn, config, binding, row, code, now)
-        conn.execute("UPDATE recognition_admin_mfa SET state='ENROLLED',pending_primary=NULL,pending_until=NULL WHERE actor=?", (primary["actor"],))
-        a._audit(conn, "mfa_enrollment_completed", primary["actor"], now)
+        return _finish_enrollment(conn, target, binding, config, primary_token, code, now=now)
+
+
+def _open_admin_session(conn, target, binding, config, primary_token, code, *, now):
+    primary = _primary(conn, target, binding, primary_token, now, recent=True)
+    mfa = conn.execute("SELECT * FROM recognition_admin_mfa WHERE actor=?", (primary["actor"],)).fetchone()
+    a.need(mfa["state"] == "ENROLLED", "mfa_enrollment_required", 401)
+    _code(conn, config, binding, mfa, code, now)
+    raw = secrets.token_urlsafe(32)
+    t = a.timestamp(now)
+    conn.execute("INSERT INTO recognition_admin_sessions VALUES(?,?,?,?,?,?,?,?,0)",
+        (a.token_hash(raw), primary["token_hash"], primary["actor"], binding["generation"], primary["auth_epoch"], mfa["epoch"], t, t + SESSION_SECONDS))
+    a._audit(conn, "administrative_session_opened", primary["actor"], now)
+    return raw
 
 
 def open_admin_session(config, primary_token, code, *, now):
     with a.transaction(config) as (conn, target, binding):
-        primary = _primary(conn, target, binding, primary_token, now, recent=True)
-        mfa = conn.execute("SELECT * FROM recognition_admin_mfa WHERE actor=?", (primary["actor"],)).fetchone()
-        a.need(mfa["state"] == "ENROLLED", "mfa_enrollment_required", 401)
-        _code(conn, config, binding, mfa, code, now)
-        raw = secrets.token_urlsafe(32)
-        t = a.timestamp(now)
-        conn.execute("INSERT INTO recognition_admin_sessions VALUES(?,?,?,?,?,?,?,?,0)",
-            (a.token_hash(raw), primary["token_hash"], primary["actor"], binding["generation"], primary["auth_epoch"], mfa["epoch"], t, t + SESSION_SECONDS))
-        a._audit(conn, "administrative_session_opened", primary["actor"], now)
-        return raw
+        return _open_admin_session(conn, target, binding, config, primary_token, code, now=now)
 
 
 def _session(conn, target, binding, token, now, *, recent=False):

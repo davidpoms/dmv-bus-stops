@@ -89,6 +89,14 @@ def _append(conn, body, history, state, actor, now, reason):
 
 def _invalidate_all(conn, actor, now, reason):
     for row in conn.execute("SELECT approval_id FROM recognition_approvals").fetchall():
+        from . import runtime_approval_contract as runtime
+        stored = conn.execute('SELECT body_json FROM recognition_approvals WHERE approval_id=?', (row[0],)).fetchone()
+        from .trust import load
+        if load(stored[0]).get('format') == runtime.FORMAT:
+            value = runtime._historical(conn, row[0])
+            if value['state'] == 'APPROVED':
+                runtime.append_invalidation(conn, value, actor, now, reason)
+            continue
         value = _read(conn, row[0])
         if value["state"] == "APPROVED":
             _append(conn, value["approval"], value["history"], "INVALIDATED", actor, now, reason)

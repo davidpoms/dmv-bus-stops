@@ -4,6 +4,16 @@ from . import execution_schema
 from .trust import require
 
 
+def _control_objects(conn):
+    from .runtime_issuance_schema_inventory import _objects
+    return _objects(conn)
+
+
+def _control_names(conn):
+    from .runtime_issuance_schema_inventory import _names
+    return _names(conn)
+
+
 TABLES = {
     "recognition_admin_bindings": "generation INTEGER PRIMARY KEY CHECK(generation>=1), body_json TEXT NOT NULL, body_sha256 TEXT NOT NULL",
     "recognition_admin_audit": "sequence INTEGER PRIMARY KEY CHECK(sequence>=1), body_json TEXT NOT NULL, body_sha256 TEXT NOT NULL",
@@ -33,7 +43,7 @@ def definitions():
 
 def check_control(conn):
     expected = definitions()
-    actual = dict(conn.execute("SELECT name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"))
+    actual = dict(_control_objects(conn))
     if "recognition_approvals" in actual:
         from .approval_schema import definitions as approval_definitions
         expected.update(approval_definitions())
@@ -41,18 +51,66 @@ def check_control(conn):
         from .local_readiness import definitions as readiness_definitions
         expected.update(readiness_definitions())
     from . import runtime_profile_schema as runtime
-    extended = any(n.startswith('recognition_runtime_') or n == 'recognition_admin_runtime_binding_guard' for n in actual)
+    from . import runtime_decision_outcome_journal_schema as outcome
+    outcome_extension = outcome.DECISIONS in actual or outcome.HISTORY in actual
+    outcome_objects = outcome.definitions('control') if outcome_extension else {}
+    extended = any((n.startswith('recognition_runtime_') and n not in outcome_objects)
+                   or n == 'recognition_admin_runtime_binding_guard' for n in actual)
+    expected.update(outcome_objects)
     if 'recognition_admin_bindings' in actual:
         extended = extended or bool(conn.execute(
             "SELECT 1 FROM recognition_admin_bindings WHERE json_extract(body_json,'$.format')=?",
             (runtime.V3,)).fetchone())
     if extended:
         expected.update(runtime.definitions())
+    from . import runtime_execution_claim_schema as claims
+    claim_extension = any(n.startswith('recognition_runtime_execution_claim') for n in actual)
+    if not claim_extension and 'recognition_admin_audit' in actual:
+        claim_extension = bool(conn.execute(
+            "SELECT 1 FROM recognition_admin_audit WHERE json_extract(body_json,'$.action')=?",
+            (claims.ACTION,)).fetchone())
+    if claim_extension:
+        expected.update(claims.definitions())
+    from . import runtime_activation_authority_schema as authorities
+    authority_extension = any(n.startswith(('recognition_runtime_execution_authorit',
+                                            'recognition_runtime_execution_lifecycle')) for n in actual)
+    if not authority_extension and 'recognition_admin_audit' in actual:
+        authority_extension = bool(conn.execute(
+            "SELECT 1 FROM recognition_admin_audit WHERE json_extract(body_json,'$.action')=?",
+            (authorities.ACTION,)).fetchone())
+    if authority_extension:
+        from . import runtime_schema_package_lineage as lineage
+        expected.update(lineage.successor_definitions() if lineage.present(conn) else authorities.definitions())
+    from . import runtime_execution_attempt_schema as attempts
+    attempt_extension = attempts.present(conn)
+    if attempt_extension:
+        require(authority_extension and claim_extension, 'runtime_attempt_migration_prerequisites')
+        expected.update(attempts.definitions())
+    from . import runtime_enrollment_transition_schema as transition
+    transition_extension = transition.present(conn)
+    if transition_extension:
+        require(attempt_extension, 'transition_migration_prerequisites')
+        expected.update(transition.definitions())
+        from . import runtime_finalization_schema_upgrade as finalization
+        if finalization.present(conn):expected.update(finalization.definitions())
     require(set(actual) == set(expected) and all(" ".join(actual[n].split()) == " ".join(s.split())
             for n, s in expected.items()), "administration_schema_mismatch")
     require(len(conn.execute("PRAGMA database_list").fetchall()) == 1, "isolated_admin_control_required")
     if extended:
         runtime.check_rows(conn)
+    if claim_extension:
+        claims.check_rows(conn)
+    if authority_extension:
+        authorities.check_rows(conn)
+    if attempt_extension:
+        attempts.check_rows(conn)
+    if transition_extension:
+        transition.check_rows(conn)
+    if outcome_extension:
+        outcome.check_schema(conn, 'control')
+        # Control schema/history integrity is not proof of a target commit.
+        # Full target witness/effect admission remains the finalizer's job.
+        outcome.inspect_rows(conn, 'control', _local_only=True)
 
 
 def install_runtime_extension(conn):

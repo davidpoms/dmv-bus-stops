@@ -15,7 +15,7 @@ from src.review.recognition.rules import canonical, digest
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("preview", "install", "install-approvals", "install-readiness", "readiness", "install-contracts", "create-operation", "inspect-operation", "scan-approved", "advance-restore", "rebind-filesystem-identity", "migrate-runtime-profile-contract", "issue-runtime-challenge", "reset-mfa"))
+    parser.add_argument("action", choices=("preview", "install", "install-approvals", "install-readiness", "readiness", "install-contracts", "create-operation", "inspect-operation", "scan-approved", "advance-restore", "rebind-filesystem-identity", "migrate-runtime-profile-contract", "migrate-runtime-execution-attempt-storage", "migrate-runtime-enrollment-transition-storage", "issue-runtime-challenge", "enroll-runtime-profile", "enroll-transition-runtime-profile", "reset-mfa"))
     parser.add_argument("--target", type=Path, required=True)
     parser.add_argument("--control", type=Path, required=True)
     parser.add_argument("--key-file", type=Path, required=True, help="existing host-held Fernet key file; never generated here")
@@ -28,6 +28,15 @@ def main(argv=None):
     parser.add_argument("--source-binding-sha256")
     parser.add_argument("--confirm-issue-runtime-challenge", action="store_true",
                         help="confirm local challenge issuance only; stdout contains a one-time nonce")
+    parser.add_argument('--challenge-id')
+    parser.add_argument('--challenge-sha256')
+    parser.add_argument('--evidence-file', type=Path)
+    parser.add_argument('--approved-review-sha256')
+    parser.add_argument('--approved-observation-sha256')
+    parser.add_argument('--confirm-private-log-review', action='store_true')
+    parser.add_argument('--confirm-enroll-runtime-profile', action='store_true')
+    parser.add_argument('--plan-id')
+    parser.add_argument('--plan-sha256')
     parser.add_argument("--target-sha256")
     parser.add_argument("--create-control", action="store_true")
     parser.add_argument("--confirm-mfa-reset", action="store_true")
@@ -45,6 +54,55 @@ def main(argv=None):
     if not args.operator or not args.reason:
         parser.error("--operator and --reason are required for an administrative ceremony")
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if args.action in ('enroll-runtime-profile','enroll-transition-runtime-profile'):
+        required = (args.installation_id,args.target_id,args.source_binding_sha256,args.challenge_id,
+                    args.challenge_sha256,args.evidence_file,args.approved_review_sha256,args.approved_observation_sha256)
+        if (not all(required) or args.expected_generation is None or args.owner_id is None
+                or not args.confirm_private_log_review or not args.confirm_enroll_runtime_profile):
+            parser.error('enrollment requires explicit scope, expected generation, evidence file, approved digests, '
+                         '--confirm-private-log-review and --confirm-enroll-runtime-profile')
+        from src.review.recognition import runtime_enrollment as enrollment
+        enroll = enrollment.enroll_runtime_profile
+        transition_scope = {}
+        if args.action == 'enroll-transition-runtime-profile':
+            if not args.plan_id or not args.plan_sha256:
+                parser.error('transition enrollment requires --plan-id and --plan-sha256')
+            from src.review.recognition.runtime_enrollment_transition import enroll_transition_runtime_profile
+            enroll = enroll_transition_runtime_profile
+            transition_scope = dict(plan_id=args.plan_id,plan_sha256=args.plan_sha256)
+        import getpass
+        import os
+        import warnings
+        try:
+            a.need(args.evidence_file.is_absolute(), 'explicit_evidence_path_required')
+            for protected in (config.target,config.control,config.key_file):
+                a.need(args.evidence_file.resolve() != protected.resolve()
+                       and (not protected.exists() or not args.evidence_file.samefile(protected)), 'separate_evidence_file_required')
+            with args.evidence_file.open('rb') as source:
+                opened = os.fstat(source.fileno())
+                for protected in (config.target,config.control,config.key_file):
+                    if protected.exists():
+                        observed = protected.stat()
+                        a.need((opened.st_dev,opened.st_ino) != (observed.st_dev,observed.st_ino),
+                               'separate_evidence_file_required')
+                raw = source.read(enrollment.MAX_REVIEW_BYTES + 1)
+            a.need(len(raw) <= enrollment.MAX_REVIEW_BYTES, 'runtime_review_too_large')
+            serialized = raw.decode('utf-8')
+            enrollment.parse_review(serialized)
+            with warnings.catch_warnings():
+                warnings.simplefilter('error', getpass.GetPassWarning)
+                nonce = getpass.getpass('Challenge nonce (hidden; never stored): ')
+            result = enroll(config,serialized,nonce,**transition_scope,
+                expected_generation=args.expected_generation,installation_id=args.installation_id,
+                target_id=args.target_id,owner_id=args.owner_id,source_binding_sha256=args.source_binding_sha256,
+                challenge_id=args.challenge_id,challenge_sha256=args.challenge_sha256,
+                approved_review_sha256=args.approved_review_sha256,approved_observation_sha256=args.approved_observation_sha256,
+                operator=args.operator,reason=args.reason,confirm_private_log_review=args.confirm_private_log_review,
+                confirm_enroll_runtime_profile=args.confirm_enroll_runtime_profile)
+        except Exception:
+            parser.exit(1, 'Runtime enrollment failed; inspect trusted state before retrying. No runtime authority enabled.\n')
+        print(canonical(result))
+        return
     if args.action == 'issue-runtime-challenge':
         if (args.expected_generation is None or not args.installation_id or not args.target_id
                 or args.owner_id is None or not args.source_binding_sha256
@@ -57,6 +115,20 @@ def main(argv=None):
             installation_id=args.installation_id, target_id=args.target_id, owner_id=args.owner_id,
             source_binding_sha256=args.source_binding_sha256, operator=args.operator,
             reason=args.reason, now=now)))
+        return
+    if args.action == 'migrate-runtime-enrollment-transition-storage':
+        if args.expected_generation is None:
+            parser.error('--expected-generation is required')
+        from src.review.recognition import runtime_enrollment_transition_schema
+        print(canonical(runtime_enrollment_transition_schema.migrate(config,
+            expected_generation=args.expected_generation, operator=args.operator, reason=args.reason)))
+        return
+    if args.action == 'migrate-runtime-execution-attempt-storage':
+        if args.expected_generation is None:
+            parser.error('--expected-generation is required')
+        from src.review.recognition import runtime_execution_attempt_schema
+        print(canonical(runtime_execution_attempt_schema.migrate(config,
+            expected_generation=args.expected_generation, operator=args.operator, reason=args.reason)))
         return
     if args.action == 'migrate-runtime-profile-contract':
         if args.expected_generation is None:
