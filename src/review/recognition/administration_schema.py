@@ -119,6 +119,8 @@ def install_runtime_extension(conn):
             'runtime_migration_transaction_required')
     from . import runtime_profile_schema as runtime
     check_control(conn)  # Never repair a partial or malformed extension.
+    from .sqlite_capabilities import require_runtime_profile
+    require_runtime_profile(conn)  # Reject unsupported engines before any extension DDL.
     conn.execute('SAVEPOINT install_runtime_extension')
     try:
         for name, sql in runtime.definitions().items():
