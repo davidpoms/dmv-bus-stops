@@ -15,10 +15,10 @@ from src.review.recognition.rules import canonical, digest
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("preview", "install", "install-approvals", "install-readiness", "readiness", "install-contracts", "create-operation", "inspect-operation", "scan-approved", "advance-restore", "rebind-filesystem-identity", "migrate-runtime-profile-contract", "migrate-runtime-execution-attempt-storage", "migrate-runtime-enrollment-transition-storage", "issue-runtime-challenge", "enroll-runtime-profile", "enroll-transition-runtime-profile", "reset-mfa"))
+    parser.add_argument("action", choices=("preview", "inspect-filesystem-rebind", "install", "install-approvals", "install-readiness", "readiness", "install-contracts", "create-operation", "inspect-operation", "scan-approved", "advance-restore", "rebind-filesystem-identity", "migrate-runtime-profile-contract", "migrate-runtime-execution-attempt-storage", "migrate-runtime-enrollment-transition-storage", "issue-runtime-challenge", "enroll-runtime-profile", "enroll-transition-runtime-profile", "reset-mfa"))
     parser.add_argument("--target", type=Path, required=True)
     parser.add_argument("--control", type=Path, required=True)
-    parser.add_argument("--key-file", type=Path, required=True, help="existing host-held Fernet key file; never generated here")
+    parser.add_argument("--key-file", type=Path, help="existing host-held Fernet key file; never generated here; not needed for inspect-filesystem-rebind")
     parser.add_argument("--operator")
     parser.add_argument("--reason")
     parser.add_argument("--installation-id")
@@ -44,6 +44,14 @@ def main(argv=None):
     parser.add_argument("--operation-id")
     parser.add_argument("--limit", type=int, default=100)
     args = parser.parse_args(argv)
+    if args.action == 'inspect-filesystem-rebind':
+        if args.expected_generation is None:
+            parser.error('--expected-generation is required for inspect-filesystem-rebind')
+        from src.review.recognition.filesystem_rebind_inspection import inspect_rebind
+        print(canonical(inspect_rebind(args.target, args.control, expected_generation=args.expected_generation)))
+        return
+    if args.key_file is None:
+        parser.error('--key-file is required for this action')
     config = a.LocalAdministration(args.target, args.control, args.key_file)
     config.paths()
     if args.action == "preview":
