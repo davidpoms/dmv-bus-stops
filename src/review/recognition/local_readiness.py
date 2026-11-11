@@ -100,6 +100,16 @@ def _assess(control, target, binding, now, *, config, exclude_operation_id=None)
                              exclude_operation_id=exclude_operation_id)
 
 
+def _assess_activation(view, session_token, primary_token):
+    """Exact runtime activation owner, including pre-activation inventory."""
+    from . import runtime_activation as owner, runtime_scope_validation as shared
+    context, (control, _, binding, _), _ = shared._view_parts(view)
+    state = owner._state(context)
+    view.validate_session(session_token, primary_token=primary_token)
+    return _assess_inventory(control, state.target, binding, owner.v._utc_now(), config=state.config,
+                             runtime=(view, session_token, primary_token))
+
+
 def _assess_runtime(view, session_token, primary_token):
     """Protected, fixed activated-owner adapter. Returns assessment DATA only.
 

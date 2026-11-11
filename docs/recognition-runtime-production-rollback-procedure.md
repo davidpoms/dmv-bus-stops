@@ -2,7 +2,21 @@
 
 For the project owner, confirmed as production custodian/deployment operator.
 This is a procedure for a future authorized deployment or incident. Nothing is
-executed by writing it. Recognition is not currently authorized for activation.
+executed by writing it. The compatible activation fix must be validated and
+deployed before recognition activation.
+
+## Protected installation stop after deploying the activation fix
+
+Sign in afresh as the project owner and open
+`/api/admin/recognition-control/owner-activation`. Authenticate with MFA, read
+durable status, then use a new authenticator code to **Suspend** or **Deactivate**
+the exact displayed installation/generation. Sign in afresh and verify the
+persisted state. These actions invalidate old administrative credentials and
+block further activated admission; they do not undo completed operations or
+replace signed issuer-specific revocation. See the
+[complete owner procedure](recognition-runtime-owner-activation-procedure.md).
+If the response is uncertain, inspect status instead of resubmitting. If the
+page or authentication fails, use the offline/maintenance procedure below.
 
 ## Before deployment
 

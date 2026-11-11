@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import hmac
 import sqlite3
 
-from flask import Blueprint, current_app, jsonify, request, session
+from flask import Blueprint, current_app, jsonify, request, session, render_template
 
 from . import admin_auth as auth, administration as a
 
@@ -40,9 +40,13 @@ def authentication_backend(config):
         bodies = [load(row[0]) for row in rows]
         a.need(all(type(body) is dict for body in bodies), 'installation_history_integrity_failure', 503)
         formats = [body.get('format') for body in bodies]
+        activation_installed = conn.execute("SELECT 1 FROM sqlite_master WHERE name='recognition_local_activation'").fetchone() is not None
         a.need(all(value in ('recognition-local-control-v2', runtime_profile_schema.V3) for value in formats),
                'installation_history_integrity_failure', 503)
     if runtime_profile_schema.V3 in formats:
+        if activation_installed:
+            from . import runtime_activation
+            return runtime_activation
         from . import runtime_auth
         return runtime_auth
     return auth
@@ -146,6 +150,61 @@ def register_admin_routes(app):
         token = auth.create_step_up(config, session["recognition_admin"], value["code"],
             action=value["action"], operation_id=value["operation_id"], now=now_utc())
         return {"step_up_token": token, "lifetime_seconds": auth.RECENT_SECONDS}
+
+    @routes.get('/owner-activation')
+    def owner_activation_page():
+        config = context(authentication_only=True)
+        from . import runtime_activation
+        a.need(authentication_backend(config) is runtime_activation, 'runtime_profile_required')
+        return render_template('recognition_runtime_activation.html', csrf_token=session['auth_csrf'])
+
+    @routes.get('/runtime-activation')
+    def runtime_activation_status():
+        config = context(administrative=True, authentication_only=True)
+        from . import runtime_activation
+        a.need(authentication_backend(config) is runtime_activation, 'runtime_profile_required')
+        return jsonify(runtime_activation.inspect(config, session['recognition_admin'],
+                       primary_token=session['recognition_primary']))
+
+    @routes.post('/runtime-activation/step-up')
+    def runtime_activation_step():
+        value = data(('code', 'action', 'installation_id', 'generation'))
+        config = context(administrative=True, authentication_only=True)
+        from . import runtime_activation
+        a.need(authentication_backend(config) is runtime_activation, 'runtime_profile_required')
+        return dict(step_up_token=runtime_activation.create_step_up(config, session['recognition_admin'],
+            value['code'], primary_token=session['recognition_primary'], action=value['action'],
+            installation_id=value['installation_id'], generation=value['generation']))
+
+    @routes.get('/runtime-activation/readiness')
+    def runtime_activation_readiness():
+        config = context(administrative=True, authentication_only=True)
+        from . import runtime_activation
+        a.need(authentication_backend(config) is runtime_activation, 'runtime_profile_required')
+        return jsonify(runtime_activation.assess(config, session['recognition_admin'],
+                       primary_token=session['recognition_primary']))
+
+    @routes.post('/runtime-activation/confirmations')
+    def runtime_activation_confirmation():
+        value = data(('step_up_token',))
+        config = context(administrative=True, authentication_only=True)
+        from . import runtime_activation
+        a.need(authentication_backend(config) is runtime_activation, 'runtime_profile_required')
+        return jsonify(runtime_activation.begin_confirmation(config, session['recognition_admin'],
+            value['step_up_token'], primary_token=session['recognition_primary']))
+
+    @routes.post('/runtime-activation')
+    def runtime_activation_change():
+        value = data(('state', 'step_up_token', 'reason', 'confirmation_token'))
+        config = context(administrative=True, authentication_only=True)
+        from . import runtime_activation
+        a.need(authentication_backend(config) is runtime_activation, 'runtime_profile_required')
+        result = runtime_activation.change_state(config, session['recognition_admin'], value['step_up_token'],
+            primary_token=session['recognition_primary'], state=value['state'], reason=value['reason'],
+            confirmation_token=value['confirmation_token'])
+        session.pop('recognition_primary', None)
+        session.pop('recognition_admin', None)
+        return jsonify(result)
 
     @routes.post("/confirmations")
     def begin_confirmation():

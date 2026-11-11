@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Recognition owner activation</title>
+<h1>Recognition owner activation</h1>
+<p>Activation does not execute recognition. Keep live capture disabled until activation is verified.</p>
+<p>After any state change, sign out and sign in again before checking status.</p>
+<button id="authenticate">Authenticate with MFA</button>
+<button id="status">Read durable status</button>
+<button id="readiness">Check readiness</button>
+<button id="activate">Prepare activation</button>
+<button id="suspend">Suspend</button>
+<button id="deactivate">Deactivate</button>
+<pre id="output" aria-live="polite"></pre>
+<script>
+'use strict';
+const csrf = {{ csrf_token|tojson }};
+const base = '/api/admin/recognition-control/';
+const output = document.getElementById('output');
+let busy = false;
+async function call(path, data) {
+  const response = await fetch(base + path, data === undefined ? {cache: 'no-store'} : {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({...data, csrf_token: csrf})
+  });
+  const value = await response.json();
+  if (!response.ok) throw new Error(value.error || 'Request failed; do not retry a state change.');
+  return value;
+}
+function show(value) { output.textContent = JSON.stringify(value, null, 2); }
+async function change(action) {
+  const current = await call('runtime-activation');
+  show(current);
+  const code = prompt('Enter a NEW current authenticator code for ' + action + '.');
+  if (!code) return;
+  const step = await call('runtime-activation/step-up', {
+    code, action, installation_id: current.installation_id, generation: current.generation
+  });
+  let confirmation = null;
+  if (action === 'activate') {
+    const prepared = await call('runtime-activation/confirmations', {step_up_token: step.step_up_token});
+    show({installation_id: current.installation_id, generation: current.generation, readiness: prepared.readiness});
+    confirmation = prepared.confirmation_token;
+  }
+  if (!confirm(action + ' installation ' + current.installation_id + ', generation ' + current.generation + '?')) return;
+  const reason = prompt('Record the reason for this owner decision:');
+  if (!reason || !reason.trim()) return;
+  show(await call('runtime-activation', {
+    state: {activate: 'ACTIVATED', suspend: 'SUSPENDED', deactivate: 'DEACTIVATED'}[action],
+    step_up_token: step.step_up_token, confirmation_token: confirmation, reason
+  }));
+}
+for (const action of ['authenticate', 'status', 'readiness', 'activate', 'suspend', 'deactivate']) {
+  document.getElementById(action).onclick = async () => {
+    if (busy) return;
+    busy = true;
+    for (const button of document.querySelectorAll('button')) button.disabled = true;
+    try {
+      if (action === 'authenticate') {
+        const code = prompt('Enter your current authenticator code. Never send it to anyone.');
+        if (code) show(await call('session', {code}));
+      } else if (action === 'status') show(await call('runtime-activation'));
+      else if (action === 'readiness') show(await call('runtime-activation/readiness'));
+      else await change(action);
+    } catch (error) {
+      output.textContent = error.message + '\nIf a state-change response was lost, do not retry. Sign in afresh and read durable status.';
+    } finally {
+      busy = false;
+      for (const button of document.querySelectorAll('button')) button.disabled = false;
+    }
+  };
+}
+</script></html>

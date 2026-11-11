@@ -22,6 +22,7 @@ _issuance_views = WeakKeyDictionary()
 _coordinator_views = WeakKeyDictionary()
 _metadata_views = WeakKeyDictionary()
 _finalization_views = WeakKeyDictionary()
+_activation_views = WeakKeyDictionary()
 
 
 def _parts(context):
@@ -48,6 +49,12 @@ def _mfa(control, scope):
 
 def _view_parts(view):
     a.need(type(view) is RuntimeReadView, 'runtime_context_invalid', 503)
+    if view in _activation_views:
+        from . import runtime_activation as owner
+        context, epoch = _activation_views[view]
+        parts = owner._read_parts(context)
+        a.need(_mfa(parts[0], parts[3]) == epoch, 'runtime_validation_changed', 503)
+        return context, parts, epoch
     if view in _finalization_views:
         from . import runtime_finalization as owner
         context, epoch = _finalization_views[view]
@@ -228,6 +235,10 @@ def _register_finalization_view(context):
 def _require_expiry(source, expires, code):
     if type(source) is RuntimeReadView:
         context, _, _ = _view_parts(source)
+        if source in _activation_views:
+            from . import runtime_activation as owner
+            owner._require_auth_expiry(context, expires, code)
+            return
         if source in _finalization_views:
             from . import runtime_finalization as owner
             owner._require_auth_expiry(context, expires, code)
