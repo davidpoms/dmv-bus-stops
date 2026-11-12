@@ -12,6 +12,7 @@ import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
+from contextlib import contextmanager
 
 from src.api import sqlite_runtime as runtime
 from scripts.active import build_private_sqlite as builder
@@ -19,6 +20,36 @@ from tests.recognition_production_owner_fixture import allocation
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+class ApprovedConnection:
+    """Simulated approved-engine results for portable guard tests, not SQL validation."""
+    def execute(self, sql, args=()):
+        if sql == 'SELECT sqlite_version()':
+            self.row = (runtime.VERSION,)
+        elif sql == 'SELECT ? -> ?':
+            self.row = (json.loads(args[0], parse_int=str)['inode'],)
+        elif sql == 'SELECT ? ->> ?':
+            self.row = (json.loads(args[0])['label'],)
+        else:
+            raw = json.loads(args[0], parse_int=str)['inode']
+            self.row = (raw, 'text', int(args[2] == raw))
+        return self
+
+    def fetchone(self):
+        return self.row
+
+    def close(self):
+        pass
+
+
+@contextmanager
+def approved_engine_fixture():
+    # Never reinterpret the host 3.37.2 runtime as an approved native candidate.
+    # Real operator/precision validation belongs to NativeIntegrationTests.
+    with patch.object(sqlite3, 'sqlite_version', runtime.VERSION), \
+            patch.object(sqlite3, 'connect', side_effect=lambda *a, **k: ApprovedConnection()) as connect:
+        yield connect
 
 
 class RuntimeTests(unittest.TestCase):
@@ -109,6 +140,13 @@ class RuntimeTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'loader_environment_override_forbidden'):
                     runtime._fresh()
 
+    def test_loader_accepts_owner_only_version_directory(self):
+        import stat
+        path = unittest.mock.Mock()
+        path.lstat.return_value = SimpleNamespace(st_mode=stat.S_IFDIR | 0o700, st_uid=100, st_nlink=2)
+        with patch.object(runtime.os, 'geteuid', return_value=100, create=True):
+            runtime._private(path, directory=True)
+
     def test_wrong_version_rejected(self):
         with patch.object(sqlite3, 'sqlite_version', '3.37.2'):
             with self.assertRaisesRegex(RuntimeError, 'wrong_sqlite_version'):
@@ -116,7 +154,7 @@ class RuntimeTests(unittest.TestCase):
 
     def test_missing_operator_rejected(self):
         from src.review.recognition import sqlite_capabilities
-        with patch.object(runtime, 'VERSION', sqlite3.sqlite_version), \
+        with approved_engine_fixture(), \
                 patch.object(sqlite_capabilities, 'inspect_connection', return_value={'supported': False}):
             with self.assertRaisesRegex(RuntimeError, 'json_operators_required'):
                 runtime._verify(self.root / 'library.so')
@@ -124,10 +162,8 @@ class RuntimeTests(unittest.TestCase):
     def test_four_large_inodes_and_memory_only_verification(self):
         library = self.root / 'library.so'
         before = list(self.root.iterdir())
-        original = sqlite3.connect
-        with patch.object(runtime, 'VERSION', sqlite3.sqlite_version), \
-                patch.object(runtime, '_mappings', return_value=[str(library)]), \
-                patch.object(sqlite3, 'connect', wraps=original) as connect:
+        with approved_engine_fixture() as connect, \
+                patch.object(runtime, '_mappings', return_value=[str(library)]):
             report = runtime._verify(library)
         self.assertTrue(report['exact_inode_text'])
         connect.assert_called_once_with(':memory:')
@@ -142,7 +178,7 @@ class RuntimeTests(unittest.TestCase):
             def close(self):
                 pass
         from src.review.recognition import sqlite_capabilities
-        with patch.object(runtime, 'VERSION', sqlite3.sqlite_version), \
+        with patch.object(sqlite3, 'sqlite_version', runtime.VERSION), \
                 patch.object(sqlite3, 'connect', return_value=RoundedConnection()), \
                 patch.object(sqlite_capabilities, 'inspect_connection', return_value={'supported': True}):
             with self.assertRaisesRegex(RuntimeError, 'inode_precision_failure'):
@@ -176,7 +212,8 @@ with patch.object(r,'_fresh'), patch.object(r,'_configured_library',return_value
      patch.object(r.ctypes,'CDLL',return_value=object()) as cdll, \
      patch.object(r.os,'RTLD_NOW',2,create=True),patch.object(r.os,'RTLD_GLOBAL',256,create=True):
     import sqlite3
-    with patch.object(r,'VERSION',sqlite3.sqlite_version),patch.object(r,'_mappings',return_value=[str(library)]):
+    # Orchestration only: do not pass the host's old engine off as a native candidate.
+    with patch.object(r,'_verify',return_value={'supported':True}):
         def memory_only(event,args):
             if event=='sqlite3.connect' and args[0]!=':memory:': raise AssertionError('file database forbidden')
         sys.addaudithook(memory_only)
@@ -212,7 +249,7 @@ assert not (Path(sys.argv[1])/'never-created.db').exists()
                 builder._download()
 
     def test_unexpected_second_library_fails_closed(self):
-        with patch.object(runtime, 'VERSION', sqlite3.sqlite_version), \
+        with approved_engine_fixture(), \
                 patch.object(runtime, '_mappings', return_value=['/system/libsqlite3.so.0']):
             with self.assertRaisesRegex(RuntimeError, 'unexpected_mapped_sqlite'):
                 runtime._verify(self.root / 'library.so')
@@ -225,7 +262,12 @@ assert not (Path(sys.argv[1])/'never-created.db').exists()
                 archive.writestr(runtime.ARCHIVE[:-4] + '/' + name, 'synthetic source')
         destination = self.root / runtime.VERSION
         command_seen = []
+        chmod_seen = []
         mkdir = Path.mkdir
+        rename = Path.rename
+        def hardened_rename(path, target):
+            self.assertIn((path, 0o700), chmod_seen)
+            return rename(path, target)
         def portable_mkdir(path, mode=0o777, parents=False, exist_ok=False):
             return mkdir(path, mode=0o777, parents=parents, exist_ok=exist_ok)
         def run(command, **kwargs):
@@ -241,7 +283,9 @@ assert not (Path(sys.argv[1])/'never-created.db').exists()
                 patch.object(builder.shutil, 'which', side_effect=lambda name: '/usr/bin/' + name), \
                 patch.object(builder, '_download', return_value=('https://www.sqlite.org/example.zip', source.getvalue())), \
                 patch.object(builder.subprocess, 'run', side_effect=run), \
-                patch.object(Path, 'mkdir', portable_mkdir), patch.object(Path, 'chmod'), \
+                patch.object(Path, 'mkdir', portable_mkdir), \
+                patch.object(Path, 'rename', hardened_rename), \
+                patch.object(Path, 'chmod', autospec=True, side_effect=lambda path, mode: chmod_seen.append((path, mode))), \
                 patch.object(builder, '_candidate_probe', side_effect=[RuntimeError('synthetic verification failure'),
                     {'supported': True, 'sqlite_runtime_version': runtime.VERSION}]):
             with self.assertRaisesRegex(RuntimeError, 'synthetic verification failure'):
@@ -255,6 +299,7 @@ assert not (Path(sys.argv[1])/'never-created.db').exists()
                          manifest['library_sha256'])
         self.assertEqual(manifest, json.loads((destination / 'manifest.json').read_text()))
         self.assertEqual(4, len(command_seen))
+        self.assertEqual(0o700, next(mode for path, mode in chmod_seen if path.name == 'publish'))
 
 
 @unittest.skipUnless(sys.platform == 'linux' and os.environ.get('RUN_PRIVATE_SQLITE_NATIVE') == '1',
@@ -273,6 +318,7 @@ class NativeIntegrationTests(unittest.TestCase):
             subprocess.run([sys.executable, '-B', 'scripts/active/build_private_sqlite.py'],
                            cwd=ROOT, env=env, check=True, timeout=780)
             library = Path(raw) / 'sqlite-runtime' / runtime.VERSION / 'lib' / runtime.SONAME
+            self.assertEqual(0o700, library.parent.parent.stat().st_mode & 0o777)
             env[runtime.ENVIRONMENT] = str(library)
             code = '''
 import sys

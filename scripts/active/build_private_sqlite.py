@@ -85,6 +85,7 @@ def build():
         (publish / 'manifest.json').write_text(json.dumps(manifest, sort_keys=True, indent=2) + '\n', encoding='utf-8')
         library.chmod(0o500)
         (publish / 'manifest.json').chmod(0o400)
+        publish.chmod(0o700)
         # rename refuses replacing a nonempty existing version directory.
         publish.rename(destination)
     return manifest
