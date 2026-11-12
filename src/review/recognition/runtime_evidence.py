@@ -8,6 +8,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 import os
 from pathlib import Path
+import sqlite3
 import sys
 import threading
 
@@ -21,6 +22,45 @@ from .trust import identity
 MARKER = 'RECOGNITION_RUNTIME_EVIDENCE'
 FORMAT = 'recognition-runtime-observation-v1'
 CHANNEL = 'operator-reviewed-private-wsgi-log-v1'
+
+# Rejection diagnostics only: never copy an exception's text or unknown code.
+_FAILURE_CLASSES = {
+    'wsgi_runtime_required': 'wsgi_runtime_required',
+    'runtime_control_path_required': 'runtime_control_path_required',
+    'explicit_runtime_paths_required': 'explicit_runtime_paths_required',
+    'separate_control_store_required': 'separate_control_store_required',
+    'existing_admin_file_required': 'existing_admin_file_required',
+    'installation_not_initialized': 'installation_not_initialized',
+    'installation_history_integrity_failure': 'installation_history_integrity_failure',
+    'administrative_audit_integrity_failure': 'administrative_audit_integrity_failure',
+    'runtime_challenge_requires_v3': 'runtime_challenge_requires_v3',
+    'runtime_challenge_not_found': 'runtime_challenge_not_found',
+    'runtime_challenge_constraint_failure': 'runtime_challenge_constraint_failure',
+    'runtime_challenge_digest_mismatch': 'runtime_challenge_digest_mismatch',
+    'runtime_challenge_consumed': 'runtime_challenge_consumed',
+    'runtime_challenge_stale': 'runtime_challenge_stale',
+    'runtime_challenge_scope_mismatch': 'runtime_challenge_scope_mismatch',
+    'runtime_challenge_expired_or_not_yet_valid': 'runtime_challenge_expired_or_not_yet_valid',
+    'runtime_challenge_expired': 'runtime_challenge_expired',
+    'runtime_collection_requires_not_activated': 'runtime_collection_requires_not_activated',
+    'runtime_identity_fields_invalid': 'runtime_identity_fields_invalid',
+    'runtime_hostname_invalid': 'runtime_hostname_invalid',
+    'runtime_path_invalid': 'runtime_path_invalid',
+    'runtime_identity_integer_required': 'runtime_identity_integer_required',
+    'runtime_target_fields_invalid': 'runtime_target_fields_invalid',
+    'runtime_identity_changed': 'runtime_identity_changed',
+    'runtime_path_or_inode_mismatch': 'runtime_path_or_inode_mismatch',
+    'runtime_hostname_mismatch': 'runtime_hostname_mismatch',
+    'runtime_schema_mismatch': 'runtime_schema_mismatch',
+    'runtime_installation_target_mismatch': 'runtime_installation_target_mismatch',
+    'verified_project_owner_required': 'verified_project_owner_required',
+    'runtime_collection_state_changed': 'runtime_collection_state_changed',
+    'local_readiness_install_required': 'local_readiness_install_required',
+    'local_activation_history_invalid': 'local_activation_history_invalid',
+    'invalid_local_activation_transition': 'invalid_local_activation_transition',
+    'activation_requires_explicit_genesis': 'activation_requires_explicit_genesis',
+    'local_activation_state_missing': 'local_activation_state_missing',
+}
 
 
 def _challenge(control, challenge_id, expected_sha256, now):
@@ -178,8 +218,14 @@ def register_runtime_evidence(app, target_path):
                     now=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))
                 a.need(a.timestamp(datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))
                        < record['observation']['challenge_expires_at'], 'runtime_challenge_expired')
-            except Exception:
+            except Exception as error:
+                failure_class = 'unclassified_collection_failure'
+                if isinstance(error, a.AdminError) and type(error.code) is str:
+                    failure_class = _FAILURE_CLASSES.get(error.code, failure_class)
+                elif isinstance(error, (sqlite3.Error, OSError)):
+                    failure_class = 'database_read_failed'
                 _log_record(app, dict(status='REJECTED',
-                    error='runtime_evidence_collection_failed', pid=os.getpid()))
+                    error='runtime_evidence_collection_failed', pid=os.getpid(),
+                    failure_class=failure_class))
                 return
             _log_record(app, record)

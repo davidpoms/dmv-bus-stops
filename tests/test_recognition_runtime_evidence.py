@@ -314,6 +314,96 @@ class RuntimeEvidenceTests(unittest.TestCase):
         self.assertNotIn(self.issued['nonce'],line)
         self.assertEqual('REJECTED',json.loads(line)['status'])
 
+    def test_hook_each_allowlisted_admin_code_emits_only_fixed_classification(self):
+        before=self.snapshot()
+        for code,classification in e._FAILURE_CLASSES.items():
+            with self.subTest(code=code):
+                app=self.app()
+                error=a.AdminError(code)
+                # Structured code stays valid even if exception args hold secrets.
+                error.args=('sentinel secret /private/path challenge-value',)
+                with patch.object(e,'_collect',side_effect=error) as collect, \
+                     patch.object(app.logger,'warning') as log,app.test_client() as client:
+                    for _ in range(2):
+                        response=client.get('/ordinary')
+                        self.assertEqual(200,response.status_code)
+                        self.assertEqual(b'ordinary response',response.data)
+                        self.assertEqual('text/html; charset=utf-8',response.content_type)
+                self.assertEqual(1,collect.call_count)
+                log.assert_called_once()
+                self.assertEqual({'status':'REJECTED','error':'runtime_evidence_collection_failed',
+                                  'pid':e.os.getpid(),'failure_class':classification},
+                                 json.loads(log.call_args.args[2]))
+                self.assertEqual(('%s %s',e.MARKER),log.call_args.args[:2])
+                self.assertEqual({},log.call_args.kwargs)
+        self.assertEqual(before,self.snapshot())
+
+    def test_hook_arbitrary_exceptions_never_expose_text_or_untrusted_codes(self):
+        secret='SENTINEL_SECRET /private/target.db challenge=SENTINEL_CHALLENGE nonce=SENTINEL_NONCE'
+        spoofed=RuntimeError(secret)
+        spoofed.code='runtime_path_or_inode_mismatch'
+        malformed=a.AdminError(secret)
+        malformed.code=[secret]
+        class UnprintableError(Exception):
+            def __str__(self):
+                raise AssertionError('exception text must never be read')
+        for error in (RuntimeError(secret),ValueError(secret),a.AdminError(secret),
+                      spoofed,malformed,UnprintableError(secret)):
+            with self.subTest(error_type=type(error).__name__):
+                app=self.app()
+                with patch.object(e,'_collect',side_effect=error) as collect, \
+                     patch.object(app.logger,'warning') as log,app.test_client() as client:
+                    for _ in range(2):
+                        response=client.get('/ordinary')
+                        self.assertEqual(200,response.status_code)
+                        self.assertEqual(b'ordinary response',response.data)
+                self.assertEqual(1,collect.call_count)
+                log.assert_called_once()
+                self.assertEqual({'status':'REJECTED','error':'runtime_evidence_collection_failed',
+                                  'pid':e.os.getpid(),'failure_class':'unclassified_collection_failure'},
+                                 json.loads(log.call_args.args[2]))
+                for sentinel in ('SENTINEL_SECRET','/private/target.db','SENTINEL_CHALLENGE','SENTINEL_NONCE'):
+                    self.assertNotIn(sentinel,repr(log.call_args))
+                self.assertEqual({},log.call_args.kwargs)
+
+    def test_hook_database_and_filesystem_errors_have_fixed_classification(self):
+        for error_type in (sqlite3.Error,sqlite3.OperationalError,sqlite3.DatabaseError,
+                           OSError,PermissionError,FileNotFoundError):
+            with self.subTest(error_type=error_type.__name__):
+                app=self.app()
+                with patch.object(e,'_collect',side_effect=error_type('SENTINEL /private/database')) as collect, \
+                     patch.object(app.logger,'warning') as log,app.test_client() as client:
+                    for _ in range(2):
+                        response=client.get('/ordinary')
+                        self.assertEqual(200,response.status_code)
+                        self.assertEqual(b'ordinary response',response.data)
+                self.assertEqual(1,collect.call_count)
+                log.assert_called_once()
+                self.assertEqual({'status':'REJECTED','error':'runtime_evidence_collection_failed',
+                                  'pid':e.os.getpid(),'failure_class':'database_read_failed'},
+                                 json.loads(log.call_args.args[2]))
+                self.assertNotIn('SENTINEL',repr(log.call_args))
+
+    def test_classified_rejection_rearms_and_failed_sink_remains_contained(self):
+        for sink_fails in (False,True):
+            with self.subTest(sink_fails=sink_fails):
+                app=self.app()
+                with patch.object(e,'_collect',side_effect=a.AdminError('runtime_schema_mismatch')) as collect, \
+                     patch.object(app.logger,'warning',side_effect=OSError('sink secret') if sink_fails else None) as log:
+                    for pid,challenge in ((123,self.challenge['challenge_id']),
+                                          (123,self.challenge['challenge_id']),
+                                          (456,self.challenge['challenge_id']),
+                                          (456,'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')):
+                        app.config['RECOGNITION_RUNTIME_CHALLENGE_ID']=challenge
+                        with patch.object(e.os,'getpid',return_value=pid),app.test_client() as client:
+                            response=client.get('/ordinary')
+                            self.assertEqual(200,response.status_code)
+                            self.assertEqual(b'ordinary response',response.data)
+                    self.assertEqual(3,collect.call_count)
+                    self.assertEqual(3,log.call_count)
+                    for call in log.call_args_list:
+                        self.assertEqual('runtime_schema_mismatch',json.loads(call.args[2])['failure_class'])
+
     def test_successful_collection_logging_failure_preserves_response(self):
         app=self.app()
         before=self.snapshot()
@@ -354,7 +444,8 @@ class RuntimeEvidenceTests(unittest.TestCase):
                     self.assertEqual('text/html; charset=utf-8',response.content_type)
             self.assertEqual(1,collect.call_count)
             self.assertEqual(1,log.call_count)
-            self.assertEqual({'status':'REJECTED','error':'runtime_evidence_collection_failed','pid':e.os.getpid()},
+            self.assertEqual({'status':'REJECTED','error':'runtime_evidence_collection_failed','pid':e.os.getpid(),
+                              'failure_class':'runtime_challenge_expired_or_not_yet_valid'},
                              json.loads(log.call_args.args[2]))
         self.assertEqual(before,self.snapshot())
 
