@@ -252,7 +252,8 @@ class FilesystemRebindTests(unittest.TestCase):
             self.assertEqual((0, 0, 0, 0), g.f.counts())
 
     def test_cli_requires_generation_preview_operator_and_reason(self):
-        from scripts.active import manage_recognition_administration as cli
+        with patch('src.api.sqlite_runtime.load_production_sqlite'):
+            from scripts.active import manage_recognition_administration as cli
         common = ["rebind-filesystem-identity", "--target", str(self.f.path), "--control", str(self.f.control),
                   "--key-file", str(self.f.key_file)]
         for extra in ([], ["--operator", "host", "--reason", "drift"], ["--operator", "host", "--reason", "drift", "--expected-generation", "1"]):

@@ -202,7 +202,8 @@ class RuntimeChallengeTests(unittest.TestCase):
             s.check_control(conn)
 
     def test_cli_requires_explicit_confirmation_and_outputs_nonce_once(self):
-        from scripts.active.manage_recognition_administration import main
+        with patch('src.api.sqlite_runtime.load_production_sqlite'):
+            from scripts.active.manage_recognition_administration import main
         args = ['issue-runtime-challenge','--target',str(self.f.path),'--control',str(self.f.control),
                 '--key-file',str(self.f.key_file),'--operator','fixture','--reason','test']
         with patch('sys.stderr',new_callable=io.StringIO),self.assertRaises(SystemExit):

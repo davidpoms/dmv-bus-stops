@@ -481,7 +481,8 @@ class RuntimeProfileMigrationTests(unittest.TestCase):
             s.check_control(conn)
 
     def test_cli_requires_explicit_ceremony_and_exposes_no_enrollment_action(self):
-        from scripts.active import manage_recognition_administration as cli
+        with patch('src.api.sqlite_runtime.load_production_sqlite'):
+            from scripts.active import manage_recognition_administration as cli
         common = ['migrate-runtime-profile-contract','--target',str(self.f.path),'--control',str(self.f.control),'--key-file',str(self.f.key_file)]
         for extra in ([],['--operator','fixture','--reason','test']):
             with self.subTest(extra=extra),self.assertRaises(SystemExit):

@@ -160,7 +160,8 @@ class TransitionRuntimeProfileTests(unittest.TestCase):
                 with self.assertRaises(ValueError):local_readiness.require_activated(control,current)
 
     def test_cli_requires_scope_and_hidden_nonce_only(self):
-        from scripts.active.manage_recognition_administration import main
+        with patch('src.api.sqlite_runtime.load_production_sqlite'):
+            from scripts.active.manage_recognition_administration import main
         with contextlib.redirect_stderr(io.StringIO()),patch('getpass.getpass',side_effect=AssertionError('must not prompt')):
             for args in (['enroll-transition-runtime-profile'],['enroll-transition-runtime-profile','--nonce','secret']):
                 with self.subTest(args=args),self.assertRaises(SystemExit):main(args)

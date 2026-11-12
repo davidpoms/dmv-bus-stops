@@ -436,7 +436,8 @@ class RuntimeEnrollmentTests(unittest.TestCase):
             self.assertEqual(before,self.snapshot())
 
     def test_cli_requires_confirmation_hidden_nonce_and_sanitizes_failure(self):
-        from scripts.active.manage_recognition_administration import main
+        with patch('src.api.sqlite_runtime.load_production_sqlite'):
+            from scripts.active.manage_recognition_administration import main
         path=self.f.path.parent/'review.json'
         path.write_text(canonical(self.review),encoding='utf-8')
         args=['enroll-runtime-profile','--target',str(self.f.path),'--control',str(self.f.control),

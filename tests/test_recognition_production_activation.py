@@ -282,7 +282,8 @@ class ProductionActivationTests(unittest.TestCase):
         self.assertEqual((0, 0, 0, 0), self.f.counts())
 
     def test_cli_has_no_activation_or_writer_bypass(self):
-        from scripts.active import manage_recognition_administration as cli
+        with patch('src.api.sqlite_runtime.load_production_sqlite'):
+            from scripts.active import manage_recognition_administration as cli
         for action in ("activate", "force-activate", "provision-writer", "execute"):
             with self.subTest(action=action), self.assertRaises(SystemExit), patch("sys.stderr", new_callable=io.StringIO):
                 cli.main([action])

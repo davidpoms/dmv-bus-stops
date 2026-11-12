@@ -109,7 +109,8 @@ class InspectionTests(unittest.TestCase):
         self.assertTrue(result['binding_history_valid'])
 
     def test_cli_requires_no_key_and_does_not_invoke_mutator(self):
-        from scripts.active.manage_recognition_administration import main
+        with patch('src.api.sqlite_runtime.load_production_sqlite'):
+            from scripts.active.manage_recognition_administration import main
         output = io.StringIO()
         with redirect_stdout(output):
             main(['inspect-filesystem-rebind', '--target', str(self.f.path), '--control', str(self.f.control),

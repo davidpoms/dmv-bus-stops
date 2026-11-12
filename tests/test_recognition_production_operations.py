@@ -305,7 +305,8 @@ print(json.dumps(d.continue_pending(config,now=request['now'])))
         self.assertEqual((0, 0, 0, 0), self.counts())
 
     def test_cli_has_no_force_execute_or_approval_bypass(self):
-        from scripts.active import manage_recognition_administration as cli
+        with patch('src.api.sqlite_runtime.load_production_sqlite'):
+            from scripts.active import manage_recognition_administration as cli
         for action in ("execute", "force-execute", "approve", "run-writer"):
             with self.subTest(action=action), self.assertRaises(SystemExit), patch("sys.stderr", new_callable=io.StringIO):
                 cli.main([action])

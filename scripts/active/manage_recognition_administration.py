@@ -9,6 +9,10 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from src.api.sqlite_runtime import load_production_sqlite
+
+load_production_sqlite()
+
 from src.review.recognition import administration as a
 from src.review.recognition.rules import canonical, digest
 
