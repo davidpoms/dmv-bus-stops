@@ -143,6 +143,12 @@ and expose it with:
 from src.api.app import app as application
 ```
 
+For the separately reviewed private SQLite runtime, follow the
+[private SQLite build/preload procedure](pythonanywhere-private-sqlite-runtime.md).
+Its optional loader call must run after environment/project-path setup and
+**before** the application import above. Do not enable it automatically or use
+it as permission to migrate or activate recognition.
+
 Use PythonAnywhere's HTTPS URL and keep `SESSION_COOKIE_SECURE=1`. Reload through
 the PythonAnywhere web-app control after code, dependency, environment, or schema
 changes. The operator must still supply persistent storage, secret, support contact,
