@@ -269,6 +269,76 @@ class RuntimeProfileSchemaTests(unittest.TestCase):
         row = self.conn.execute(f'SELECT control_inode,typeof(control_inode) FROM {r.PROFILES}').fetchone()
         self.assertEqual(tuple(row),('18446744073709551615','text'))
 
+    def test_generated_guard_reopens_from_disk_and_enrolls_generation_four_binding(self):
+        # A schema persisted by a supported engine must also parse on reopen.
+        # Exercise the actual generated trigger, not just a scalar JSON probe.
+        for generation in (2,3,4):
+            body=dict(self.old,format=r.V3,generation=generation,
+                      previous_sha256=digest(self.old),runtime_profile_sha256=None)
+            self.binding(body)
+            self.old=body
+        self.conn.commit()
+        database=self.root/'schema-roundtrip.db'
+        destination=sqlite3.connect(database)
+        try:
+            self.conn.backup(destination)
+        finally:
+            destination.close()
+        reopened=sqlite3.connect(database.resolve().as_uri()+'?mode=rw',uri=True)
+        self.addCleanup(reopened.close)
+        reopened.row_factory=sqlite3.Row
+        reopened.execute('PRAGMA foreign_keys=ON')
+        self.conn=reopened
+        s.check_control(self.conn)
+        guard=self.conn.execute("SELECT sql FROM sqlite_master WHERE name=?",
+            ('recognition_runtime_profile_challenge_guard',)).fetchone()[0]
+        self.assertEqual(r.definitions()['recognition_runtime_profile_challenge_guard'],guard)
+        profile=self.profile(complete=False,generation=5,challenge_changes=dict(source_generation=4))
+        self.binding(dict(self.old,generation=5,previous_sha256=digest(self.old),
+                          runtime_profile_sha256=profile['profile_sha256']))
+        self.conn.commit()
+        s.check_control(self.conn)
+        self.assertEqual(5,profile['generation'])
+        self.assertEqual('NOT_ACTIVATED',self.old['production_state'])
+        self.conn.close()
+        readonly=sqlite3.connect(database.resolve().as_uri()+'?mode=ro',uri=True)
+        try:
+            s.check_control(readonly)
+            self.assertEqual((profile['profile_sha256'],),readonly.execute(
+                f'SELECT profile_sha256 FROM {r.PROFILES}').fetchone())
+        finally:
+            readonly.close()
+
+    def test_inode_guard_rejects_adjacent_unsigned_values_and_other_binding_mismatches(self):
+        self.conn.execute('DROP TRIGGER recognition_admin_bindings_immutable_update')
+        self.old['target']['observation']['inode']=18446744073709551615
+        self.old['control_identity']['inode']=9223372036854775808
+        self.conn.execute('UPDATE recognition_admin_bindings SET body_json=?,body_sha256=?',
+                          (canonical(self.old),digest(self.old)))
+        self.conn.execute(s.definitions()['recognition_admin_bindings_immutable_update'])
+        # These neighboring JSON integers collapse under conversion through REAL.
+        # Every mismatch must be rejected by the binding trigger itself.
+        cases=[dict(target_inode='18446744073709551614'),
+               dict(control_inode='9223372036854775809'),
+               dict(target_path=str(self.root/'other-target.db')),
+               dict(control_path=str(self.root/'other-control.db')),
+               dict(target_schema_sha256='d'*64),dict(owner_id=2),
+               dict(generation=3),dict(observed_at=999),dict(created_at=1600)]
+        for changes in cases:
+            with self.subTest(changes=changes):
+                self.conn.execute('SAVEPOINT mismatch')
+                try:
+                    with self.assertRaisesRegex(sqlite3.IntegrityError,'runtime_profile_binding_mismatch'):
+                        self.profile(**changes)
+                finally:
+                    self.conn.execute('ROLLBACK TO mismatch')
+                    self.conn.execute('RELEASE mismatch')
+        self.profile()
+        self.conn.commit()
+        s.check_control(self.conn)
+        self.assertEqual(('18446744073709551615','9223372036854775808'),tuple(
+            self.conn.execute(f'SELECT target_inode,control_inode FROM {r.PROFILES}').fetchone()))
+
     def test_deferred_profile_binding_and_audit_foreign_keys(self):
         self.profile(complete=False)
         with self.assertRaises(sqlite3.IntegrityError):
