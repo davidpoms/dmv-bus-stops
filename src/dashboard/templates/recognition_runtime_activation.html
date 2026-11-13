@@ -2,8 +2,22 @@
 <html lang="en"><meta charset="utf-8"><title>Recognition owner activation</title>
 <h1>Recognition owner activation</h1>
 <p>Activation does not execute recognition. Keep live capture disabled until activation is verified.</p>
-<p>After any state change, sign out and sign in again before checking status.</p>
-<button id="authenticate">Authenticate with MFA</button>
+<p>After an activation, suspension or deactivation, sign out and sign in again before checking status.</p>
+<p id="mfa-state" aria-live="polite">Reading MFA state…</p>
+<button id="setup" hidden>Set up MFA</button>
+<button id="refresh-mfa">Refresh MFA status</button>
+<section id="mfa-setup" hidden aria-label="Private MFA setup">
+<p>Add a time-based account to your authenticator using the setup key below (six digits, 30 seconds). Keep these details private.</p>
+<label>Setup key <input id="setup-key" readonly autocomplete="off" spellcheck="false"></label>
+<details><summary>Provisioning URI for a compatible authenticator</summary>
+<textarea id="provisioning-uri" readonly autocomplete="off" spellcheck="false" aria-label="Private provisioning URI"></textarea></details>
+<form id="verify-form" autocomplete="off">
+<label>Six-digit authenticator code <input id="verification-code" type="password" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" required autocomplete="off"></label>
+<button id="verify" type="submit">Verify MFA setup</button>
+</form>
+</section>
+<p id="mfa-help">First-time setup and MFA authentication require a sign-in less than ten minutes old.</p>
+<button id="authenticate" disabled>Authenticate with MFA</button>
 <button id="status">Read durable status</button>
 <button id="readiness">Check readiness</button>
 <button id="activate">Prepare activation</button>
@@ -16,6 +30,51 @@ const csrf = {{ csrf_token|tojson }};
 const base = '/api/admin/recognition-control/';
 const output = document.getElementById('output');
 let busy = false;
+let mfaState = null;
+let pendingExpired = false;
+let provisioningEpoch = 0;
+function clearProvisioning() {
+  provisioningEpoch += 1;
+  document.getElementById('setup-key').value = '';
+  document.getElementById('provisioning-uri').value = '';
+  document.getElementById('verification-code').value = '';
+}
+function controls() {
+  for (const button of document.querySelectorAll('button')) button.disabled = busy;
+  document.getElementById('setup').hidden = mfaState !== 'UNENROLLED' && !pendingExpired;
+  document.getElementById('setup').textContent = pendingExpired ? 'Restart MFA setup' : 'Set up MFA';
+  document.getElementById('authenticate').disabled = busy || mfaState !== 'ENROLLED';
+}
+async function refreshMfa() {
+  const value = await call('mfa/state');
+  mfaState = value.state;
+  pendingExpired = mfaState === 'PENDING' && value.pending_expired === true;
+  document.getElementById('mfa-state').textContent = 'MFA state: ' + mfaState;
+  if (mfaState !== 'PENDING') {
+    clearProvisioning();
+    document.getElementById('mfa-setup').hidden = true;
+  }
+  if (mfaState === 'PENDING') {
+    if (pendingExpired) clearProvisioning();
+    document.getElementById('mfa-help').textContent = pendingExpired
+      ? 'Setup has expired. Sign in afresh, then choose Restart MFA setup to create a new authenticator key. The old key will no longer work.'
+      : 'Setup is pending. Use the key shown when setup began; it cannot be retrieved again. If setup was abandoned or the key was lost, wait for its ten-minute window to expire, then refresh MFA status and restart with a fresh sign-in.';
+    document.getElementById('mfa-setup').hidden = pendingExpired;
+  } else {
+    document.getElementById('mfa-help').textContent = mfaState === 'ENROLLED'
+      ? 'Use Authenticate with MFA with a NEW authenticator code after setup verification.'
+      : 'First-time setup and MFA authentication require a sign-in less than ten minutes old.';
+  }
+  controls();
+}
+function failure(error) {
+  if (error.message === 'recent_primary_authentication_required') {
+    clearProvisioning();
+    output.textContent = 'Sign out and sign in again through the normal email sign-in flow. MFA setup and authentication require a recent primary login.';
+  } else {
+    output.textContent = error.message + '\nIf a state-change response was lost, do not retry. Sign in afresh and read durable status.';
+  }
+}
 async function call(path, data) {
   const response = await fetch(base + path, data === undefined ? {cache: 'no-store'} : {
     method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -48,24 +107,64 @@ async function change(action) {
     step_up_token: step.step_up_token, confirmation_token: confirmation, reason
   }));
 }
-for (const action of ['authenticate', 'status', 'readiness', 'activate', 'suspend', 'deactivate']) {
+for (const action of ['setup', 'refresh-mfa', 'authenticate', 'status', 'readiness', 'activate', 'suspend', 'deactivate']) {
   document.getElementById(action).onclick = async () => {
     if (busy) return;
     busy = true;
     for (const button of document.querySelectorAll('button')) button.disabled = true;
     try {
-      if (action === 'authenticate') {
+      if (action === 'setup') {
+        clearProvisioning();
+        const epoch = provisioningEpoch;
+        const value = await call('mfa/enrollment', {});
+        // Never send provisioning details to general output, storage or another service.
+        if (!document.hidden && epoch === provisioningEpoch) {
+          document.getElementById('provisioning-uri').value = value.provisioning_uri;
+          document.getElementById('setup-key').value = new URL(value.provisioning_uri).searchParams.get('secret') || '';
+        }
+        await refreshMfa();
+      } else if (action === 'refresh-mfa') {
+        await refreshMfa();
+      } else if (action === 'authenticate') {
         const code = prompt('Enter your current authenticator code. Never send it to anyone.');
         if (code) show(await call('session', {code}));
       } else if (action === 'status') show(await call('runtime-activation'));
       else if (action === 'readiness') show(await call('runtime-activation/readiness'));
       else await change(action);
     } catch (error) {
-      output.textContent = error.message + '\nIf a state-change response was lost, do not retry. Sign in afresh and read durable status.';
+      failure(error);
     } finally {
       busy = false;
-      for (const button of document.querySelectorAll('button')) button.disabled = false;
+      controls();
     }
   };
 }
+document.getElementById('verify-form').onsubmit = async (event) => {
+  event.preventDefault();
+  if (busy) return;
+  const input = document.getElementById('verification-code');
+  const code = input.value;
+  input.value = '';
+  if (!/^[0-9]{6}$/.test(code)) {
+    output.textContent = 'Enter exactly six digits from your authenticator.';
+    return;
+  }
+  busy = true;
+  controls();
+  try {
+    await call('mfa/verify', {code});
+    clearProvisioning();
+    await refreshMfa();
+    if (mfaState !== 'ENROLLED') throw new Error('MFA state changed; sign in afresh and check durable MFA state.');
+    output.textContent = 'MFA is ENROLLED. Wait for a NEW authenticator code, then choose Authenticate with MFA. The setup verification code has already been used.';
+  } catch (error) {
+    failure(error);
+  } finally {
+    busy = false;
+    controls();
+  }
+};
+window.addEventListener('pagehide', clearProvisioning);
+document.addEventListener('visibilitychange', () => { if (document.hidden) clearProvisioning(); });
+refreshMfa().catch(failure);
 </script></html>

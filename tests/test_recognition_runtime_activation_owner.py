@@ -251,6 +251,154 @@ class ActivationOwnerTests(unittest.TestCase):
         self.assertEqual(200, authenticated.status_code, authenticated.get_json())
         self.assertEqual('ACTIVATED', client.get(prefix+'runtime-activation').get_json()['activation']['state'])
 
+    def mfa_client(self, unenrolled=True):
+        fixture=self.f
+        while not hasattr(fixture,'web'):
+            fixture=fixture.f if hasattr(fixture,'f') else fixture.fixture
+        if unenrolled:
+            # Disposable first-time setup fixture only; production reset is not involved.
+            with a.connect(self.config.control,write=True) as control:
+                reset=control.execute("UPDATE recognition_admin_mfa SET state='UNENROLLED',seed_ciphertext=NULL,"
+                                      "pending_primary=NULL,pending_until=NULL,last_counter=-1 WHERE actor=?",(1,))
+                self.assertEqual(1,reset.rowcount)
+                control.commit()
+        self.primary=owner.record_primary_authentication(self.config,actor_id=1,reviewer_key='owner-key')
+        client=fixture.web()
+        with client.session_transaction() as browser:
+            browser.update(authenticated_reviewer_id=1,reviewer_key='owner-key',
+                           recognition_primary=self.primary,auth_csrf='test-csrf')
+        return client
+
+    def test_first_time_mfa_ui_and_durable_setup_without_activation_or_secret_logging(self):
+        client=self.mfa_client()
+        prefix='/api/admin/recognition-control/'
+        with a.connect(self.config.target) as target:
+            before='\n'.join(target.iterdump())
+        page=client.get(prefix+'owner-activation')
+        self.assertEqual(200,page.status_code)
+        html=page.get_data(as_text=True)
+        self.assertIn('Set up MFA',html)
+        self.assertIn('mfa/state',html)
+        self.assertIn("mfaState !== 'UNENROLLED'",html)
+        status=client.get(prefix+'mfa/state')
+        self.assertEqual({'state':'UNENROLLED','pending_expired':False},status.get_json())
+        self.assertEqual('no-store',status.headers['Cache-Control'])
+        with patch.object(auth.secrets,'token_bytes',return_value=base.SEED), \
+             patch('logging.Logger._log') as logged:
+            begun=client.post(prefix+'mfa/enrollment',json={'csrf_token':'test-csrf'})
+            self.assertEqual(200,begun.status_code,begun.get_json())
+            uri=begun.get_json()['provisioning_uri']
+            self.assertTrue(uri.startswith('otpauth://'))
+            self.assertEqual({'state':'PENDING','pending_expired':False},client.get(prefix+'mfa/state').get_json())
+            self.assertNotIn(uri,client.get(prefix+'owner-activation').get_data(as_text=True))
+            good=base.independent_code(v._utc_now())
+            bad=str((int(good[0])+1)%10)+good[1:]
+            rejected=client.post(prefix+'mfa/verify',json={'csrf_token':'test-csrf','code':bad})
+            self.assertEqual('invalid_or_replayed_totp',rejected.get_json()['error'])
+            self.assertEqual({'state':'PENDING','pending_expired':False},client.get(prefix+'mfa/state').get_json())
+            verified=client.post(prefix+'mfa/verify',json={'csrf_token':'test-csrf','code':good})
+            self.assertEqual({'state':'ENROLLED'},verified.get_json())
+            self.assertEqual({'state':'ENROLLED','pending_expired':False},client.get(prefix+'mfa/state').get_json())
+            replay=client.post(prefix+'session',json={'csrf_token':'test-csrf','code':good})
+            self.assertEqual('invalid_or_replayed_totp',replay.get_json()['error'])
+            self.tick()
+            authenticated=client.post(prefix+'session',json={'csrf_token':'test-csrf',
+                                                            'code':base.independent_code(v._utc_now())})
+            self.assertEqual(200,authenticated.status_code,authenticated.get_json())
+            log_text=repr(logged.call_args_list)
+            self.assertNotIn(uri,log_text)
+            self.assertNotIn('otpauth://',log_text)
+            from urllib.parse import urlparse,parse_qs
+            self.assertNotIn(parse_qs(urlparse(uri).query)['secret'][0],log_text)
+        self.assertEqual('NOT_ACTIVATED',self.durable()['state'])
+        with a.connect(self.config.target) as target:
+            self.assertEqual(before,'\n'.join(target.iterdump()))
+
+    def test_mfa_setup_csrf_exact_payload_recent_primary_and_existing_enrollment(self):
+        client=self.mfa_client()
+        prefix='/api/admin/recognition-control/'
+        for path,valid in (('mfa/enrollment',{}),('mfa/verify',{'code':'123456'})):
+            for payload in (valid,dict(valid,csrf_token='wrong'),
+                            dict(valid,csrf_token='test-csrf',actor_id=1)):
+                with self.subTest(path=path,payload=payload):
+                    self.assertEqual(400,client.post(prefix+path,json=payload).status_code)
+        for _ in range(20):self.tick()
+        self.assertEqual(200,client.get(prefix+'owner-activation').status_code)
+        denied=client.post(prefix+'mfa/enrollment',json={'csrf_token':'test-csrf'})
+        self.assertEqual('recent_primary_authentication_required',denied.get_json()['error'])
+        self.assertEqual({'state':'UNENROLLED','pending_expired':False},client.get(prefix+'mfa/state').get_json())
+        self.assertEqual('NOT_ACTIVATED',self.durable()['state'])
+        fresh=owner.record_primary_authentication(self.config,actor_id=1,reviewer_key='owner-key')
+        with client.session_transaction() as browser:browser['recognition_primary']=fresh
+        self.assertEqual(200,client.post(prefix+'mfa/enrollment',json={'csrf_token':'test-csrf'}).status_code)
+        for _ in range(20):self.tick()
+        expired=client.post(prefix+'mfa/verify',json={'csrf_token':'test-csrf',
+                                                   'code':base.independent_code(v._utc_now())})
+        self.assertEqual('recent_primary_authentication_required',expired.get_json()['error'])
+        self.assertEqual({'state':'PENDING','pending_expired':True},client.get(prefix+'mfa/state').get_json())
+        self.assertEqual('NOT_ACTIVATED',self.durable()['state'])
+        with client.session_transaction() as browser:browser.pop('recognition_primary')
+        self.assertEqual(401,client.get(prefix+'mfa/state').status_code)
+
+    def test_enrolled_owner_state_and_existing_authentication(self):
+        client=self.mfa_client(unenrolled=False)
+        prefix='/api/admin/recognition-control/'
+        self.assertEqual({'state':'ENROLLED','pending_expired':False},client.get(prefix+'mfa/state').get_json())
+        denied=client.post(prefix+'mfa/enrollment',json={'csrf_token':'test-csrf'})
+        self.assertEqual('mfa_already_enrolled_or_pending',denied.get_json()['error'])
+        self.tick()
+        response=client.post(prefix+'session',json={'csrf_token':'test-csrf',
+                                                  'code':base.independent_code(v._utc_now())})
+        self.assertEqual(200,response.status_code,response.get_json())
+        self.assertEqual('NOT_ACTIVATED',self.durable()['state'])
+
+    def test_mfa_client_reset_preserves_second_actor_sentinel(self):
+        with a.connect(self.config.control,write=True) as control:
+            control.execute("INSERT INTO recognition_admin_mfa(actor,seed_ciphertext,state,epoch,last_counter) "
+                            "VALUES(2,'second-actor-sentinel','ENROLLED',7,123)")
+            sentinel=tuple(control.execute('SELECT * FROM recognition_admin_mfa WHERE actor=2').fetchone())
+            control.commit()
+        self.mfa_client()
+        with a.connect(self.config.control) as control:
+            self.assertEqual(sentinel,tuple(control.execute(
+                'SELECT * FROM recognition_admin_mfa WHERE actor=2').fetchone()))
+            self.assertEqual(('UNENROLLED',None,-1),tuple(control.execute(
+                'SELECT state,seed_ciphertext,last_counter FROM recognition_admin_mfa WHERE actor=1').fetchone()))
+
+    def test_expired_pending_setup_restarts_only_with_fresh_primary_and_new_seed(self):
+        client=self.mfa_client()
+        prefix='/api/admin/recognition-control/'
+        def pending():
+            with a.connect(self.config.control) as control:
+                return dict(control.execute('SELECT * FROM recognition_admin_mfa WHERE actor=1').fetchone())
+        with patch.object(auth.secrets,'token_bytes',return_value=base.SEED):
+            begun=client.post(prefix+'mfa/enrollment',json={'csrf_token':'test-csrf'})
+            self.assertEqual(200,begun.status_code)
+        old=pending()
+        self.assertEqual({'state':'PENDING','pending_expired':False},client.get(prefix+'mfa/state').get_json())
+        early=client.post(prefix+'mfa/enrollment',json={'csrf_token':'test-csrf'})
+        self.assertEqual('mfa_already_enrolled_or_pending',early.get_json()['error'])
+        for _ in range(20):self.tick()
+        self.assertEqual({'state':'PENDING','pending_expired':True},client.get(prefix+'mfa/state').get_json())
+        self.assertEqual(old,pending())  # Inspection never rewrites expired PENDING.
+        stale=client.post(prefix+'mfa/enrollment',json={'csrf_token':'test-csrf'})
+        self.assertEqual('recent_primary_authentication_required',stale.get_json()['error'])
+        fresh=owner.record_primary_authentication(self.config,actor_id=1,reviewer_key='owner-key')
+        with client.session_transaction() as browser:browser['recognition_primary']=fresh
+        with patch.object(auth.secrets,'token_bytes',return_value=b'Z'*20):
+            restarted=client.post(prefix+'mfa/enrollment',json={'csrf_token':'test-csrf'})
+        self.assertEqual(200,restarted.status_code,restarted.get_json())
+        self.assertNotEqual(begun.get_json()['provisioning_uri'],restarted.get_json()['provisioning_uri'])
+        new=pending()
+        self.assertEqual('PENDING',new['state'])
+        self.assertNotEqual(old['seed_ciphertext'],new['seed_ciphertext'])
+        self.assertEqual(a.token_hash(fresh),new['pending_primary'])
+        self.assertEqual(a.timestamp(v._utc_now())+auth.RECENT_SECONDS,new['pending_until'])
+        self.assertEqual(old['epoch'],new['epoch'])
+        self.assertEqual(-1,new['last_counter'])
+        self.assertEqual({'state':'PENDING','pending_expired':False},client.get(prefix+'mfa/state').get_json())
+        self.assertEqual('NOT_ACTIVATED',self.durable()['state'])
+
     def test_concurrent_activation_has_one_committed_transition(self):
         self.prepare()
         def attempt():

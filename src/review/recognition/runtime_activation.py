@@ -210,6 +210,22 @@ def get_admin_identity(config, primary_token, *, now=None):
     return result
 
 
+def get_mfa_state(config, primary_token, *, now=None):
+    """Owner UI status only; never return seed, URI, counters or credentials."""
+    with _transaction(config) as context:
+        primary = _primary(context, primary_token)
+        control, _, _, _ = _read_parts(context)
+        row = control.execute('SELECT state,pending_until FROM recognition_admin_mfa WHERE actor=?',
+                              (primary['actor'],)).fetchone()
+        a.need(row is not None and row['state'] in ('UNENROLLED', 'PENDING', 'ENROLLED'),
+               'mfa_state_unavailable', 503)
+        a.need(row['state'] != 'PENDING' or type(row['pending_until']) is int,
+               'mfa_state_unavailable', 503)
+        result = dict(state=row['state'], pending_expired=row['state'] == 'PENDING'
+                      and row['pending_until'] <= a.timestamp(v._utc_now()))
+    return result
+
+
 def begin_enrollment(config, primary_token, *, now=None):
     with _transaction(config) as context:
         _primary(context, primary_token, recent=True)

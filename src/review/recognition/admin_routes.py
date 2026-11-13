@@ -115,6 +115,13 @@ def register_admin_routes(app):
         config = context(authentication_only=True)
         return jsonify(asdict(authentication_backend(config).get_admin_identity(config, session["recognition_primary"], now=now_utc())))
 
+    @routes.get('/mfa/state')
+    def mfa_state():
+        config = context(authentication_only=True)
+        from . import runtime_activation
+        a.need(authentication_backend(config) is runtime_activation, 'runtime_profile_required')
+        return jsonify(runtime_activation.get_mfa_state(config, session['recognition_primary']))
+
     @routes.post("/mfa/enrollment")
     def enrollment():
         data(())

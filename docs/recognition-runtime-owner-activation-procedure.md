@@ -8,10 +8,28 @@ required by this fix. Keep `LIVE_RECOGNITION_CAPTURE=0` throughout this procedur
 ## Activate
 
 1. Sign out of the application, then sign in through its normal owner sign-in
-   flow. Use your existing project-owner account and enrolled authenticator.
+   flow. Use your existing project-owner account.
 2. On the same application, open
    `/api/admin/recognition-control/owner-activation` in your browser.
-3. Click **Authenticate with MFA** and enter your current authenticator code.
+3. If MFA state is **UNENROLLED**, click **Set up MFA**. Add the displayed setup
+   key to your authenticator (or use the provisioning URI with a compatible
+   authenticator), then enter its six-digit code and click **Verify MFA setup**.
+   The page reads durable MFA state again and must show **ENROLLED**. Keep setup
+   details private; they are shown only during setup and cleared when the page
+   is hidden or verification succeeds. Pending setup cannot retrieve its key
+   again. Setup and verification require the same recent primary login; if
+   `recent_primary_authentication_required` appears, sign out and sign in again.
+   If setup was abandoned or its key was lost, wait for its ten-minute window
+   to expire. Choose **Refresh MFA status** or reload the page. Expired PENDING
+   setup exposes **Restart MFA setup**; sign in afresh before restarting. This
+   uses the existing enrollment operation to replace the expired key and begin
+   a new pending setup. It does not change durable PENDING to UNENROLLED.
+   Hiding the page also invalidates any in-flight provisioning response, so
+   returning to the tab cannot restore cleared setup details.
+   No MFA reset or activation occurs in this setup flow.
+   Wait for a **new** authenticator code after verification, because verification
+   consumes the previous TOTP counter. Already-enrolled owners skip setup.
+   Click **Authenticate with MFA** and enter your current authenticator code.
    Never paste the host encryption key into a terminal or share credentials.
 4. Click **Read durable status**. Check the installation ID and generation
    against your deployment record. Stop if either is unexpected.
