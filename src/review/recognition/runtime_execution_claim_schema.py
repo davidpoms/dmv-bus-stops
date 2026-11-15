@@ -268,7 +268,7 @@ def manifest(conn, *, exclude=()):
     return digest({name:' '.join(sql.split()) for name,sql in _control_objects(conn) if name not in exclude})
 
 
-def migrate(config, *, expected_generation, operator, reason):
+def migrate(config, *, expected_generation, operator, reason, recovery_sha256=None):
     """Explicit trusted deployment migration; storage only, target query-only.
 
     Lost commit acknowledgement requires durable inspection, never blind retry.
@@ -288,13 +288,18 @@ def migrate(config, *, expected_generation, operator, reason):
         binding = challenges._deployment_binding(control)
         require(binding['generation'] == expected_generation, 'runtime_claim_migration_generation_conflict')
         require(binding['production_state'] == 'NOT_ACTIVATED', 'runtime_claim_migration_requires_not_activated')
-        require(asdict(a.target_identity(control)) == binding['control_identity'], 'control_identity_mismatch')
+        if recovery_sha256 is None:
+            require(asdict(a.target_identity(control)) == binding['control_identity'], 'control_identity_mismatch')
         if binding['runtime_profile_sha256'] is not None:
             runtime._history(control)  # Durable enrollment only; console is not runtime.
         with a.connect(config.target,write=True) as target:
             target.execute('BEGIN IMMEDIATE')
             target.execute('PRAGMA query_only=ON')
-            a._verify(config,control,target,binding)
+            if recovery_sha256 is None:
+                a._verify(config,control,target,binding)
+            else:
+                from . import deployment_claim_recovery as recovery
+                recovery_snapshot = recovery.validate(config, control, target, recovery_sha256)
             if control.execute("SELECT 1 FROM sqlite_master WHERE name='recognition_local_activation'").fetchone():
                 from .local_readiness import _state
                 require(_state(control,binding)['state'] == 'NOT_ACTIVATED','runtime_claim_migration_requires_not_activated')
@@ -334,11 +339,16 @@ def migrate(config, *, expected_generation, operator, reason):
                 schema.check_control(control)
                 a._audit_head(control)
                 require(challenges._deployment_binding(control) == binding,'runtime_claim_migration_binding_changed')
-                require(asdict(a.target_identity(control)) == binding['control_identity'],'control_identity_mismatch')
-                a._verify(config,control,target,binding)
+                if recovery_sha256 is None:
+                    require(asdict(a.target_identity(control)) == binding['control_identity'],'control_identity_mismatch')
+                    a._verify(config,control,target,binding)
+                else:
+                    recovery_expires_at = recovery.finish(config, control, target, recovery_sha256, recovery_snapshot)
                 require(target.total_changes == target_changes and target.execute('PRAGMA query_only').fetchone()[0] == 1,
                         'runtime_claim_migration_target_changed')
                 require(a.timestamp(runtime._utc_now()) >= a.timestamp(now),'administrative_clock_rollback')
+                if recovery_sha256 is not None:
+                    require(a.timestamp(runtime._utc_now()) < recovery_expires_at, 'claim_recovery_expired')
                 control.execute('RELEASE install_runtime_execution_claims')
                 control.commit()  # Target reservation remains held through COMMIT.
             except BaseException:
