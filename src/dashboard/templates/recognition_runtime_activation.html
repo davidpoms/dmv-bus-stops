@@ -23,6 +23,16 @@
 <button id="activate">Prepare activation</button>
 <button id="suspend">Suspend</button>
 <button id="deactivate">Deactivate</button>
+<section aria-label="Pre-activation event foundation">
+<h2>Pre-activation event foundation</h2>
+<p>Preview is read-only: it does not install schema, activate recognition or grant execution authority.</p>
+<button id="foundation-preview">Preview foundation (read-only)</button>
+<button id="foundation-status">Read foundation status</button>
+<p>Completion is a separate schema change requiring an independently signed migration approval for the exact preview.</p>
+<button id="foundation-complete" disabled>Complete approved foundation</button>
+<p>Preview plan SHA256: <output id="foundation-digest">No preview prepared</output></p>
+<pre id="foundation-plan" aria-live="polite"></pre>
+</section>
 <pre id="output" aria-live="polite"></pre>
 <script>
 'use strict';
@@ -33,6 +43,7 @@ let busy = false;
 let mfaState = null;
 let pendingExpired = false;
 let provisioningEpoch = 0;
+let foundationPreview = null;
 function clearProvisioning() {
   provisioningEpoch += 1;
   document.getElementById('setup-key').value = '';
@@ -44,6 +55,7 @@ function controls() {
   document.getElementById('setup').hidden = mfaState !== 'UNENROLLED' && !pendingExpired;
   document.getElementById('setup').textContent = pendingExpired ? 'Restart MFA setup' : 'Set up MFA';
   document.getElementById('authenticate').disabled = busy || mfaState !== 'ENROLLED';
+  document.getElementById('foundation-complete').disabled = busy || foundationPreview === null;
 }
 async function refreshMfa() {
   const value = await call('mfa/state');
@@ -85,6 +97,40 @@ async function call(path, data) {
   return value;
 }
 function show(value) { output.textContent = JSON.stringify(value, null, 2); }
+async function previewFoundation() {
+  foundationPreview = null;
+  document.getElementById('foundation-digest').textContent = 'No preview prepared';
+  document.getElementById('foundation-plan').textContent = '';
+  const operator = prompt('Record the operator for this read-only foundation preview:');
+  if (!operator || !operator.trim()) return;
+  const reason = prompt('Record the reason for this read-only foundation preview:');
+  if (!reason || !reason.trim()) return;
+  const value = await call('runtime-foundation/preview', {operator, reason});
+  foundationPreview = value;
+  document.getElementById('foundation-digest').textContent = value.plan_sha256;
+  document.getElementById('foundation-plan').textContent = JSON.stringify(value.plan, null, 2);
+  output.textContent = 'Read-only foundation preview prepared. Nothing has been installed or activated. Review the plan before obtaining an independent signed approval.';
+}
+async function completeFoundation() {
+  if (!foundationPreview) return;
+  const approved = prompt('To authorize the separate schema completion, type the exact preview plan SHA256 shown on this page:');
+  if (approved !== foundationPreview.plan_sha256) throw new Error('Preview plan digest does not match; no completion requested.');
+  const serialized_approval = prompt('Paste the independently signed approval JSON for this exact preview:');
+  if (!serialized_approval) return;
+  const approval = JSON.parse(serialized_approval);
+  // Compare plan DATA only; all signature, scope, freshness and authority checks remain on the server.
+  const ordered = (key, value) => value && typeof value === 'object' && !Array.isArray(value)
+    ? Object.fromEntries(Object.keys(value).sort().map(name => [name, value[name]])) : value;
+  if (JSON.stringify(approval.subject?.plan, ordered) !== JSON.stringify(foundationPreview.plan, ordered)) {
+    throw new Error('Signed approval plan does not match this preview; no completion requested.');
+  }
+  const signature = prompt('Paste the independent approval signature:');
+  if (!signature) return;
+  if (!confirm('Install only the approved event foundation for preview ' + approved + '? This does not activate recognition.')) return;
+  // A lost response must be inspected, never retried automatically with this preview.
+  foundationPreview = null;
+  show(await call('runtime-foundation/complete', {serialized_approval, signature}));
+}
 async function change(action) {
   const current = await call('runtime-activation');
   show(current);
@@ -107,7 +153,8 @@ async function change(action) {
     step_up_token: step.step_up_token, confirmation_token: confirmation, reason
   }));
 }
-for (const action of ['setup', 'refresh-mfa', 'authenticate', 'status', 'readiness', 'activate', 'suspend', 'deactivate']) {
+for (const action of ['setup', 'refresh-mfa', 'authenticate', 'status', 'readiness', 'activate', 'suspend', 'deactivate',
+                      'foundation-preview', 'foundation-status', 'foundation-complete']) {
   document.getElementById(action).onclick = async () => {
     if (busy) return;
     busy = true;
@@ -130,6 +177,9 @@ for (const action of ['setup', 'refresh-mfa', 'authenticate', 'status', 'readine
         if (code) show(await call('session', {code}));
       } else if (action === 'status') show(await call('runtime-activation'));
       else if (action === 'readiness') show(await call('runtime-activation/readiness'));
+      else if (action === 'foundation-preview') await previewFoundation();
+      else if (action === 'foundation-status') show(await call('runtime-foundation/status'));
+      else if (action === 'foundation-complete') await completeFoundation();
       else await change(action);
     } catch (error) {
       failure(error);

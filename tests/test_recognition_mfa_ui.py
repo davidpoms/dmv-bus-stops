@@ -22,6 +22,80 @@ if not CHROME and os.name == 'nt':
 
 @unittest.skipUnless(CHROME, 'Local Chrome/Chromium required; no browser dependency downloaded')
 class MfaBrowserTests(unittest.TestCase):
+    def test_foundation_preview_digest_csrf_and_separate_completion(self):
+        fake_api = r"""
+<script>
+const requests = [], plan = {generation:5, h0:'original', h1:'successor', package:'recognition-preactivation-event-foundation-v1'};
+const planDigest = 'a'.repeat(64);
+window.fetch = async (url, options = {}) => {
+  const path = url.split('/recognition-control/')[1];
+  const body = options.body ? JSON.parse(options.body) : null;
+  requests.push({path, body, options});
+  let value;
+  if (path === 'mfa/state') value = {state:'ENROLLED',pending_expired:false};
+  else if (path === 'runtime-foundation/preview') value = {plan,plan_sha256:planDigest,execution_authority:false};
+  else if (path === 'runtime-foundation/complete') value = {state:'COMPLETED',production_state:'NOT_ACTIVATED',execution_authority:false};
+  else if (path === 'runtime-foundation/status') value = {state:'COMPLETED',activation_state:'NOT_ACTIVATED',execution_authority:false};
+  else throw Error('Unexpected endpoint');
+  return {ok:true,json:async()=>value};
+};
+console.log = console.warn = console.error = () => {throw Error('Unexpected logging');};
+</script>
+"""
+        scenario = r"""
+<script>
+(async () => {
+  const check = (value,message) => {if (!value) throw Error(message);};
+  const el = id => document.getElementById(id);
+  let answers = [];
+  window.prompt = () => answers.shift();
+  window.confirm = () => true;
+  const completes = () => requests.filter(r=>r.path==='runtime-foundation/complete');
+  await refreshMfa();
+  check(el('foundation-complete').disabled,'completion enabled without preview');
+  answers = ['fixture-owner','read-only foundation review'];
+  await el('foundation-preview').onclick();
+  const preview = requests.at(-1);
+  check(preview.path==='runtime-foundation/preview' && preview.options.method==='POST','preview endpoint');
+  check(preview.options.headers['Content-Type']==='application/json','content type');
+  check(JSON.stringify(preview.body)===JSON.stringify({operator:'fixture-owner',reason:'read-only foundation review',csrf_token:'test-csrf'}),'exact csrf payload');
+  check(el('foundation-digest').textContent===planDigest,'visible digest');
+  check(JSON.stringify(JSON.parse(el('foundation-plan').textContent))===JSON.stringify(plan),'visible plan');
+  check(el('output').textContent.includes('Read-only'),'read-only result');
+  check(completes().length===0,'preview triggered completion');
+  check(!el('foundation-complete').disabled,'separate completion unavailable');
+  answers = ['wrong-digest'];
+  await el('foundation-complete').onclick();
+  check(completes().length===0,'mismatched digest submitted');
+  check(el('output').textContent.includes('digest does not match'),'digest mismatch feedback');
+  answers = [planDigest, JSON.stringify({subject:{plan:{...plan,h1:'wrong'}}})];
+  await el('foundation-complete').onclick();
+  check(completes().length===0,'different signed plan submitted');
+  // Different object key order is harmless; the complete plan must still agree.
+  const serialized = JSON.stringify({subject:{plan:{package:plan.package,h1:plan.h1,h0:plan.h0,generation:5}}});
+  answers = [planDigest,serialized,'synthetic-independent-signature'];
+  window.confirm = () => false;
+  await el('foundation-complete').onclick();
+  check(completes().length===0,'canceled completion submitted');
+  answers = [planDigest,serialized,'synthetic-independent-signature'];
+  window.confirm = () => true;
+  await el('foundation-complete').onclick();
+  check(completes().length===1,'separate completion missing');
+  check(JSON.stringify(completes()[0].body)===JSON.stringify({serialized_approval:serialized,signature:'synthetic-independent-signature',csrf_token:'test-csrf'}),'completion payload changed backend contract');
+  check(el('foundation-complete').disabled,'completion may be replayed from same preview');
+  await el('foundation-status').onclick();
+  check(requests.at(-1).path==='runtime-foundation/status' && !requests.at(-1).body,'durable foundation status');
+  check(el('output').textContent.includes('NOT_ACTIVATED'),'activation changed');
+  for (const id of ['authenticate','status','readiness','activate','suspend','deactivate']) check(el(id),'existing control missing');
+  check(!document.querySelector('[name="session_token"], [name="primary_token"]'),'credential field');
+  check(requests.every(r=>!r.body || (!('session_token' in r.body) && !('primary_token' in r.body))),'credential payload');
+  check(localStorage.length===0 && sessionStorage.length===0,'browser persistence');
+  el('browser-result').textContent='PASS';
+})().catch(error=>{document.getElementById('browser-result').textContent='FAIL: '+error.message;});
+</script>
+"""
+        self.run_browser(fake_api,scenario)
+
     def test_first_time_setup_existing_enrollment_and_freshness(self):
         fake_api = r"""
 <script>

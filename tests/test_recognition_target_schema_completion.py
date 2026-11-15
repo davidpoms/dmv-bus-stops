@@ -409,6 +409,46 @@ class TargetSchemaCompletionTests(unittest.TestCase):
             self.assertEqual('COMPLETED',status.get_json()['state'])
             self.assertEqual('NOT_ACTIVATED',status.get_json()['activation_state'])
 
+    def test_foundation_owner_page_preview_authentication_csrf_and_readonly(self):
+        from flask import Flask
+        from src.review.recognition import admin_routes
+        app=Flask(__name__,template_folder=str(Path(__file__).resolve().parents[1]/'src/dashboard/templates'))
+        app.config.update(TESTING=True,SECRET_KEY='synthetic-foundation-ui')
+        admin_routes.register_admin_routes(app)
+        prefix='/api/admin/recognition-control/'
+        client=app.test_client();guest=app.test_client()
+        with client.session_transaction() as browser:
+            browser.update(authenticated_reviewer_id=1,reviewer_key='owner-key',recognition_primary=self.primary,
+                           recognition_admin=self.session,auth_csrf='synthetic-csrf')
+        with guest.session_transaction() as browser:browser['auth_csrf']='synthetic-csrf'
+        with patch.object(admin_routes,'configuration',return_value=self.config):
+            self.assertEqual(403,guest.get(prefix+'owner-activation').status_code)
+            self.assertEqual(403,guest.post(prefix+'runtime-foundation/preview',json=dict(
+                csrf_token='synthetic-csrf',operator='fixture',reason='review')).status_code)
+            page=client.get(prefix+'owner-activation')
+            self.assertEqual(200,page.status_code)
+            html=page.get_data(as_text=True)
+            for control in ('foundation-preview','foundation-digest','foundation-plan','foundation-complete',
+                            'authenticate','status','readiness','activate','suspend','deactivate'):
+                self.assertIn('id="'+control+'"',html)
+            self.assertIn('Preview is read-only',html)
+            self.assertNotIn(self.primary,html);self.assertNotIn(self.session,html)
+            self.assertEqual('no-store',page.headers['Cache-Control'])
+            for payload in (dict(operator='fixture',reason='review'),
+                            dict(csrf_token='wrong',operator='fixture',reason='review'),
+                            dict(csrf_token='synthetic-csrf',operator='fixture',reason='review',session_token=self.session)):
+                self.assertEqual(400,client.post(prefix+'runtime-foundation/preview',json=payload).status_code)
+            before=self.dump(self.config.target),self.dump(self.config.control)
+            with patch.object(completion,'complete',side_effect=AssertionError('Preview must never complete')):
+                response=client.post(prefix+'runtime-foundation/preview',json=dict(
+                    csrf_token='synthetic-csrf',operator='fixture',reason='read-only review'))
+            self.assertEqual(200,response.status_code,response.get_json())
+            self.assertEqual(digest(response.get_json()['plan']),response.get_json()['plan_sha256'])
+            self.assertEqual(before,(self.dump(self.config.target),self.dump(self.config.control)))
+            with client.session_transaction() as browser:browser.pop('recognition_admin')
+            self.assertEqual(401,client.post(prefix+'runtime-foundation/preview',json=dict(
+                csrf_token='synthetic-csrf',operator='fixture',reason='review')).status_code)
+
     def test_crash_atomicity_delete_journals_before_and_after_commit(self):
         grant=self.approval()
         options=dict(paths=[str(self.config.target),str(self.config.control),str(self.config.key_file)],
