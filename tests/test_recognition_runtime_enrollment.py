@@ -239,7 +239,7 @@ class RuntimeEnrollmentTests(unittest.TestCase):
             admin_auth.require_recognition_admin(self.f.config,self.fixture.session,now=f.at(182))
         readiness=local_readiness.assess(self.f.config,now=f.at(182))
         self.assertFalse(readiness['activation_ready'])
-        self.assertIn('runtime_profile_contract_not_enabled',canonical(readiness))
+        self.assertIn('runtime_administrative_session_required',canonical(readiness))
         context=object.__new__(p.ProductionOperationContext)
         p._contexts[context]=dict(config=self.f.config,operation_id='synthetic',consumed=False)
         self.addCleanup(p._contexts.pop,context,None)

@@ -186,7 +186,7 @@ class RuntimeValidationTests(unittest.TestCase):
             self.assertEqual('production_execution_unavailable', result.reason)
         readiness = local_readiness.assess(self.config, now=f.at(900))
         self.assertFalse(readiness['activation_ready'])
-        self.assertIn('runtime_profile_contract_not_enabled', canonical(readiness))
+        self.assertIn('runtime_administrative_session_required', canonical(readiness))
         self.assertEqual(before, self.snapshot())
 
     def test_target_query_only_and_locks_through_commit(self):

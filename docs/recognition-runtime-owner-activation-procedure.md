@@ -7,6 +7,15 @@ required by this fix. Keep `LIVE_RECOGNITION_CAPTURE=0` throughout this procedur
 
 ## Activate
 
+Enrolled v3 installations use the existing authenticated runtime readiness path;
+there is no separate contract-enablement migration. The generic readiness HTTP
+endpoint also dispatches v3 to that path using the current primary/admin session.
+Direct `local_readiness.assess()` callers must supply both `session_token` and
+`primary_token` for v3. A tokenless legacy CLI assessment remains blocked with
+`runtime_administrative_session_required`; use the owner page instead. Runtime
+profile provenance and serving-worker identity remain mandatory. Do not rerun the
+v2-to-v3 migration to enable an already-enrolled profile.
+
 1. Sign out of the application, then sign in through its normal owner sign-in
    flow. Use your existing project-owner account.
 2. On the same application, open

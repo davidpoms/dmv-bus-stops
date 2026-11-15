@@ -236,7 +236,8 @@ def register_admin_routes(app):
     @routes.get("/readiness")
     def readiness():
         from . import local_readiness
-        return jsonify(local_readiness.assess(context(administrative=True), now=now_utc()))
+        return jsonify(local_readiness.assess(context(administrative=True, authentication_only=True), now=now_utc(),
+            session_token=session.get('recognition_admin'), primary_token=session.get('recognition_primary')))
 
     @routes.post("/activation")
     def activation():

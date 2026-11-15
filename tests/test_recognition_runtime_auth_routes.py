@@ -101,7 +101,13 @@ class RuntimeAuthRouteTests(unittest.TestCase):
         with a.connect(self.config.control) as conn:
             profile_before=tuple(conn.execute(f'SELECT * FROM {r.PROFILES}').fetchone())
             bindings_before=[tuple(row) for row in conn.execute('SELECT * FROM recognition_admin_bindings')]
-        for path in ('readiness','installation','operations/'+self.f.oid,'operations/'+self.f.oid+'/approvals'):
+        # Readiness now selects the existing runtime owner; this earlier
+        # authentication-only fixture still lacks activation/readiness storage.
+        response=self.client.get('/api/admin/recognition-control/readiness')
+        self.assertEqual(200,response.status_code,response.get_json())
+        self.assertFalse(response.get_json()['activation_ready'])
+        self.assertIn('local_readiness_install_required',response.get_json()['issues'])
+        for path in ('installation','operations/'+self.f.oid,'operations/'+self.f.oid+'/approvals'):
             with self.subTest(path=path):
                 response=self.client.get('/api/admin/recognition-control/'+path)
                 self.assertEqual(503,response.status_code,response.get_json())

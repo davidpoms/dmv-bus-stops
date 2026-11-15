@@ -343,12 +343,32 @@ def _blocked(issue):
                 production_authorization="BLOCKED", production_execution="BLOCKED", production_activation="BLOCKED")
 
 
-def assess(config, *, now, selected_provider=None):
+def assess(config, *, now, selected_provider=None, session_token=None, primary_token=None):
     # Provider selection is rejected, not adapted or substituted. It is never a
     # Flask request/configuration option and cannot grant authority.
     if selected_provider is not None:
         return _blocked("external_or_test_provider_not_permitted")
     try:
+        a.need(type(config) is a.LocalAdministration, 'local_administration_required', 503)
+        config.paths()
+        # v3 enrollment enables the existing authenticated runtime contract,
+        # never the legacy deployment-identity transaction. No fallback on an
+        # invalid/missing profile or failed runtime authentication is permitted.
+        from . import runtime_profile_schema, runtime_validation, runtime_activation
+        from .trust import load
+        with a.connect(config.control) as control:
+            control.execute('BEGIN')
+            a.schema.check_control(control)
+            bindings = [load(row[0]) for row in control.execute(
+                'SELECT body_json FROM recognition_admin_bindings ORDER BY generation')]
+            a.need(all(type(body) is dict for body in bindings), 'installation_history_integrity_failure', 503)
+            runtime = any(body.get('format') == runtime_profile_schema.V3 for body in bindings)
+            if runtime:
+                runtime_validation._history(control)
+        if runtime:
+            a.need(session_token is not None and primary_token is not None,
+                   'runtime_administrative_session_required', 401)
+            return runtime_activation.assess(config, session_token, primary_token=primary_token)
         with a.transaction(config, lock_target=True) as (control, target, binding):
             return _assess(control, target, binding, now, config=config)
     except (a.AdminError, Quarantined) as error:
