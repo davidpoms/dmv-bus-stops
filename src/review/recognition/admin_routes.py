@@ -194,6 +194,28 @@ def register_admin_routes(app):
             return jsonify(runtime_activation.assess(config, session['recognition_admin'],
                            primary_token=session['recognition_primary']))
 
+    @routes.post('/runtime-foundation/preview')
+    def runtime_foundation_preview():
+        value = data(('operator','reason'))
+        config = context(administrative=True, authentication_only=True)
+        from . import runtime_target_schema_completion as completion
+        return jsonify(completion.preview(config, session['recognition_admin'],
+            primary_token=session['recognition_primary'], operator=value['operator'], reason=value['reason']))
+
+    @routes.post('/runtime-foundation/complete')
+    def runtime_foundation_complete():
+        value = data(('serialized_approval','signature'))
+        config = context(administrative=True, authentication_only=True)
+        from . import runtime_target_schema_completion as completion
+        return jsonify(completion.complete(config, session['recognition_admin'], primary_token=session['recognition_primary'],
+            serialized_approval=value['serialized_approval'], signature=value['signature']))
+
+    @routes.get('/runtime-foundation/status')
+    def runtime_foundation_status():
+        config = context(administrative=True, authentication_only=True)
+        from . import runtime_target_schema_completion as completion
+        return jsonify(completion.inspect(config))
+
     @routes.post('/runtime-activation/confirmations')
     def runtime_activation_confirmation():
         value = data(('step_up_token',))

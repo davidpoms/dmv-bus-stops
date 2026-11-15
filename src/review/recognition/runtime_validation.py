@@ -196,8 +196,8 @@ def _identity_snapshot(config, control, target, now):
                         device=profile[prefix + '_device'], inode=profile[prefix + '_inode'])
         actual = dict(actual, device=str(actual['device']), inode=str(actual['inode']))
         a.need(actual == expected, 'runtime_profile_identity_mismatch', 503)
-    a.need(observed['schema_sha256'] == profile['target_schema_sha256'] == binding['target']['schema_sha256'],
-           'runtime_profile_schema_mismatch', 503)
+    from .runtime_target_schema_lineage import validate_target
+    validate_target(control, target, binding, profile, observed['schema_sha256'])
     metadata = target.execute(f'SELECT * FROM {schema.TARGET_TABLE}').fetchall()
     a.need(len(metadata) == 1 and all(metadata[0][k] == binding[k] for k in ('installation_id', 'target_id', 'owner_id')),
            'runtime_profile_scope_mismatch', 503)

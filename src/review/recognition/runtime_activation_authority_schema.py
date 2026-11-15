@@ -349,6 +349,9 @@ def check_manifest_transition(conn):
     from .administration_schema import _control_objects
     actual = dict(_control_objects(conn))
     expected = definitions()
+    from . import runtime_target_schema_lineage as completion
+    if completion.present(conn):
+        expected = completion.upgrade_definitions(expected)
     require(all(name in actual and ' '.join(actual[name].split()) == ' '.join(sql.split())
                 for name,sql in expected.items()), 'runtime_authority_partial_schema')
     rows = _rows(conn, ACTION)
@@ -364,12 +367,17 @@ def check_manifest_transition(conn):
     require(binding is not None and load(binding[0])['installation_id'] == subject['installation_id'], 'runtime_authority_migration_scope')
     prior = _rows(conn, claims.ACTION)
     require(len(prior) == 1 and prior[0]['sequence'] < rows[0]['sequence']
-            and _record(prior[0])['subject']['installed_schema_sha256'] == subject['previous_schema_sha256'],
+            and _record(prior[0])['subject']['installed_schema_sha256'] == completion.historical_claim_manifest(conn, subject['previous_schema_sha256']),
             'runtime_authority_migration_predecessor')
     return subject
 
 
 def historical_claim_manifest(conn, *, exclude=()):
+    from .runtime_target_schema_lineage import historical_claim_manifest as completion_manifest
+    return completion_manifest(conn, _historical_claim_manifest(conn, exclude=exclude))
+
+
+def _historical_claim_manifest(conn, *, exclude=()):
     """4d-1's original manifest, reconstructed only after verified transition."""
     from . import runtime_schema_package_lineage as lineage
     if lineage.present(conn):
@@ -439,8 +447,10 @@ def _historical_scope(conn, body):
         require(physical['hostname'] == profile['hostname'] and physical['database'] == profile[prefix+'_path']
                 and str(physical['device']) == profile[prefix+'_device'] and str(physical['inode']) == profile[prefix+'_inode'],
                 'runtime_authority_physical_scope')
-    require(body['physical_snapshot']['target']['schema_sha256'] == profile['target_schema_sha256']
-            == binding['target']['schema_sha256'], 'runtime_authority_schema_scope')
+    from .runtime_target_schema_lineage import expected_schema
+    require(binding['target']['schema_sha256'] == profile['target_schema_sha256']
+            and body['physical_snapshot']['target']['schema_sha256'] == expected_schema(conn, binding, profile),
+            'runtime_authority_schema_scope')
     act = conn.execute('SELECT * FROM recognition_local_activation WHERE sequence=?', (body['activation']['sequence'],)).fetchone()
     require(act is not None and act['body_sha256'] == body['activation']['event_sha256'], 'runtime_authority_activation_scope')
     activation = _record(act)

@@ -1,0 +1,261 @@
+"""Closed pre-activation maintenance owner. No runtime writer authority.
+
+The only attached connection belongs to this synchronous API. Normal validators
+still use isolated read-only connections; target DDL and its control audit commit
+in one rollback-journal SQLite transaction. Journal modes are never changed.
+"""
+
+from contextlib import contextmanager, closing
+from dataclasses import asdict
+from datetime import timedelta
+from pathlib import Path
+import sqlite3
+import tempfile
+
+from . import administration as a, admin_auth as auth, runtime_auth
+from . import runtime_validation as runtime, runtime_activation as owner, local_readiness
+from . import event_schema, execution_schema, runtime_target_schema_lineage as lineage
+from . import runtime_execution_claim_schema as claims, runtime_production_governance as governance
+from .rules import canonical, digest
+from .trust import require, load, utc
+
+
+ALIAS = 'completion_target'
+
+
+def _objects(conn, namespace='main'):
+    require(namespace in ('main', ALIAS), 'foundation_namespace')
+    return [list(row) for row in conn.execute(
+        f"SELECT type,name,tbl_name,sql FROM {namespace}.sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name")]
+
+
+def _fingerprint(conn, namespace):
+    return digest(dict(objects=_objects(conn, namespace),
+        application_id=conn.execute(f'PRAGMA {namespace}.application_id').fetchone()[0],
+        user_version=conn.execute(f'PRAGMA {namespace}.user_version').fetchone()[0]))
+
+
+def _data(conn, namespace='main'):
+    # Internal table identifiers only; exact typed contents never leave this API.
+    result = []
+    for row in _objects(conn, namespace):
+        if row[0] == 'table' and row[1] not in event_schema.TABLES:
+            quoted = '"'+row[1].replace('"','""')+'"'
+            result.append((row[1], sorted(repr(tuple(value)) for value in conn.execute(f'SELECT * FROM {namespace}.{quoted}'))))
+    return digest(result)
+
+
+def _journal(conn, namespace='main'):
+    require(conn.execute(f'PRAGMA {namespace}.journal_mode').fetchone()[0].lower() == 'delete',
+            'foundation_delete_journal_required')
+
+
+def _session(config, control, target, session, primary):
+    now = runtime._utc_now()
+    scope = runtime._identity_snapshot(config, control, target, now)
+    binding, profile, head = runtime._history(control)
+    p = auth._primary(control, target, binding, primary, now)
+    s, mfa = auth._session(control, target, binding, session, now)
+    require(s['primary_hash'] == p['token_hash'], 'foundation_session_mismatch')
+    runtime_auth._scope(control, scope, 'primary', p, now)
+    runtime_auth._scope(control, scope, 'session', s, now)
+    return binding, profile, head, scope, p, s, mfa
+
+
+def _plan(config, control, target, session, primary, *, operator, reason, created_at=None, deadline=None):
+    runtime.enrollment._text(operator, 200); runtime.enrollment._text(reason, 2000)
+    binding, profile, head, scope, p, s, mfa = _session(config, control, target, session, primary)
+    require(type(binding['generation']) is int and binding['generation'] == 5, 'foundation_generation_required')
+    require(not lineage.present(control), 'foundation_already_completed')
+    require(binding['production_state'] == 'NOT_ACTIVATED'
+            and local_readiness._state(control,binding)['state'] == 'NOT_ACTIVATED', 'foundation_requires_not_activated')
+    _journal(control); _journal(target)
+    original = dict((row[1],row[3]) for row in _objects(control))
+    require(lineage.normalized_manifest(original) == lineage.normalized_manifest(lineage.source_definitions()),
+            'foundation_source_control_topology')
+    require(not any(row[1] in event_schema.definitions() for row in _objects(target)), 'foundation_event_objects_already_present')
+    # No live execution/operation continuation can be carried over this edge.
+    for name in ('recognition_operation_contracts','recognition_execution_claims',
+                 'recognition_execution_seals','recognition_operation_receipts'):
+        require(not target.execute('SELECT 1 FROM '+name+' LIMIT 1').fetchone(), 'foundation_existing_operation')
+    for name in (claims.CLAIMS, claims.HISTORY):
+        require(not control.execute('SELECT 1 FROM '+name+' LIMIT 1').fetchone(), 'foundation_existing_claim')
+    for path in (config.control,config.target):
+        # integrity_check may initialize TEMP; do not contaminate the ordinary
+        # isolated validation connections with that implementation detail.
+        with a.connect(path) as check:
+            require([row[0] for row in check.execute('PRAGMA integrity_check')] == ['ok']
+                    and not check.execute('PRAGMA foreign_key_check').fetchone(), 'foundation_integrity_failure')
+    # Backup through a separate RO reader: backing up an active writer connection
+    # can wait on its own reservation. The runtime owner already holds both writers.
+    with tempfile.TemporaryDirectory(prefix='recognition-foundation-preview-') as directory:
+        preview_path = Path(directory)/'preview.db'
+        with a.connect(config.target) as reader, closing(sqlite3.connect(preview_path)) as preview:
+            reader.backup(preview)
+            preview.row_factory = sqlite3.Row
+            preview.execute('PRAGMA foreign_keys=ON')
+            require(_fingerprint(preview,'main') == profile['target_schema_sha256'], 'foundation_preview_source_mismatch')
+            preview.execute('BEGIN')
+            for sql in event_schema.definitions().values():
+                preview.execute(sql)
+            execution_schema.check_schema(preview)  # All readiness target schemas, not just event tables.
+            assessment = local_readiness._assess_inventory(control,preview,binding,runtime._utc_now(),config=config)
+            require(assessment['activation_ready'], 'foundation_other_readiness_prerequisites')
+            h1 = _fingerprint(preview,'main')
+    now = runtime._utc_now()
+    created_at = now if created_at is None else created_at
+    limit = min(a.timestamp(created_at)+auth.RECENT_SECONDS, p['expires'], s['expires'])
+    end = utc(created_at)+timedelta(seconds=limit-a.timestamp(created_at))
+    deadline = end.strftime('%Y-%m-%dT%H:%M:%SZ') if deadline is None else deadline
+    require(a.timestamp(created_at) <= a.timestamp(now) < a.timestamp(deadline) <= limit, 'foundation_plan_expired')
+    plan = dict(format='recognition-target-schema-completion-plan-v1', package=lineage.PACKAGE,
+        installation_id=binding['installation_id'],target_id=binding['target_id'],owner_id=binding['owner_id'],generation=5,
+        binding_sha256=digest(binding),profile_sha256=profile['profile_sha256'],
+        enrollment_audit_sha256=control.execute('SELECT body_sha256 FROM recognition_admin_audit WHERE sequence=?',
+                                              (profile['audit_sequence'],)).fetchone()[0],
+        h0=profile['target_schema_sha256'],h1=h1,control_before_sha256=lineage.normalized_manifest(original),
+        control_after_sha256=lineage.normalized_manifest(lineage.upgrade_definitions(original)),
+        definitions_sha256=digest(event_schema.definitions()),
+        physical=dict(target=asdict(a.target_identity(target)),control=asdict(a.target_identity(control))),
+        auth_epoch=scope['auth_epoch'],mfa_epoch=mfa['epoch'],owner_key_sha256=scope['owner_key_sha256'],
+        target_data_sha256=_data(target),readiness_sha256=digest(local_readiness._assessment_binding(assessment)),
+        source_audit_sha256=head['body_sha256'],operator=operator,reason=reason,
+        created_at_utc=created_at,deadline_at_utc=deadline)
+    lineage.validate_plan(plan)
+    return plan
+
+
+def preview(config, session_token, *, primary_token, operator, reason):
+    with owner._transaction(config) as context:
+        owner._view(context).validate_session(session_token, primary_token=primary_token)
+        with a.connect(config.control) as control, a.connect(config.target) as target:
+            control.execute('BEGIN');target.execute('BEGIN')
+            plan = _plan(config,control,target,session_token,primary_token,operator=operator,reason=reason)
+    return dict(plan=plan,plan_sha256=digest(plan),execution_authority=False)
+
+
+def _authorizer(action, first, second, database, source):
+    writes = {sqlite3.SQLITE_INSERT,sqlite3.SQLITE_UPDATE,sqlite3.SQLITE_DELETE}
+    if action in writes:
+        return sqlite3.SQLITE_OK if ((first == 'sqlite_master' and database in ('main',ALIAS))
+            or (action == sqlite3.SQLITE_INSERT and database == 'main' and first == 'recognition_admin_audit')) else sqlite3.SQLITE_DENY
+    allowed = {
+        sqlite3.SQLITE_CREATE_TABLE: database == ALIAS and first in event_schema.TABLES,
+        sqlite3.SQLITE_CREATE_INDEX: database == ALIAS and second in event_schema.TABLES and first.startswith('sqlite_autoindex_'),
+        sqlite3.SQLITE_CREATE_TRIGGER: (database == ALIAS and first in event_schema.definitions())
+            or (database == 'main' and first == claims.CLAIMS+'_scope_guard'),
+        sqlite3.SQLITE_DROP_TRIGGER: database == 'main' and first == claims.CLAIMS+'_scope_guard',
+    }
+    if action in allowed:
+        return sqlite3.SQLITE_OK if allowed[action] else sqlite3.SQLITE_DENY
+    forbidden = {sqlite3.SQLITE_ATTACH,sqlite3.SQLITE_DETACH,sqlite3.SQLITE_ALTER_TABLE,
+                 sqlite3.SQLITE_DROP_TABLE,sqlite3.SQLITE_DROP_INDEX,sqlite3.SQLITE_CREATE_VIEW,sqlite3.SQLITE_DROP_VIEW,
+                 sqlite3.SQLITE_CREATE_VTABLE,sqlite3.SQLITE_DROP_VTABLE,
+                 sqlite3.SQLITE_CREATE_TEMP_TABLE,sqlite3.SQLITE_CREATE_TEMP_TRIGGER,sqlite3.SQLITE_CREATE_TEMP_VIEW,
+                 sqlite3.SQLITE_CREATE_TEMP_INDEX,sqlite3.SQLITE_DROP_TEMP_TABLE,sqlite3.SQLITE_DROP_TEMP_TRIGGER,
+                 sqlite3.SQLITE_DROP_TEMP_VIEW,sqlite3.SQLITE_DROP_TEMP_INDEX}
+    if action in forbidden:
+        return sqlite3.SQLITE_DENY
+    if action == sqlite3.SQLITE_PRAGMA:
+        return sqlite3.SQLITE_OK if first in ('database_list','application_id','user_version','foreign_key_check','journal_mode','synchronous') and second is None else sqlite3.SQLITE_DENY
+    return sqlite3.SQLITE_OK
+
+
+@contextmanager
+def _attached(config):
+    # No supplied filename/namespace/SQL. Ordinary connection owners never see this handle.
+    config.paths()
+    require(config.target.resolve() != config.control.resolve(), 'foundation_distinct_files_required')
+    with a.connect(config.control,write=True) as db:
+        _journal(db)
+        db.execute('ATTACH DATABASE ? AS '+ALIAS, (config.target.resolve().as_uri()+'?mode=rw',))
+        _journal(db,ALIAS)
+        db.execute('PRAGMA '+ALIAS+'.synchronous=FULL')
+        require(db.execute('PRAGMA foreign_keys').fetchone()[0] == 1, 'foundation_foreign_keys_required')
+        db.execute('BEGIN IMMEDIATE')
+        require([(row[1],str(Path(row[2]).resolve())) for row in db.execute('PRAGMA database_list')]
+                == [('main',str(config.control.resolve())),(ALIAS,str(config.target.resolve()))], 'foundation_database_scope')
+        yield db
+
+
+def _install(db):
+    for name, sql in event_schema.definitions().items():
+        verb = 'CREATE TABLE ' if name in event_schema.TABLES else 'CREATE TRIGGER '
+        require(sql.startswith(verb+name+' '), 'foundation_package_definition_changed')
+        db.execute(sql.replace(verb+name+' ',verb+ALIAS+'.'+name+' ',1))
+    guard = claims.CLAIMS+'_scope_guard'
+    db.execute('DROP TRIGGER main.'+guard)
+    sql = lineage.upgrade_definitions(claims.definitions())[guard]
+    db.execute(sql.replace('CREATE TRIGGER '+guard+' ','CREATE TRIGGER main.'+guard+' ',1))
+
+
+def _validate_after(db, plan):
+    require(_fingerprint(db,ALIAS) == plan['h1'] and _data(db,ALIAS) == plan['target_data_sha256'],
+            'foundation_target_changed')
+    require(lineage.normalized_manifest({row[1]:row[3] for row in _objects(db)}) == plan['control_after_sha256'],
+            'foundation_control_changed')
+    for name in event_schema.TABLES:
+        require(db.execute('SELECT COUNT(*) FROM '+ALIAS+'.'+name).fetchone()[0] == 0, 'foundation_created_target_data')
+    require(not db.execute('PRAGMA '+ALIAS+'.foreign_key_check').fetchone(), 'foundation_foreign_key_failure')
+
+
+def _commit(db):
+    db.commit()
+
+
+def complete(config, session_token, *, primary_token, serialized_approval, signature):
+    # Existing public authentication preserves its normal denial semantics. The
+    # reserved recheck below is RO and cannot update credentials or MFA counters.
+    owner.require_recognition_admin(config,session_token,primary_token=primary_token)
+    require(type(serialized_approval) is str and len(serialized_approval.encode('utf-8')) <= 65536
+            and type(signature) is str and len(signature) == 88, 'foundation_approval_encoding')
+    root, approval, _ = governance._verify(config,serialized_approval,signature)
+    require(approval['subject']['kind'] == lineage.KIND, 'foundation_approval_purpose')
+    plan = approval['subject']['plan']; lineage.validate_plan(plan)
+    require(approval['holder'] == dict(actor_id=plan['owner_id'],primary_sha256=a.token_hash(primary_token),
+                                     session_sha256=a.token_hash(session_token)), 'foundation_approval_holder')
+    from .runtime_execution_claims import _Clock
+    clock = _Clock()
+    with _attached(config) as db:
+        with a.connect(config.control) as control, a.connect(config.target) as target:
+            control.execute('BEGIN');target.execute('BEGIN')
+            current = _plan(config,control,target,session_token,primary_token,operator=plan['operator'],reason=plan['reason'],
+                            created_at=plan['created_at_utc'],deadline=plan['deadline_at_utc'])
+            require(current == plan, 'foundation_plan_changed')
+        db.set_authorizer(_authorizer)
+        _install(db)
+        _validate_after(db,plan)
+        governance._verify(config,serialized_approval,signature)
+        now = runtime._utc_now()
+        require(a.timestamp(now) < a.timestamp(plan['deadline_at_utc']), 'foundation_plan_expired')
+        a._audit(db,lineage.ACTION,plan['owner_id'],now,
+                 dict(package=lineage.PACKAGE,plan=plan,plan_sha256=digest(plan),approval=serialized_approval,
+                      signature=signature,state='CONSUMED'))
+        lineage.verify(db)
+        for key,path in (('control',config.control),('target',config.target)):
+            require(asdict(a.target_identity(path)) == plan['physical'][key], 'foundation_physical_changed')
+        clock.read()
+        require(a.timestamp(runtime._utc_now()) < min(a.timestamp(plan['deadline_at_utc']),a.timestamp(approval['expires_at_utc'])),
+                'foundation_approval_expired')
+        _commit(db)
+        require(not db.in_transaction, 'foundation_commit_unconfirmed')
+    with a.connect(config.control) as control, a.connect(config.target) as target:
+        control.execute('BEGIN');target.execute('BEGIN')
+        runtime._identity_snapshot(config,control,target,runtime._utc_now())
+        execution_schema.check_schema(target)
+    return dict(package=lineage.PACKAGE,generation=5,state='COMPLETED',schema_sha256=plan['h1'],
+                production_state='NOT_ACTIVATED',execution_authority=False)
+
+
+def inspect(config):
+    config.paths()
+    with a.connect(config.control) as control, a.connect(config.target) as target:
+        control.execute('BEGIN'); target.execute('BEGIN')
+        binding, profile, _ = runtime._history(control)
+        plan = lineage.verify(control)
+        actual = a.observe_target(target)['schema_sha256']
+        lineage.validate_target(control,target,binding,profile,actual)
+        return dict(state='COMPLETED' if plan else 'NOT_COMPLETED',generation=binding['generation'],
+                    profile_sha256=profile['profile_sha256'],enrolled_schema_sha256=profile['target_schema_sha256'],
+                    current_schema_sha256=actual,activation_state=local_readiness._state(control,binding)['state'],
+                    execution_authority=False)

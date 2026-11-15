@@ -86,6 +86,14 @@ def _verify(config,serialized,signature):
             operation_sha256=subject['authority_sha256'],policy_sha256=digest('runtime-finalization-inspection-v1'),
             population_sha256=None,reference=subject['authority_id'])]
         target=body['target']
+    elif subject.get('kind') == 'target_event_foundation_completion':
+        from . import runtime_target_schema_lineage as completion, event_schema
+        fields(subject, ('kind','plan'))
+        completion.validate_plan(subject['plan'])
+        require(subject['plan']['physical'] == dict(target=body['target'], control=body['control'])
+                and subject['plan']['binding_sha256'] == body['binding_sha256'], 'foundation_approval_scope')
+        expected=[dict(**authorization.migration_binding(completion.PACKAGE,event_schema.definitions()),reference=contract.MANDATE)]
+        target=body['target']
     else:
         from . import runtime_finalization_schema_upgrade as upgrade
         fields(subject,('kind',));require(subject['kind']=='journal_install','production_governance_subject')
@@ -104,6 +112,7 @@ def provision(config=None,session=None,*,primary_token=None,serialized=None,sign
     if type(config) is not a.LocalAdministration:
         raise authorization.AuthorizationError('production_authority_not_provisioned')
     config.paths();root,body,approvals=_verify(config,serialized,signature)
+    require(body['subject']['kind'] != 'target_event_foundation_completion', 'foundation_original_maintenance_owner_required')
     # Existing 3a/3b kernels independently authenticate current owner/profile.
     # A signed deployment artifact alone is not a login credential or source.
     from . import runtime_finalization as owner

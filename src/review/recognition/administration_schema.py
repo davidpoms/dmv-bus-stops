@@ -93,6 +93,9 @@ def check_control(conn):
         expected.update(transition.definitions())
         from . import runtime_finalization_schema_upgrade as finalization
         if finalization.present(conn):expected.update(finalization.definitions())
+    from . import runtime_target_schema_lineage as completion
+    if completion.present(conn):
+        expected = completion.upgrade_definitions(expected)
     require(set(actual) == set(expected) and all(" ".join(actual[n].split()) == " ".join(s.split())
             for n, s in expected.items()), "administration_schema_mismatch")
     require(len(conn.execute("PRAGMA database_list").fetchall()) == 1, "isolated_admin_control_required")

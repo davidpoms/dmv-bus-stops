@@ -222,9 +222,11 @@ def check_rows(conn):
         snapshot = value['target_snapshot']
         fields(snapshot, ('target','control_identity'))
         fields(snapshot['target'], ('observation','schema_sha256'))
+        from .runtime_target_schema_lineage import expected_schema
         require(digest(snapshot) == value['target_snapshot_sha256']
-                and snapshot['target']['schema_sha256'] == profile['target_schema_sha256']
-                == bound['target']['schema_sha256'], 'runtime_execution_claim_target_snapshot')
+                and bound['target']['schema_sha256'] == profile['target_schema_sha256']
+                and snapshot['target']['schema_sha256'] == expected_schema(conn, bound, profile),
+                'runtime_execution_claim_target_snapshot')
         for prefix, physical in (('target',snapshot['target']['observation']),('control',snapshot['control_identity'])):
             runtime._physical(physical)
             require(physical['hostname'] == profile['hostname'] and physical['database'] == profile[prefix+'_path']

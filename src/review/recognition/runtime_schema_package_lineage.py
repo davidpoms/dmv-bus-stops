@@ -162,6 +162,20 @@ def verify(conn):
                 k: v for k, v in baseline.items() if k not in claims.definitions()})
             and roots[0]['sequence'] < edges['A']['sequence'], 'lineage_claim_anchor')
     state = dict(baseline)
+    # The target completion is a verified intervening control-guard edge. Keep
+    # the original claim anchor at C0; later packages must start at its exact C1.
+    from . import runtime_target_schema_lineage as foundation
+    completion = foundation.verify(conn)
+    if completion is not None:
+        completed = authority._rows(conn, foundation.ACTION)[0]
+        require(roots[0]['sequence'] < completed['sequence'] < edges['A']['sequence'],
+                'lineage_foundation_order')
+        require(digest(state) == completion['control_before_sha256'], 'lineage_foundation_source')
+        state = _normalized(foundation.upgrade_definitions(state))
+        require(digest(state) == completion['control_after_sha256'], 'lineage_foundation_successor')
+        for key in ('A', 'L'):
+            migration, action, definitions = packages[key]
+            packages[key] = (migration, action, foundation.upgrade_definitions(definitions))
     seen = set()
     for key, edge in sorted(edges.items(), key=lambda item: item[1]['sequence']):
         required = dict(A=set(), T={'A'}, E={'T'}, L={'A'}, J={'A','T','E','L'})[key]
@@ -173,7 +187,7 @@ def verify(conn):
                     'journal_original_guard_mismatch')
             require(not (set(definitions)-{finalization.GUARD}).intersection(state),'lineage_package_collision')
         elif key == 'L':
-            original = _normalized(authority.definitions())
+            original = _normalized(packages['A'][2])
             require(all(state.get(n) == sql for n, sql in original.items()), 'lineage_original_schema')
             require(set(definitions) == set(original), 'lineage_successor_object_set')
         else:
