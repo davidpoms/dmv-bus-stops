@@ -8,6 +8,7 @@ from weakref import WeakKeyDictionary
 from . import administration as a, admin_auth as auth, runtime_auth as ra
 from . import runtime_validation as v, runtime_scope_validation as shared
 from . import local_readiness as readiness
+from . import readiness_diagnostics as diagnostics
 from .rules import digest
 from .trust import load
 
@@ -63,8 +64,9 @@ def _state(context):
 
 def _read_parts(context):
     state = _state(context)
-    a.need(v._identity_snapshot(state.config, state.control, state.target, v._utc_now()) == state.snapshot,
-           'runtime_validation_changed', 503)
+    with diagnostics.stage('runtime_identity_validation'):
+        a.need(v._identity_snapshot(state.config, state.control, state.target, v._utc_now()) == state.snapshot,
+               'runtime_validation_changed', 503)
     a.need(readiness._state(state.control, state.binding) == state.activation,
            'activation_incarnation_changed', 503)
     return state.kernel_control, state.body_target, state.binding, state.snapshot
@@ -102,7 +104,8 @@ def _transaction(config):
     outcome = dict(committed=False)
     with v._owned_connection(config.control, outcome) as control:
         control.execute('BEGIN IMMEDIATE')
-        v._history(control)
+        with diagnostics.stage('history_validation'):
+            v._history(control)
         with v._owned_connection(config.target, outcome) as target:
             target.execute('BEGIN IMMEDIATE')
             target.execute('PRAGMA query_only=ON')
@@ -114,7 +117,8 @@ def _transaction(config):
             state.clock.read()
             state.config, state.ceremony = config, False
             state.started_at = a.timestamp(v._utc_now())
-            state.snapshot = v._identity_snapshot(config, control, target, v._utc_now())
+            with diagnostics.stage('runtime_identity_validation'):
+                state.snapshot = v._identity_snapshot(config, control, target, v._utc_now())
             state.binding = load(control.execute('SELECT body_json FROM recognition_admin_bindings '
                                                 'ORDER BY generation DESC LIMIT 1').fetchone()[0])
             state.activation = readiness._state(control, state.binding)
@@ -263,11 +267,15 @@ def require_recognition_admin(config, session_token, *, primary_token, now=None)
 def _assessment(context, session, primary):
     from . import runtime_claim_disposition as disposition
     state = _state(context)
-    binding, profile, head = v._history(state.control)
-    inventory = disposition._inspect_reserved(state.control, binding, profile, head, state.clock)
-    a.need(not any(row['blocks_readiness'] for row in inventory['claims']),
-           'activation_claim_disposition_blocked', 503)
-    return readiness._assess_activation(_view(context), session, primary)
+    with diagnostics.stage('history_validation'):
+        binding, profile, head = v._history(state.control)
+    with diagnostics.stage('claim_inspection'):
+        inventory = disposition._inspect_reserved(state.control, binding, profile, head, state.clock)
+        a.need(not any(row['blocks_readiness'] for row in inventory['claims']),
+               'activation_claim_disposition_blocked', 503)
+    with diagnostics.stage('authentication'):
+        view = _view(context)
+    return readiness._assess_activation(view, session, primary)
 
 
 def inspect(config, session_token, *, primary_token):
@@ -279,6 +287,7 @@ def inspect(config, session_token, *, primary_token):
     return result
 
 
+@diagnostics.assessment()
 def assess(config, session_token, *, primary_token):
     with _transaction(config) as context:
         result = _assessment(context, session_token, primary_token)

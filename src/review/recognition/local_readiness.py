@@ -8,6 +8,7 @@ from . import administration as a, admin_auth as auth, approvals, execution as j
 from . import events, operations, production_operations, local_execution, writer_boundary, permanent
 from .rules import canonical, digest
 from .qualification import Quarantined
+from . import readiness_diagnostics as diagnostics
 
 
 STATES = {"NOT_ACTIVATED", "ACTIVATED", "SUSPENDED", "DEACTIVATED", "RECOVERY_REQUIRED"}
@@ -103,11 +104,13 @@ def _assess(control, target, binding, now, *, config, exclude_operation_id=None)
 def _assess_activation(view, session_token, primary_token):
     """Exact runtime activation owner, including pre-activation inventory."""
     from . import runtime_activation as owner, runtime_scope_validation as shared
-    context, (control, _, binding, _), _ = shared._view_parts(view)
-    state = owner._state(context)
-    view.validate_session(session_token, primary_token=primary_token)
-    return _assess_inventory(control, state.target, binding, owner.v._utc_now(), config=state.config,
-                             runtime=(view, session_token, primary_token))
+    with diagnostics.stage('authentication'):
+        context, (control, _, binding, _), _ = shared._view_parts(view)
+        state = owner._state(context)
+        view.validate_session(session_token, primary_token=primary_token)
+    with diagnostics.stage('readiness_inventory'):
+        return _assess_inventory(control, state.target, binding, owner.v._utc_now(), config=state.config,
+                                 runtime=(view, session_token, primary_token))
 
 
 def _assess_runtime(view, session_token, primary_token):
@@ -343,6 +346,7 @@ def _blocked(issue):
                 production_authorization="BLOCKED", production_execution="BLOCKED", production_activation="BLOCKED")
 
 
+@diagnostics.assessment()
 def assess(config, *, now, selected_provider=None, session_token=None, primary_token=None):
     # Provider selection is rejected, not adapted or substituted. It is never a
     # Flask request/configuration option and cannot grant authority.
@@ -356,7 +360,7 @@ def assess(config, *, now, selected_provider=None, session_token=None, primary_t
         # invalid/missing profile or failed runtime authentication is permitted.
         from . import runtime_profile_schema, runtime_validation, runtime_activation
         from .trust import load
-        with a.connect(config.control) as control:
+        with diagnostics.stage('history_validation'), a.connect(config.control) as control:
             control.execute('BEGIN')
             a.schema.check_control(control)
             bindings = [load(row[0]) for row in control.execute(

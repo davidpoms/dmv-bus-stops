@@ -31,9 +31,9 @@ def revoke_admin_login():
 
 def authentication_backend(config):
     """Durable format dispatch for authentication only; no fallback on failure."""
-    from . import administration_schema, runtime_profile_schema
+    from . import administration_schema, runtime_profile_schema, readiness_diagnostics
     from .trust import load
-    with a.connect(config.control) as conn:
+    with readiness_diagnostics.stage('history_validation'), a.connect(config.control) as conn:
         administration_schema.check_control(conn)
         rows = conn.execute('SELECT body_json FROM recognition_admin_bindings ORDER BY generation').fetchall()
         a.need(bool(rows), 'installation_not_initialized', 503)
@@ -185,11 +185,14 @@ def register_admin_routes(app):
 
     @routes.get('/runtime-activation/readiness')
     def runtime_activation_readiness():
-        config = context(administrative=True, authentication_only=True)
-        from . import runtime_activation
-        a.need(authentication_backend(config) is runtime_activation, 'runtime_profile_required')
-        return jsonify(runtime_activation.assess(config, session['recognition_admin'],
-                       primary_token=session['recognition_primary']))
+        from . import readiness_diagnostics
+        with readiness_diagnostics.assessment():
+            with readiness_diagnostics.stage('authentication'):
+                config = context(administrative=True, authentication_only=True)
+                from . import runtime_activation
+                a.need(authentication_backend(config) is runtime_activation, 'runtime_profile_required')
+            return jsonify(runtime_activation.assess(config, session['recognition_admin'],
+                           primary_token=session['recognition_primary']))
 
     @routes.post('/runtime-activation/confirmations')
     def runtime_activation_confirmation():
@@ -235,9 +238,12 @@ def register_admin_routes(app):
 
     @routes.get("/readiness")
     def readiness():
-        from . import local_readiness
-        return jsonify(local_readiness.assess(context(administrative=True, authentication_only=True), now=now_utc(),
-            session_token=session.get('recognition_admin'), primary_token=session.get('recognition_primary')))
+        from . import local_readiness, readiness_diagnostics
+        with readiness_diagnostics.assessment():
+            with readiness_diagnostics.stage('authentication'):
+                config = context(administrative=True, authentication_only=True)
+            return jsonify(local_readiness.assess(config, now=now_utc(),
+                session_token=session.get('recognition_admin'), primary_token=session.get('recognition_primary')))
 
     @routes.post("/activation")
     def activation():
