@@ -132,22 +132,73 @@ class RuntimeReadinessDiagnosticTests(unittest.TestCase):
                      patch.object(diagnostics._logger, 'warning', side_effect=RuntimeError(SECRET) if sink_fails else None) as log:
                     response = client.get('/api/admin/recognition-control/runtime-activation/readiness')
                     self.assertEqual(503, response.status_code)
-                    self.assertEqual({'error': 'administrative_control_unavailable'}, response.get_json())
+                    self.assertEqual({'error': 'administrative_control_unavailable', 'diagnostic': dict(
+                        stage='readiness_inventory', failure_class='trust_validation_failed')}, response.get_json())
                     self.assertNotIn(SECRET, repr(log.call_args))
                     self.assertEqual('readiness_inventory', json.loads(log.call_args.args[1])['stage'])
             with patch.object(runtime, '_identity_snapshot', side_effect=a.AdminError('runtime_profile_identity_mismatch', 503)), \
                  patch.object(diagnostics._logger, 'warning') as log:
                 response = client.get('/api/admin/recognition-control/runtime-activation/readiness')
                 self.assertEqual(503, response.status_code)
-                self.assertEqual({'error': 'runtime_profile_identity_mismatch'}, response.get_json())
+                self.assertEqual({'error': 'runtime_profile_identity_mismatch', 'diagnostic': dict(
+                    stage='runtime_identity_validation', failure_class='runtime_profile_identity_mismatch')}, response.get_json())
                 self.assertEqual('runtime_identity_validation', json.loads(log.call_args.args[1])['stage'])
             with patch.object(a.schema, 'check_control', side_effect=TrustError(SECRET)), \
                  patch.object(diagnostics._logger, 'warning') as log:
                 response = client.get('/api/admin/recognition-control/runtime-activation/readiness')
-                self.assertEqual({'error': 'administrative_control_unavailable'}, response.get_json())
+                self.assertEqual({'error': 'administrative_control_unavailable', 'diagnostic': dict(
+                    stage='history_validation', failure_class='trust_validation_failed')}, response.get_json())
                 self.assertEqual(503, response.status_code)
                 self.assertEqual('history_validation', json.loads(log.call_args.args[1])['stage'])
         self.assertEqual(before, self.f.snapshot())
+
+    def test_both_owner_actions_report_shared_context_failures(self):
+        from flask import Flask
+        from src.review import admin_dashboard
+        from src.review.recognition import admin_routes, runtime_target_schema_completion as completion
+        app = Flask(__name__)
+        app.config.update(TESTING=True, SECRET_KEY='disposable-shared-context-test')
+        admin_routes.register_admin_routes(app)
+        client = app.test_client()
+        with client.session_transaction() as browser:
+            browser.update(authenticated_reviewer_id=1, reviewer_key='owner-key', auth_csrf='test-csrf',
+                           recognition_primary=self.f.primary, recognition_admin=self.f.session)
+        before = self.f.snapshot()
+        cases = [(admin_routes, 'configuration', OSError(SECRET), 'configuration', 'filesystem_access_failed'),
+                 (a, 'connect', OSError(SECRET), 'owner_access', 'filesystem_access_failed'),
+                 (admin_dashboard, 'owner_access', ValueError(SECRET), 'owner_access', 'validation_failed'),
+                 (admin_routes, 'authentication_backend', sqlite3.DatabaseError(SECRET), 'authentication', 'database_access_failed'),
+                 (owner, 'get_admin_identity', ImportError(SECRET), 'authentication', 'dependency_import_failed')]
+        with patch.object(admin_routes, 'configuration', return_value=self.f.config):
+            for module, name, error, stage, classification in cases:
+                with self.subTest(stage=stage, operation=name), patch.object(module, name, side_effect=error), \
+                     patch.object(completion, 'preview') as preview, patch.object(owner, 'assess') as assess, \
+                     patch.object(diagnostics._logger, 'warning'):
+                    responses = [client.post('/api/admin/recognition-control/runtime-foundation/preview',
+                        json=dict(csrf_token='test-csrf', operator='fixture', reason='review')),
+                        client.get('/api/admin/recognition-control/runtime-activation/readiness')]
+                    for response in responses:
+                        self.assertEqual(503, response.status_code)
+                        self.assertEqual(dict(error='administrative_control_unavailable', diagnostic=dict(
+                            stage=stage, failure_class=classification)), response.get_json())
+                        self.assertNotIn(SECRET, response.get_data(as_text=True))
+                        self.assertEqual('no-store', response.headers['Cache-Control'])
+                    preview.assert_not_called()
+                    assess.assert_not_called()
+                    self.assertIsNone(diagnostics._scope.get())
+                self.assertEqual(before, self.f.snapshot())
+
+            for actor, key in ((None, 'owner-key'), (1, 'wrong-owner-key')):
+                with client.session_transaction() as browser:
+                    browser.update(authenticated_reviewer_id=actor, reviewer_key=key)
+                responses = [client.post('/api/admin/recognition-control/runtime-foundation/preview',
+                    json=dict(csrf_token='test-csrf', operator='fixture', reason='review')),
+                    client.get('/api/admin/recognition-control/runtime-activation/readiness')]
+                for response in responses:
+                    self.assertEqual(403, response.status_code)
+                    self.assertEqual(dict(error='recognition_owner_required', diagnostic=dict(
+                        stage='owner_access', failure_class='administration_denied')), response.get_json())
+                self.assertEqual(before, self.f.snapshot())
 
     def test_generic_readiness_blocked_payload_unchanged(self):
         with patch.object(readiness, '_assess_inventory', side_effect=TrustError(SECRET)), \

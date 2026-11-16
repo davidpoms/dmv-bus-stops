@@ -78,7 +78,7 @@ def register_admin_routes(app):
 
     def error_payload(code):
         payload = dict(error=code)
-        diagnostic = getattr(g, 'recognition_foundation_diagnostic', None)
+        diagnostic = getattr(g, 'recognition_control_diagnostic', None)
         if diagnostic is not None:
             payload['diagnostic'] = diagnostic
         return payload
@@ -196,13 +196,17 @@ def register_admin_routes(app):
     @routes.get('/runtime-activation/readiness')
     def runtime_activation_readiness():
         from . import readiness_diagnostics
-        with readiness_diagnostics.assessment():
-            with readiness_diagnostics.stage('authentication'):
-                config = context(administrative=True, authentication_only=True)
-                from . import runtime_activation
-                a.need(authentication_backend(config) is runtime_activation, 'runtime_profile_required')
-            return jsonify(runtime_activation.assess(config, session['recognition_admin'],
-                           primary_token=session['recognition_primary']))
+        with readiness_diagnostics.assessment() as diagnostic_scope:
+            try:
+                with readiness_diagnostics.stage('authentication'):
+                    config = context(administrative=True, authentication_only=True)
+                    from . import runtime_activation
+                    a.need(authentication_backend(config) is runtime_activation, 'runtime_profile_required')
+                return jsonify(runtime_activation.assess(config, session['recognition_admin'],
+                               primary_token=session['recognition_primary']))
+            except Exception:
+                g.recognition_control_diagnostic = diagnostic_scope.get('diagnostic')
+                raise
 
     @routes.post('/runtime-foundation/preview')
     def runtime_foundation_preview():
@@ -220,7 +224,7 @@ def register_admin_routes(app):
             except Exception:
                 # The assessment ContextVar resets before Flask handles the error.
                 # Copy only the fixed classification, never the exception itself.
-                g.recognition_foundation_diagnostic = diagnostic_scope.get('diagnostic')
+                g.recognition_control_diagnostic = diagnostic_scope.get('diagnostic')
                 raise
 
     @routes.post('/runtime-foundation/complete')

@@ -22,6 +22,49 @@ if not CHROME and os.name == 'nt':
 
 @unittest.skipUnless(CHROME, 'Local Chrome/Chromium required; no browser dependency downloaded')
 class MfaBrowserTests(unittest.TestCase):
+    def test_both_owner_actions_display_only_response_diagnostic_fields(self):
+        fake_api = r"""
+<script>
+const requests = [];
+let withDiagnostic = true;
+window.fetch = async (url, options = {}) => {
+  const path = url.split('/recognition-control/')[1];
+  requests.push(path);
+  if (path === 'mfa/state') return {ok:true,json:async()=>({state:'ENROLLED',pending_expired:false})};
+  if (!['runtime-foundation/preview','runtime-activation/readiness'].includes(path)) throw Error('Unexpected endpoint');
+  const value = {error:'administrative_control_unavailable',private_data:'SENTINEL_SECRET'};
+  if (withDiagnostic) value.diagnostic = {stage:'owner_access',failure_class:'validation_failed',private_data:'SENTINEL_SECRET'};
+  return {ok:false,status:503,json:async()=>value};
+};
+console.log = console.warn = console.error = () => {throw Error('Unexpected logging');};
+</script>
+"""
+        scenario = r"""
+<script>
+(async () => {
+  const check = (value,message) => {if (!value) throw Error(message);};
+  const el = id => document.getElementById(id);
+  window.prompt = () => 'fixture-owner-review';
+  await refreshMfa();
+  for (const id of ['foundation-preview','readiness']) {
+    await el(id).onclick();
+    const text = el('output').textContent;
+    check(text.includes('administrative_control_unavailable'),'error code lost');
+    check(text.includes('Diagnostic stage: owner_access'),'diagnostic stage lost');
+    check(text.includes('Failure class: validation_failed'),'failure class lost');
+    check(!text.includes('SENTINEL_SECRET'),'unrelated response data exposed');
+  }
+  withDiagnostic = false;
+  await el('readiness').onclick();
+  check(!el('output').textContent.includes('Diagnostic stage:'),'previous diagnostic retained');
+  check(requests.filter(p=>p==='runtime-foundation/preview').length===1,'preview repeated');
+  check(requests.every(p=>['mfa/state','runtime-foundation/preview','runtime-activation/readiness'].includes(p)),'state-changing action requested');
+  el('browser-result').textContent='PASS';
+})().catch(error=>{document.getElementById('browser-result').textContent='FAIL: '+error.message;});
+</script>
+"""
+        self.run_browser(fake_api, scenario)
+
     def test_foundation_preview_digest_csrf_and_separate_completion(self):
         fake_api = r"""
 <script>
