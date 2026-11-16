@@ -16,7 +16,7 @@ _scope = ContextVar('recognition_readiness_diagnostic_scope', default=None)
 _logger = logging.getLogger(__name__)
 _STAGES = frozenset(('readiness_request', 'history_validation', 'runtime_identity_validation',
                      'authentication', 'claim_inspection', 'readiness_inventory',
-                     'configuration', 'owner_access', 'foundation_request',
+                     'configuration', 'owner_access', 'foundation_request', 'foundation_plan',
                      'foundation_prerequisites', 'foundation_copy', 'foundation_schema',
                      'foundation_inventory'))
 _ADMIN_CLASSES = {code: code for code in (
@@ -39,6 +39,8 @@ def _classification(error):
         return 'filesystem_access_failed'
     if isinstance(error, ImportError):
         return 'dependency_import_failed'
+    if isinstance(error, ValueError):
+        return 'validation_failed'
     return 'unclassified_readiness_failure'
 
 
@@ -47,6 +49,8 @@ def _record(stage_name, error):
     if scope is None or scope['logged']:
         return
     scope['logged'] = True  # One classification, including when the sink fails.
+    # Only fixed vocabulary survives for a protected request's error handler.
+    scope['diagnostic'] = dict(stage=stage_name, failure_class=_classification(error))
     try:
         record = dict(error='runtime_readiness_failed', stage=stage_name,
                       failure_class=_classification(error), pid=os.getpid())
@@ -68,12 +72,14 @@ def stage(name):
 
 @contextmanager
 def assessment():
-    if _scope.get() is not None:
-        yield
+    existing = _scope.get()
+    if existing is not None:
+        yield existing
         return
-    token = _scope.set(dict(logged=False))
+    scope = dict(logged=False)
+    token = _scope.set(scope)
     try:
         with stage('readiness_request'):
-            yield
+            yield scope
     finally:
         _scope.reset(token)

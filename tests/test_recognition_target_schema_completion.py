@@ -389,7 +389,7 @@ class TargetSchemaCompletionTests(unittest.TestCase):
             control.commit()
         self.assertEqual('COMPLETED',completion.inspect(self.config)['state'])
 
-    def test_http_preview_private_stage_diagnostics_preserve_response_and_state(self):
+    def test_http_preview_diagnostic_survives_error_handler_without_state_changes(self):
         import json
         from flask import Flask
         from src.review import admin_dashboard
@@ -409,6 +409,10 @@ class TargetSchemaCompletionTests(unittest.TestCase):
             (admin_routes, 'configuration', OSError(secret), 'configuration', 'filesystem_access_failed'),
             (admin_dashboard, 'owner_access', sqlite3.DatabaseError(secret), 'owner_access', 'database_access_failed'),
             (owner, 'get_admin_identity', ImportError(secret), 'authentication', 'dependency_import_failed'),
+            (owner, 'get_admin_identity', a.AdminError('primary_authentication_required', 401),
+             'authentication', 'primary_authentication_required'),
+            (completion, 'preview', ImportError(secret), 'foundation_plan', 'dependency_import_failed'),
+            (completion, 'preview', ValueError(secret), 'foundation_plan', 'validation_failed'),
             (completion, '_journal', TrustError(secret), 'foundation_prerequisites', 'trust_validation_failed'),
             (completion.tempfile, 'TemporaryDirectory', OSError(secret), 'foundation_copy', 'filesystem_access_failed'),
             (completion.execution_schema, 'check_schema', Quarantined(secret), 'foundation_schema', 'recognition_inventory_rejected'),
@@ -424,8 +428,14 @@ class TargetSchemaCompletionTests(unittest.TestCase):
                                       side_effect=RuntimeError(secret) if broken_sink else None) as log:
                         response = client.post('/api/admin/recognition-control/runtime-foundation/preview',
                             json=dict(csrf_token='synthetic-csrf', operator='fixture', reason='review'))
-                        self.assertEqual(503, response.status_code)
-                        self.assertEqual({'error': 'administrative_control_unavailable'}, response.get_json())
+                        status = error.status if isinstance(error, a.AdminError) else 503
+                        code = error.code if isinstance(error, a.AdminError) else 'administrative_control_unavailable'
+                        self.assertEqual(status, response.status_code)
+                        expected = dict(stage=stage, failure_class=classification)
+                        self.assertEqual({'error': code,
+                                          'diagnostic': expected}, response.get_json())
+                        self.assertNotIn(secret, response.get_data(as_text=True))
+                        self.assertIsNone(diagnostics._scope.get())
                         self.assertEqual('no-store', response.headers['Cache-Control'])
                         log.assert_called_once()
                         record = json.loads(log.call_args.args[1])
@@ -434,6 +444,15 @@ class TargetSchemaCompletionTests(unittest.TestCase):
                         self.assertNotIn(secret, repr(log.call_args))
                         self.assertNotIn('exc_info', log.call_args.kwargs)
                     self.assertEqual(before, (self.dump(self.config.target), self.dump(self.config.control)))
+            # A different request must never inherit the Preview diagnostic.
+            with patch.object(owner, 'get_admin_identity', side_effect=ValueError(secret)):
+                response = client.get('/api/admin/recognition-control/identity')
+                self.assertEqual({'error': 'administrative_control_unavailable'}, response.get_json())
+            response = client.post('/api/admin/recognition-control/runtime-foundation/preview',
+                json=dict(csrf_token='wrong', operator='fixture', reason='review'))
+            self.assertEqual(400, response.status_code)
+            self.assertEqual({'error': 'invalid_request_token', 'diagnostic': dict(
+                stage='foundation_request', failure_class='administration_denied')}, response.get_json())
             with patch.object(diagnostics._logger, 'warning') as log:
                 response = client.post('/api/admin/recognition-control/runtime-foundation/preview',
                     json=dict(csrf_token='synthetic-csrf', operator='fixture', reason='review'))

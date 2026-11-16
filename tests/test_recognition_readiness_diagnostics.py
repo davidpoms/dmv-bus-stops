@@ -35,7 +35,7 @@ class DiagnosticClassificationTests(unittest.TestCase):
                  (sqlite3.DatabaseError(SECRET), 'database_access_failed'),
                  (OSError(SECRET), 'filesystem_access_failed'),
                  (ImportError(SECRET), 'dependency_import_failed'),
-                 (ValueError(SECRET), 'unclassified_readiness_failure'),
+                 (ValueError(SECRET), 'validation_failed'),
                  (RuntimeError(SECRET), 'unclassified_readiness_failure'),
                  (a.AdminError(SECRET, 503), 'administration_denied')]
         cases.extend((a.AdminError(code, 503), classification)

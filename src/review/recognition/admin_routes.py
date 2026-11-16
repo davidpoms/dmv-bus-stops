@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import hmac
 import sqlite3
 
-from flask import Blueprint, current_app, jsonify, request, session, render_template
+from flask import Blueprint, current_app, g, jsonify, request, session, render_template
 
 from . import admin_auth as auth, administration as a
 
@@ -74,10 +74,17 @@ def register_admin_routes(app):
 
     @routes.errorhandler(a.AdminError)
     def denied(error):
-        return {"error": error.code}, error.status
+        return error_payload(error.code), error.status
+
+    def error_payload(code):
+        payload = dict(error=code)
+        diagnostic = getattr(g, 'recognition_foundation_diagnostic', None)
+        if diagnostic is not None:
+            payload['diagnostic'] = diagnostic
+        return payload
 
     def unavailable(_error):
-        return {"error": "administrative_control_unavailable"}, 503
+        return error_payload('administrative_control_unavailable'), 503
 
     for error_type in (OSError, sqlite3.Error, ValueError, ImportError):
         routes.register_error_handler(error_type, unavailable)
@@ -200,13 +207,21 @@ def register_admin_routes(app):
     @routes.post('/runtime-foundation/preview')
     def runtime_foundation_preview():
         from . import readiness_diagnostics
-        with readiness_diagnostics.assessment(), readiness_diagnostics.stage('foundation_request'):
-            value = data(('operator','reason'))
-            with readiness_diagnostics.stage('authentication'):
-                config = context(administrative=True, authentication_only=True)
-            from . import runtime_target_schema_completion as completion
-            return jsonify(completion.preview(config, session['recognition_admin'],
-                primary_token=session['recognition_primary'], operator=value['operator'], reason=value['reason']))
+        with readiness_diagnostics.assessment() as diagnostic_scope:
+            try:
+                with readiness_diagnostics.stage('foundation_request'):
+                    value = data(('operator','reason'))
+                    with readiness_diagnostics.stage('authentication'):
+                        config = context(administrative=True, authentication_only=True)
+                    with readiness_diagnostics.stage('foundation_plan'):
+                        from . import runtime_target_schema_completion as completion
+                        return jsonify(completion.preview(config, session['recognition_admin'],
+                            primary_token=session['recognition_primary'], operator=value['operator'], reason=value['reason']))
+            except Exception:
+                # The assessment ContextVar resets before Flask handles the error.
+                # Copy only the fixed classification, never the exception itself.
+                g.recognition_foundation_diagnostic = diagnostic_scope.get('diagnostic')
+                raise
 
     @routes.post('/runtime-foundation/complete')
     def runtime_foundation_complete():
