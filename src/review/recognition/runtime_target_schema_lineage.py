@@ -95,19 +95,25 @@ def validate_plan(plan):
         _physical(physical)
 
 
-def _signed_history(control, event, subject):
-    """Historical approval verification, not a fresh provisioning interface."""
-    from . import runtime_production_governance as governance, authorization, admin_auth
-    config = SimpleNamespace(control=Path(control.execute('PRAGMA database_list').fetchone()[2]).resolve())
+def _protected_root(config):
+    from . import runtime_production_governance as governance
     root = governance._root(config)
-    encoded, signature, plan = subject['approval'], subject['signature'], subject['plan']
-    require(type(encoded) is str and len(encoded.encode('utf-8')) <= 65536
-            and type(signature) is str and len(signature) == 88, 'foundation_approval_encoding')
     path = governance.trust_path(config)
     require(path.is_file() and path.stat().st_nlink == 1, 'foundation_approval_root')
     if os.name != 'nt':
         require(path.stat().st_mode & 0o022 == 0 and path.parent.stat().st_mode & 0o022 == 0,
                 'foundation_unprotected_root')
+    return root
+
+
+def _signed_history(control, event, subject):
+    """Historical approval verification, not a fresh provisioning interface."""
+    from . import runtime_production_governance as governance, authorization, admin_auth
+    config = SimpleNamespace(control=Path(control.execute('PRAGMA database_list').fetchone()[2]).resolve())
+    root = _protected_root(config)
+    encoded, signature, plan = subject['approval'], subject['signature'], subject['plan']
+    require(type(encoded) is str and len(encoded.encode('utf-8')) <= 65536
+            and type(signature) is str and len(signature) == 88, 'foundation_approval_encoding')
     body = load(encoded)
     fields(body, ('format','mandate','installation_id','binding_sha256','holder','subject',
                   'target','control','issued_at_utc','expires_at_utc','approvals'))

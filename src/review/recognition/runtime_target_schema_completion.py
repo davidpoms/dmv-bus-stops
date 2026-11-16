@@ -21,6 +21,19 @@ from .trust import require, load, utc
 
 
 ALIAS = 'completion_target'
+PREVIEW_KIND = 'target_event_foundation_preview'
+
+
+def preview_binding(subject):
+    """Fixed inspection purpose; cannot authorize installation or an Authority."""
+    from .trust import fields
+    fields(subject, ('kind','operator','reason'))
+    require(subject['kind'] == PREVIEW_KIND, 'foundation_preview_purpose')
+    runtime.enrollment._text(subject['operator'], 200)
+    runtime.enrollment._text(subject['reason'], 2000)
+    return dict(family=lineage.PACKAGE,permission='inspection',action='preview',
+                operation_sha256=digest(subject),policy_sha256=digest(event_schema.definitions()),
+                population_sha256=None,reference=governance.contract.MANDATE)
 
 
 def _objects(conn, namespace='main'):
@@ -62,9 +75,43 @@ def _session(config, control, target, session, primary):
     return binding, profile, head, scope, p, s, mfa
 
 
-def _plan(config, control, target, session, primary, *, operator, reason, created_at=None, deadline=None):
+def _signed_session(config, control, target, authorization):
+    """Signed-owner continuation of existing MFA records, never raw-token admission.
+
+    Fresh signature verification precedes use of the existing persisted-session
+    kernel. RO handles ensure even denials cannot mutate authentication records.
+    No caller-provided holder or callback is accepted as authority.
+    """
+    require(all(conn.execute('PRAGMA query_only').fetchone()[0] == 1 for conn in (control,target)),
+            'foundation_readonly_validation_required')
+    lineage._protected_root(config)
+    _, approval, _ = governance._verify(config, *authorization)
+    require(approval['subject']['kind'] in (PREVIEW_KIND,lineage.KIND), 'foundation_approval_purpose')
+    now = runtime._utc_now()
+    scope = runtime._identity_snapshot(config,control,target,now)
+    binding, profile, head = runtime._history(control)
+    holder = approval['holder']
+    require(holder['actor_id'] == scope['owner_id'] and approval['binding_sha256'] == scope['binding_sha256']
+            and approval['installation_id'] == scope['installation_id'], 'foundation_approval_holder')
+    s, mfa = auth._session_hash(control,target,binding,holder['session_sha256'],now)
+    p = control.execute('SELECT * FROM recognition_admin_primary WHERE token_hash=?',
+                        (holder['primary_sha256'],)).fetchone()
+    require(p is not None and s['primary_hash'] == p['token_hash'], 'foundation_session_mismatch')
+    runtime_auth._scope(control,scope,'primary',p,now)
+    runtime_auth._scope(control,scope,'session',s,now)
+    require(a.timestamp(approval['expires_at_utc']) <= min(p['expires'],s['expires']),
+            'foundation_approval_credential_lifetime')
+    return binding, profile, head, scope, p, s, mfa
+
+
+def _plan(config, control, target, session, primary, *, operator, reason, created_at=None, deadline=None,
+          signed_authorization=None):
     runtime.enrollment._text(operator, 200); runtime.enrollment._text(reason, 2000)
-    binding, profile, head, scope, p, s, mfa = _session(config, control, target, session, primary)
+    if signed_authorization is None:
+        binding, profile, head, scope, p, s, mfa = _session(config, control, target, session, primary)
+    else:
+        require(session is None and primary is None, 'foundation_mixed_authentication')
+        binding, profile, head, scope, p, s, mfa = _signed_session(config,control,target,signed_authorization)
     require(type(binding['generation']) is int and binding['generation'] == 5, 'foundation_generation_required')
     require(not lineage.present(control), 'foundation_already_completed')
     require(binding['production_state'] == 'NOT_ACTIVATED'
@@ -168,14 +215,64 @@ def _attached(config):
     require(config.target.resolve() != config.control.resolve(), 'foundation_distinct_files_required')
     with a.connect(config.control,write=True) as db:
         _journal(db)
+        _synchronization(db,'main')
         db.execute('ATTACH DATABASE ? AS '+ALIAS, (config.target.resolve().as_uri()+'?mode=rw',))
         _journal(db,ALIAS)
         db.execute('PRAGMA '+ALIAS+'.synchronous=FULL')
+        _synchronization(db,ALIAS)
         require(db.execute('PRAGMA foreign_keys').fetchone()[0] == 1, 'foundation_foreign_keys_required')
         db.execute('BEGIN IMMEDIATE')
         require([(row[1],str(Path(row[2]).resolve())) for row in db.execute('PRAGMA database_list')]
                 == [('main',str(config.control.resolve())),(ALIAS,str(config.target.resolve()))], 'foundation_database_scope')
         yield db
+
+
+def _synchronization(db, namespace):
+    require(namespace in ('main',ALIAS) and db.execute(f'PRAGMA {namespace}.synchronous').fetchone()[0] == 2,
+            'foundation_full_synchronization_required')
+
+
+def _preview_authorizer(action, first, second, *rest):
+    if action in runtime._AUTHENTICATION_DDL_DENY or action in (
+            sqlite3.SQLITE_INSERT,sqlite3.SQLITE_UPDATE,sqlite3.SQLITE_DELETE):
+        return sqlite3.SQLITE_DENY
+    if action == sqlite3.SQLITE_PRAGMA:
+        return sqlite3.SQLITE_OK if first in ('database_list','query_only','journal_mode','synchronous') and second is None else sqlite3.SQLITE_DENY
+    return sqlite3.SQLITE_OK
+
+
+def preview_approved(config, *, serialized_approval, signature):
+    """Explicit signed inspection; reserves both files and always rolls back."""
+    authorization = _approval_input(serialized_approval,signature)
+    _, approval, _ = governance._verify(config,*authorization)
+    require(approval['subject']['kind'] == PREVIEW_KIND, 'foundation_preview_purpose')
+    from .runtime_execution_claims import _Clock
+    clock = _Clock()
+    with _attached(config) as reserved:
+        # No source writes or COMMIT are possible through this owner in preview.
+        reserved.execute('PRAGMA query_only=ON')
+        reserved.set_authorizer(_preview_authorizer)
+        with a.connect(config.control) as control, a.connect(config.target) as target:
+            control.execute('BEGIN');target.execute('BEGIN')
+            plan = _plan(config,control,target,None,None,operator=approval['subject']['operator'],
+                         reason=approval['subject']['reason'],signed_authorization=authorization)
+            _signed_session(config,control,target,authorization)
+            for key,path in (('control',config.control),('target',config.target)):
+                require(asdict(a.target_identity(path)) == plan['physical'][key], 'foundation_physical_changed')
+            clock.read()
+            require(a.timestamp(runtime._utc_now()) < a.timestamp(plan['deadline_at_utc']), 'foundation_plan_expired')
+    return dict(plan=plan,plan_sha256=digest(plan),generation=5,h0=plan['h0'],h1=plan['h1'],
+                read_only=True,source_databases_modified=False,execution_authority=False,
+                preconditions=['enrolled_generation_5_h0','exact_profile_physical_identity','verified_owner',
+                               'live_profile_scoped_primary_and_mfa_admin_records','independent_signed_authorization',
+                               'not_activated','delete_journals_full_synchronization','empty_work_and_claims',
+                               'exact_control_topology','all_other_readiness_prerequisites'])
+
+
+def _approval_input(serialized_approval,signature):
+    require(type(serialized_approval) is str and len(serialized_approval.encode('utf-8')) <= 65536
+            and type(signature) is str and len(signature) == 88, 'foundation_approval_encoding')
+    return serialized_approval,signature
 
 
 def _install(db):
@@ -207,20 +304,35 @@ def complete(config, session_token, *, primary_token, serialized_approval, signa
     # Existing public authentication preserves its normal denial semantics. The
     # reserved recheck below is RO and cannot update credentials or MFA counters.
     owner.require_recognition_admin(config,session_token,primary_token=primary_token)
-    require(type(serialized_approval) is str and len(serialized_approval.encode('utf-8')) <= 65536
-            and type(signature) is str and len(signature) == 88, 'foundation_approval_encoding')
+    return _complete(config,session_token,primary_token,serialized_approval,signature)
+
+
+def complete_approved(config, *, approved_plan_sha256, serialized_approval, signature):
+    """Same atomic owner, independently signed exact plan, no token arguments."""
+    runtime.r._check_sha(approved_plan_sha256)
+    _approval_input(serialized_approval,signature)
+    _, approval, _ = governance._verify(config,serialized_approval,signature)
+    require(approval['subject']['kind'] == lineage.KIND
+            and digest(approval['subject']['plan']) == approved_plan_sha256, 'foundation_plan_digest_mismatch')
+    return _complete(config,None,None,serialized_approval,signature,signed=True)
+
+
+def _complete(config, session_token, primary_token, serialized_approval, signature, *, signed=False):
+    _approval_input(serialized_approval,signature)
     root, approval, _ = governance._verify(config,serialized_approval,signature)
     require(approval['subject']['kind'] == lineage.KIND, 'foundation_approval_purpose')
     plan = approval['subject']['plan']; lineage.validate_plan(plan)
-    require(approval['holder'] == dict(actor_id=plan['owner_id'],primary_sha256=a.token_hash(primary_token),
-                                     session_sha256=a.token_hash(session_token)), 'foundation_approval_holder')
+    if not signed:
+        require(approval['holder'] == dict(actor_id=plan['owner_id'],primary_sha256=a.token_hash(primary_token),
+                                         session_sha256=a.token_hash(session_token)), 'foundation_approval_holder')
     from .runtime_execution_claims import _Clock
     clock = _Clock()
     with _attached(config) as db:
         with a.connect(config.control) as control, a.connect(config.target) as target:
             control.execute('BEGIN');target.execute('BEGIN')
             current = _plan(config,control,target,session_token,primary_token,operator=plan['operator'],reason=plan['reason'],
-                            created_at=plan['created_at_utc'],deadline=plan['deadline_at_utc'])
+                            created_at=plan['created_at_utc'],deadline=plan['deadline_at_utc'],
+                            signed_authorization=(serialized_approval,signature) if signed else None)
             require(current == plan, 'foundation_plan_changed')
         db.set_authorizer(_authorizer)
         _install(db)

@@ -86,6 +86,10 @@ def _verify(config,serialized,signature):
             operation_sha256=subject['authority_sha256'],policy_sha256=digest('runtime-finalization-inspection-v1'),
             population_sha256=None,reference=subject['authority_id'])]
         target=body['target']
+    elif subject.get('kind') == 'target_event_foundation_preview':
+        from .runtime_target_schema_completion import preview_binding
+        expected=[preview_binding(subject)]
+        target=body['target']
     elif subject.get('kind') == 'target_event_foundation_completion':
         from . import runtime_target_schema_lineage as completion, event_schema
         fields(subject, ('kind','plan'))
@@ -112,7 +116,8 @@ def provision(config=None,session=None,*,primary_token=None,serialized=None,sign
     if type(config) is not a.LocalAdministration:
         raise authorization.AuthorizationError('production_authority_not_provisioned')
     config.paths();root,body,approvals=_verify(config,serialized,signature)
-    require(body['subject']['kind'] != 'target_event_foundation_completion', 'foundation_original_maintenance_owner_required')
+    require(body['subject']['kind'] not in ('target_event_foundation_completion','target_event_foundation_preview'),
+            'foundation_original_maintenance_owner_required')
     # Existing 3a/3b kernels independently authenticate current owner/profile.
     # A signed deployment artifact alone is not a login credential or source.
     from . import runtime_finalization as owner
