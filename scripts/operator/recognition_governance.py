@@ -32,6 +32,8 @@ MANDATE = 'dmv-bus-stops-g1-governance-mandate-4e-20-G13-v1'
 DOMAIN = b'DMV-runtime-production-governance-v1\x00'
 PACKAGE = 'recognition-preactivation-event-foundation-v1'
 POLICY = '5a0112a24ba81c7067c4af2cf3ea6cda39d4fde5ee04f8591e81f152162d9cfd'
+RUNTIME_PACKAGE = 'recognition-preactivation-runtime-foundation-v2'
+RUNTIME_POLICY = '00194be45a1660e7890854caa4ed4a05a5cf79bbcb46e2e2163da64561e673b0'
 ADMIN_SECONDS = 600
 PREVIEW = 'target_event_foundation_preview'
 COMPLETE = 'target_event_foundation_completion'
@@ -213,21 +215,27 @@ def _payload(path,root):
                 and all(type(physical[k]) is int and physical[k] >= 0 for k in ('device','inode')))
     subject = body['subject']
     require(type(subject) is dict)
+    package, policy = PACKAGE, POLICY
     if subject.get('kind') == PREVIEW:
-        fields(subject,'kind operator reason')
+        fields(subject,'kind operator reason package' if 'package' in subject else 'kind operator reason')
+        if 'package' in subject:
+            require(subject['package'] == RUNTIME_PACKAGE)
+            package, policy = RUNTIME_PACKAGE, RUNTIME_POLICY
         for key,limit in (('operator',200),('reason',2000)):
             require(type(subject[key]) is str and 1 <= len(subject[key]) <= limit and '\x00' not in subject[key])
-        binding = dict(permission='inspection',action='preview',operation_sha256=digest(subject),policy_sha256=POLICY)
+        binding = dict(permission='inspection',action='preview',operation_sha256=digest(subject),policy_sha256=policy)
     else:
         fields(subject,'kind plan')
         require(subject['kind'] == COMPLETE and type(subject['plan']) is dict)
         plan = subject['plan']
-        require(plan['package'] == PACKAGE and type(plan['generation']) is int and plan['generation'] == 5
+        if plan['package'] == RUNTIME_PACKAGE:
+            package, policy = RUNTIME_PACKAGE, RUNTIME_POLICY
+        require(plan['package'] == package and type(plan['generation']) is int and plan['generation'] == 5
                 and plan['binding_sha256'] == body['binding_sha256']
                 and plan['installation_id'] == body['installation_id'] and plan['owner_id'] == body['holder']['actor_id']
                 and plan['physical'] == dict(target=body['target'],control=body['control']))
-        binding = dict(permission='migration',action='install',operation_sha256=POLICY,policy_sha256=POLICY)
-    expected = dict(target=body['target'],environment='production',family=PACKAGE,population_sha256=None,
+        binding = dict(permission='migration',action='install',operation_sha256=policy,policy_sha256=policy)
+    expected = dict(target=body['target'],environment='production',family=package,population_sha256=None,
                     reference=MANDATE,expires_at_utc=body['expires_at_utc'],**binding)
     require(canonical(body['approvals']) == canonical([expected]))
     require(len(canonical(body).encode('utf-8')) <= 65536)

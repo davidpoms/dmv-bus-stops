@@ -68,6 +68,8 @@ class GovernanceBootstrapTests(unittest.TestCase):
         self.assertFalse(self.public.read_bytes().endswith(b'\n'))
         self.assertEqual(governance.FORMAT,tool.FORMAT);self.assertEqual(governance.DOMAIN,tool.DOMAIN)
         self.assertEqual(contract.MANDATE,tool.MANDATE);self.assertEqual(digest(event_schema.definitions()),tool.POLICY)
+        self.assertEqual(lineage.RUNTIME_PACKAGE, tool.RUNTIME_PACKAGE)
+        self.assertEqual(digest(lineage.package_definitions(lineage.RUNTIME_PACKAGE)), tool.RUNTIME_POLICY)
         self.assertEqual(admin_auth.RECENT_SECONDS,tool.ADMIN_SECONDS)
         self.assertEqual(self.generated['public_key_sha256'],tool._fingerprint(public))
         result=self.install();self.assertEqual('PUBLIC_ROOT_INSTALLED',result['state'])
@@ -111,6 +113,18 @@ class GovernanceBootstrapTests(unittest.TestCase):
         self.assertEqual(body,checked);self.assertEqual('SIGNED_OFFLINE',result['state'])
         self.assertNotIn(self.password,logs.getvalue());self.assertNotIn('PRIVATE KEY',logs.getvalue())
         tool._protected(output)
+
+    def test_v2_preview_signature_uses_existing_verifier_and_distinct_closed_policy(self):
+        self.install(); body = self.body()
+        body['subject']['package'] = lineage.RUNTIME_PACKAGE
+        body['approvals'] = [asdict(authorization.Authorization(target=authorization.Target(**body['target']),
+            environment='production',expires_at_utc=body['expires_at_utc'],**completion.preview_binding(body['subject'])))]
+        payload = self.operator/'reviewed-v2.json'; payload.write_text(canonical(body))
+        output = self.operator/'signed-v2.json'
+        with patch('builtins.input',return_value=digest(body)),patch.object(tool.getpass,'getpass',return_value=self.password),redirect_stdout(io.StringIO()):
+            tool.sign(self.private,self.public,payload,output)
+        artifact = json.loads(output.read_text())
+        self.assertEqual(body,governance._verify(self.config,**dict(serialized=artifact['serialized_approval'],signature=artifact['signature']))[1])
 
     def test_installer_wrong_scope_fingerprint_and_existing_file_reject(self):
         fingerprint=self.generated['public_key_sha256']

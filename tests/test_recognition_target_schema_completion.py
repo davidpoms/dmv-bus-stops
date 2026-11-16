@@ -52,6 +52,23 @@ class TargetSchemaCompletionTests(unittest.TestCase):
                 for name, sql in operation_schema.definitions().items():
                     if sql.startswith('CREATE TRIGGER '):target.execute(sql)
                 for name in event_schema.TABLES:target.execute('DROP TABLE '+name)
+                if getattr(self, 'missing_runtime_prerequisites', False):
+                    for module in (execution_schema, operation_schema):
+                        for name, sql in module.definitions().items():
+                            if sql.startswith('CREATE TRIGGER '):
+                                target.execute('DROP TRIGGER '+name)
+                        for name in module.TABLES:
+                            target.execute('DROP TABLE '+name)
+                    variant = getattr(self, 'runtime_source_variant', None)
+                    if variant == 'partial':
+                        target.execute(operation_schema.definitions()['recognition_operation_contracts'])
+                    elif variant == 'mismatched':
+                        target.execute('CREATE TABLE recognition_execution_storage(unapproved TEXT)')
+                    elif variant == 'existing':
+                        target.execute(execution_schema.definitions()['recognition_execution_storage'])
+                    elif variant == 'missing_private':
+                        trigger = next(name for name, sql in permanent_schema.definitions().items() if sql.startswith('CREATE TRIGGER '))
+                        target.execute('DROP TRIGGER '+trigger)
                 if self._testMethodName == 'test_other_missing_schema_already_absent_at_enrollment_rejects':
                     trigger = next(name for name,sql in operation_schema.definitions().items() if sql.startswith('CREATE TRIGGER '))
                     target.execute('DROP TRIGGER '+trigger)

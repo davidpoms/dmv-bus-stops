@@ -96,7 +96,8 @@ def _verify(config,serialized,signature):
         completion.validate_plan(subject['plan'])
         require(subject['plan']['physical'] == dict(target=body['target'], control=body['control'])
                 and subject['plan']['binding_sha256'] == body['binding_sha256'], 'foundation_approval_scope')
-        expected=[dict(**authorization.migration_binding(completion.PACKAGE,event_schema.definitions()),reference=contract.MANDATE)]
+        expected=[dict(**authorization.migration_binding(subject['plan']['package'],
+            completion.package_definitions(subject['plan']['package'])),reference=contract.MANDATE)]
         target=body['target']
     else:
         from . import runtime_finalization_schema_upgrade as upgrade

@@ -28,12 +28,15 @@ PREVIEW_KIND = 'target_event_foundation_preview'
 def preview_binding(subject):
     """Fixed inspection purpose; cannot authorize installation or an Authority."""
     from .trust import fields
-    fields(subject, ('kind','operator','reason'))
+    require(type(subject) is dict, 'foundation_preview_purpose')
+    package = subject.get('package', lineage.PACKAGE)
+    fields(subject, ('kind','operator','reason','package') if 'package' in subject else ('kind','operator','reason'))
+    require('package' not in subject or package == lineage.RUNTIME_PACKAGE, 'foundation_preview_purpose')
     require(subject['kind'] == PREVIEW_KIND, 'foundation_preview_purpose')
     runtime.enrollment._text(subject['operator'], 200)
     runtime.enrollment._text(subject['reason'], 2000)
-    return dict(family=lineage.PACKAGE,permission='inspection',action='preview',
-                operation_sha256=digest(subject),policy_sha256=digest(event_schema.definitions()),
+    return dict(family=package,permission='inspection',action='preview',
+                operation_sha256=digest(subject),policy_sha256=digest(lineage.package_definitions(package)),
                 population_sha256=None,reference=governance.contract.MANDATE)
 
 
@@ -49,11 +52,11 @@ def _fingerprint(conn, namespace):
         user_version=conn.execute(f'PRAGMA {namespace}.user_version').fetchone()[0]))
 
 
-def _data(conn, namespace='main'):
+def _data(conn, namespace='main', *, exclude=()):
     # Internal table identifiers only; exact typed contents never leave this API.
     result = []
     for row in _objects(conn, namespace):
-        if row[0] == 'table' and row[1] not in event_schema.TABLES:
+        if row[0] == 'table' and row[1] not in event_schema.TABLES and row[1] not in exclude:
             quoted = '"'+row[1].replace('"','""')+'"'
             result.append((row[1], sorted(repr(tuple(value)) for value in conn.execute(f'SELECT * FROM {namespace}.{quoted}'))))
     return digest(result)
@@ -62,6 +65,25 @@ def _data(conn, namespace='main'):
 def _journal(conn, namespace='main'):
     require(conn.execute(f'PRAGMA {namespace}.journal_mode').fetchone()[0].lower() == 'delete',
             'foundation_delete_journal_required')
+
+
+def _source_package(target):
+    """Only the known absent-prerequisite source is eligible for the new edge."""
+    objects = dict((row[1], row[3]) for row in _objects(target))
+    required = {'recognition_operation_contracts','recognition_operation_receipts',
+                'recognition_execution_claims','recognition_execution_seals'}
+    if required <= objects.keys():
+        return lineage.PACKAGE, event_schema.definitions()
+    require(not required.intersection(objects), 'foundation_partial_prerequisite_source')
+    definitions = lineage.package_definitions(lineage.RUNTIME_PACKAGE)
+    for name, sql in definitions.items():
+        require(name not in objects or ' '.join(objects[name].split()) == ' '.join(sql.split()),
+                'foundation_existing_definition_mismatch')
+    # Existing related histories must also be empty; they are never rewritten.
+    for name, sql in definitions.items():
+        if name in objects and sql.startswith('CREATE TABLE ') and name != 'recognition_execution_storage':
+            require(not target.execute('SELECT 1 FROM '+name+' LIMIT 1').fetchone(), 'foundation_existing_operation')
+    return lineage.RUNTIME_PACKAGE, {name: sql for name, sql in definitions.items() if name not in objects}
 
 
 def _session(config, control, target, session, primary):
@@ -122,10 +144,17 @@ def _plan(config, control, target, session, primary, *, operator, reason, create
     require(lineage.normalized_manifest(original) == lineage.normalized_manifest(lineage.source_definitions()),
             'foundation_source_control_topology')
     require(not any(row[1] in event_schema.definitions() for row in _objects(target)), 'foundation_event_objects_already_present')
+    package, additions = _source_package(target)
+    added_tables = {name for name, sql in additions.items() if sql.startswith('CREATE TABLE ')}
+    if signed_authorization is not None:
+        subject = load(signed_authorization[0])['subject']
+        approved_package = subject.get('package', lineage.PACKAGE) if subject['kind'] == PREVIEW_KIND else subject['plan']['package']
+        require(approved_package == package, 'foundation_preview_package_mismatch')
     # No live execution/operation continuation can be carried over this edge.
     for name in ('recognition_operation_contracts','recognition_execution_claims',
                  'recognition_execution_seals','recognition_operation_receipts'):
-        require(not target.execute('SELECT 1 FROM '+name+' LIMIT 1').fetchone(), 'foundation_existing_operation')
+        if name not in added_tables:
+            require(not target.execute('SELECT 1 FROM '+name+' LIMIT 1').fetchone(), 'foundation_existing_operation')
     for name in (claims.CLAIMS, claims.HISTORY):
         require(not control.execute('SELECT 1 FROM '+name+' LIMIT 1').fetchone(), 'foundation_existing_claim')
     for path in (config.control,config.target):
@@ -145,7 +174,7 @@ def _plan(config, control, target, session, primary, *, operator, reason, create
             require(_fingerprint(preview,'main') == profile['target_schema_sha256'], 'foundation_preview_source_mismatch')
             preview.execute('BEGIN')
             with diagnostics.stage('foundation_schema'):
-                for sql in event_schema.definitions().values():
+                for sql in additions.values():
                     preview.execute(sql)
                 execution_schema.check_schema(preview)  # All readiness target schemas, not just event tables.
             with diagnostics.stage('foundation_inventory'):
@@ -158,19 +187,21 @@ def _plan(config, control, target, session, primary, *, operator, reason, create
     end = utc(created_at)+timedelta(seconds=limit-a.timestamp(created_at))
     deadline = end.strftime('%Y-%m-%dT%H:%M:%SZ') if deadline is None else deadline
     require(a.timestamp(created_at) <= a.timestamp(now) < a.timestamp(deadline) <= limit, 'foundation_plan_expired')
-    plan = dict(format='recognition-target-schema-completion-plan-v1', package=lineage.PACKAGE,
+    plan = dict(format='recognition-target-schema-completion-plan-v2' if package == lineage.RUNTIME_PACKAGE else 'recognition-target-schema-completion-plan-v1', package=package,
         installation_id=binding['installation_id'],target_id=binding['target_id'],owner_id=binding['owner_id'],generation=5,
         binding_sha256=digest(binding),profile_sha256=profile['profile_sha256'],
         enrollment_audit_sha256=control.execute('SELECT body_sha256 FROM recognition_admin_audit WHERE sequence=?',
                                               (profile['audit_sequence'],)).fetchone()[0],
         h0=profile['target_schema_sha256'],h1=h1,control_before_sha256=lineage.normalized_manifest(original),
         control_after_sha256=lineage.normalized_manifest(lineage.upgrade_definitions(original)),
-        definitions_sha256=digest(event_schema.definitions()),
+        definitions_sha256=digest(lineage.package_definitions(package)),
         physical=dict(target=asdict(a.target_identity(target)),control=asdict(a.target_identity(control))),
         auth_epoch=scope['auth_epoch'],mfa_epoch=mfa['epoch'],owner_key_sha256=scope['owner_key_sha256'],
-        target_data_sha256=_data(target),readiness_sha256=digest(local_readiness._assessment_binding(assessment)),
+        target_data_sha256=_data(target, exclude=added_tables),readiness_sha256=digest(local_readiness._assessment_binding(assessment)),
         source_audit_sha256=head['body_sha256'],operator=operator,reason=reason,
         created_at_utc=created_at,deadline_at_utc=deadline)
+    if package == lineage.RUNTIME_PACKAGE:
+        plan['added_objects'] = sorted(additions)
     lineage.validate_plan(plan)
     return plan
 
@@ -185,15 +216,17 @@ def preview(config, session_token, *, primary_token, operator, reason):
     return dict(plan=plan,plan_sha256=digest(plan),execution_authority=False)
 
 
-def _authorizer(action, first, second, database, source):
+def _authorizer(action, first, second, database, source, *, additions=None):
+    definitions = event_schema.definitions() if additions is None else additions
+    tables = {name for name, sql in definitions.items() if sql.startswith('CREATE TABLE ')}
     writes = {sqlite3.SQLITE_INSERT,sqlite3.SQLITE_UPDATE,sqlite3.SQLITE_DELETE}
     if action in writes:
         return sqlite3.SQLITE_OK if ((first == 'sqlite_master' and database in ('main',ALIAS))
             or (action == sqlite3.SQLITE_INSERT and database == 'main' and first == 'recognition_admin_audit')) else sqlite3.SQLITE_DENY
     allowed = {
-        sqlite3.SQLITE_CREATE_TABLE: database == ALIAS and first in event_schema.TABLES,
-        sqlite3.SQLITE_CREATE_INDEX: database == ALIAS and second in event_schema.TABLES and first.startswith('sqlite_autoindex_'),
-        sqlite3.SQLITE_CREATE_TRIGGER: (database == ALIAS and first in event_schema.definitions())
+        sqlite3.SQLITE_CREATE_TABLE: database == ALIAS and first in tables,
+        sqlite3.SQLITE_CREATE_INDEX: database == ALIAS and second in tables and first.startswith('sqlite_autoindex_'),
+        sqlite3.SQLITE_CREATE_TRIGGER: (database == ALIAS and first in definitions)
             or (database == 'main' and first == claims.CLAIMS+'_scope_guard'),
         sqlite3.SQLITE_DROP_TRIGGER: database == 'main' and first == claims.CLAIMS+'_scope_guard',
     }
@@ -279,9 +312,10 @@ def _approval_input(serialized_approval,signature):
     return serialized_approval,signature
 
 
-def _install(db):
-    for name, sql in event_schema.definitions().items():
-        verb = 'CREATE TABLE ' if name in event_schema.TABLES else 'CREATE TRIGGER '
+def _install(db, plan=None):
+    definitions = event_schema.definitions() if plan is None else lineage.additions(plan)
+    for name, sql in definitions.items():
+        verb = 'CREATE TABLE ' if sql.startswith('CREATE TABLE ') else 'CREATE TRIGGER '
         require(sql.startswith(verb+name+' '), 'foundation_package_definition_changed')
         db.execute(sql.replace(verb+name+' ',verb+ALIAS+'.'+name+' ',1))
     guard = claims.CLAIMS+'_scope_guard'
@@ -291,11 +325,12 @@ def _install(db):
 
 
 def _validate_after(db, plan):
-    require(_fingerprint(db,ALIAS) == plan['h1'] and _data(db,ALIAS) == plan['target_data_sha256'],
+    tables = {name for name, sql in lineage.additions(plan).items() if sql.startswith('CREATE TABLE ')}
+    require(_fingerprint(db,ALIAS) == plan['h1'] and _data(db,ALIAS,exclude=tables) == plan['target_data_sha256'],
             'foundation_target_changed')
     require(lineage.normalized_manifest({row[1]:row[3] for row in _objects(db)}) == plan['control_after_sha256'],
             'foundation_control_changed')
-    for name in event_schema.TABLES:
+    for name in tables:
         require(db.execute('SELECT COUNT(*) FROM '+ALIAS+'.'+name).fetchone()[0] == 0, 'foundation_created_target_data')
     require(not db.execute('PRAGMA '+ALIAS+'.foreign_key_check').fetchone(), 'foundation_foreign_key_failure')
 
@@ -338,14 +373,18 @@ def _complete(config, session_token, primary_token, serialized_approval, signatu
                             created_at=plan['created_at_utc'],deadline=plan['deadline_at_utc'],
                             signed_authorization=(serialized_approval,signature) if signed else None)
             require(current == plan, 'foundation_plan_changed')
-        db.set_authorizer(_authorizer)
-        _install(db)
+        additions = lineage.additions(plan)
+        db.set_authorizer(lambda *args: _authorizer(*args, additions=additions))
+        if plan['package'] == lineage.PACKAGE:
+            _install(db)
+        else:
+            _install(db, plan)
         _validate_after(db,plan)
         governance._verify(config,serialized_approval,signature)
         now = runtime._utc_now()
         require(a.timestamp(now) < a.timestamp(plan['deadline_at_utc']), 'foundation_plan_expired')
         a._audit(db,lineage.ACTION,plan['owner_id'],now,
-                 dict(package=lineage.PACKAGE,plan=plan,plan_sha256=digest(plan),approval=serialized_approval,
+                 dict(package=plan['package'],plan=plan,plan_sha256=digest(plan),approval=serialized_approval,
                       signature=signature,state='CONSUMED'))
         lineage.verify(db)
         for key,path in (('control',config.control),('target',config.target)):
@@ -359,7 +398,7 @@ def _complete(config, session_token, primary_token, serialized_approval, signatu
         control.execute('BEGIN');target.execute('BEGIN')
         runtime._identity_snapshot(config,control,target,runtime._utc_now())
         execution_schema.check_schema(target)
-    return dict(package=lineage.PACKAGE,generation=5,state='COMPLETED',schema_sha256=plan['h1'],
+    return dict(package=plan['package'],generation=5,state='COMPLETED',schema_sha256=plan['h1'],
                 production_state='NOT_ACTIVATED',execution_authority=False)
 
 

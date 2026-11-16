@@ -4,6 +4,59 @@ This is one closed, explicitly authorized target-schema transition, not a schema
 drift exemption or filesystem recovery. The package ID is
 `recognition-preactivation-event-foundation-v1`.
 
+## Closed runtime-prerequisite successor (v2)
+
+The existing preview/completion backend and maintenance CLI also support the
+closed package `recognition-preactivation-runtime-foundation-v2`. This is one
+combined H0-to-H1 completion, not a separate prerequisite installer or an
+intermediate schema edge. Preview simulates its additions before checking the
+complete readiness inventory. Live schemas change only at signed completion.
+
+V2 is selected only when all four source tables `recognition_operation_contracts`,
+`recognition_operation_receipts`, `recognition_execution_claims`, and
+`recognition_execution_seals` are absent. A partially present set is rejected.
+Every event object must also be absent, as for v1. Its entire permitted manifest
+is exactly the union of `event_schema.definitions()`,
+`operation_schema.definitions()`, and `execution_schema.definitions()`. Any
+already-present member must match the canonical SQL and existing related work
+tables must be empty. Existing private schemas and every unrelated readiness
+prerequisite must pass; this package cannot install or repair them.
+
+The v2 plan has format `recognition-target-schema-completion-plan-v2` and adds
+only `added_objects`, a sorted list of the exact missing canonical object names.
+The definitions digest binds the full closed manifest, while the signed plan
+binds the actual addition list and deterministic H1. DDL admission allows only
+those additions; existing objects are never rewritten. Every added table must
+remain empty. Existing data is checked before/after, excluding only the newly
+created empty tables. Full execution-schema validation and removal of exactly
+the signed additions must reproduce the immutable enrolled H0 fingerprint.
+Runtime validation accepts H1 only through that verified lineage, never by
+falling back to H0. Generation, binding, profile, MFA/authentication and activation
+remain unchanged. V1 completed histories retain their original interpretation;
+no completed installation is eligible for a second completion.
+
+Browser preview selects the package from the strictly validated source. Signed
+CLI preview requires the same existing inspection purpose with this explicit
+subject (an old v1 inspection approval cannot inspect v2):
+
+```json
+{"kind":"target_event_foundation_preview","operator":"<operator>","reason":"<reason>","package":"recognition-preactivation-runtime-foundation-v2"}
+```
+
+Its approval uses `preview_binding(subject)`, which binds the v2 family and full
+canonical manifest digest. Completion still uses the existing
+`target_event_foundation_completion` purpose, exact signed plan, root, mandate,
+owner/session proofs, signing domain and `migration_binding()` representation;
+the migration family/definitions are those of the plan's closed package. The
+offline signer accepts only these two pinned package policies. No new command,
+signing ceremony, raw-token substitute, legacy transaction or force flag exists.
+All existing DELETE/FULL, physical identity, pre-authority topology, empty work,
+freshness, atomic commit and one-time consumption requirements apply to v2.
+
+The remainder below documents the original v1 edge and shared ceremony. Where it
+describes adding/projecting event objects only, v2 instead uses its signed exact
+addition list. Do not run `install-contracts` against an enrolled v3 target.
+
 ## Contract
 
 The original generation-5 v3 binding, runtime profile and enrollment audit retain

@@ -14,12 +14,26 @@ from .trust import fields, load, require
 
 
 PACKAGE = 'recognition-preactivation-event-foundation-v1'
+RUNTIME_PACKAGE = 'recognition-preactivation-runtime-foundation-v2'
 ACTION = 'runtime_target_event_foundation_completed'
 KIND = 'target_event_foundation_completion'
 PLAN_FIELDS = tuple(('format package installation_id target_id owner_id generation binding_sha256 profile_sha256 '
     'enrollment_audit_sha256 h0 h1 control_before_sha256 control_after_sha256 definitions_sha256 physical '
     'auth_epoch mfa_epoch owner_key_sha256 target_data_sha256 readiness_sha256 source_audit_sha256 '
     'operator reason created_at_utc deadline_at_utc').split())
+
+
+def package_definitions(package):
+    if package == PACKAGE:
+        return event_schema.definitions()
+    require(package == RUNTIME_PACKAGE, 'foundation_package_unknown')
+    from . import operation_schema, execution_schema
+    return {**event_schema.definitions(), **operation_schema.definitions(), **execution_schema.definitions()}
+
+
+def additions(plan):
+    definitions = package_definitions(plan['package'])
+    return {name: sql for name, sql in definitions.items() if name in plan['added_objects']} if plan['package'] == RUNTIME_PACKAGE else definitions
 
 
 def normalized_manifest(objects):
@@ -61,15 +75,17 @@ def present(control):
     if not control.execute("SELECT 1 FROM sqlite_master WHERE name='recognition_admin_audit'").fetchone():
         return False
     return bool(control.execute("SELECT 1 FROM recognition_admin_audit WHERE "
-        "json_extract(body_json,'$.action')=? OR json_extract(body_json,'$.subject.package')=? LIMIT 1",
-        (ACTION, PACKAGE)).fetchone())
+        "json_extract(body_json,'$.action')=? OR json_extract(body_json,'$.subject.package') IN (?,?) LIMIT 1",
+        (ACTION, PACKAGE, RUNTIME_PACKAGE)).fetchone())
 
 
 def validate_plan(plan):
     from . import runtime_profile_schema as p, runtime_enrollment as codec
-    fields(plan, PLAN_FIELDS)
-    require(plan['format'] == 'recognition-target-schema-completion-plan-v1'
-            and plan['package'] == PACKAGE and type(plan['generation']) is int and plan['generation'] == 5,
+    require(type(plan) is dict, 'foundation_plan_scope')
+    extended = plan.get('package') == RUNTIME_PACKAGE
+    fields(plan, PLAN_FIELDS + ('added_objects',) if extended else PLAN_FIELDS)
+    require(plan['format'] == ('recognition-target-schema-completion-plan-v2' if extended else 'recognition-target-schema-completion-plan-v1')
+            and plan['package'] in (PACKAGE, RUNTIME_PACKAGE) and type(plan['generation']) is int and plan['generation'] == 5,
             'foundation_plan_scope')
     for key in ('installation_id', 'target_id'):
         from .trust import identity
@@ -80,7 +96,16 @@ def validate_plan(plan):
                 'control_before_sha256','control_after_sha256','definitions_sha256','owner_key_sha256',
                 'target_data_sha256','readiness_sha256','source_audit_sha256'):
         p._check_sha(plan[key])
-    require(plan['h0'] != plan['h1'] and plan['definitions_sha256'] == digest(event_schema.definitions()),
+    definitions = package_definitions(plan['package'])
+    if extended:
+        names = plan['added_objects']
+        require(type(names) is list and all(type(name) is str for name in names)
+                and names == sorted(set(names)) and set(names) <= set(definitions)
+                and set(event_schema.definitions()) <= set(names)
+                and {'recognition_operation_contracts', 'recognition_operation_receipts',
+                     'recognition_execution_claims', 'recognition_execution_seals'} <= set(names),
+                'foundation_addition_scope')
+    require(plan['h0'] != plan['h1'] and plan['definitions_sha256'] == digest(definitions),
             'foundation_package_mismatch')
     require(plan['control_before_sha256'] == normalized_manifest(source_definitions())
             and plan['control_after_sha256'] == normalized_manifest(upgrade_definitions(source_definitions())),
@@ -138,7 +163,7 @@ def _signed_history(control, event, subject):
     require(body['holder']['actor_id'] == plan['owner_id'], 'foundation_approval_owner')
     expected = authorization.Authorization(target=authorization.Target(**body['target']), environment='production',
         expires_at_utc=body['expires_at_utc'], reference=governance.contract.MANDATE,
-        **authorization.migration_binding(PACKAGE, event_schema.definitions()))
+        **authorization.migration_binding(plan['package'], package_definitions(plan['package'])))
     require(body['approvals'] == [asdict(expected)], 'foundation_approval_purpose')
     at, issued, expires = map(a.timestamp, (event['at_utc'], body['issued_at_utc'], body['expires_at_utc']))
     require(a.timestamp(plan['created_at_utc']) <= issued <= at < expires <= issued+admin_auth.RECENT_SECONDS
@@ -163,7 +188,7 @@ def _signed_history(control, event, subject):
 def verify(control):
     from . import runtime_execution_claim_schema as claims, runtime_profile_schema as profiles
     rows = control.execute("SELECT * FROM recognition_admin_audit WHERE json_extract(body_json,'$.action')=? "
-                           "OR json_extract(body_json,'$.subject.package')=?", (ACTION, PACKAGE)).fetchall()
+                           "OR json_extract(body_json,'$.subject.package') IN (?,?)", (ACTION, PACKAGE, RUNTIME_PACKAGE)).fetchall()
     if not rows:
         return None
     require(len(rows) == 1, 'foundation_lineage_ambiguous')
@@ -172,7 +197,7 @@ def verify(control):
     fields(subject, ('package','plan','plan_sha256','approval','signature','state'))
     plan = subject['plan']; validate_plan(plan)
     require(event['action'] == ACTION and type(event['actor']) is int and event['actor'] == plan['owner_id']
-            and subject['package'] == PACKAGE and subject['state'] == 'CONSUMED'
+            and subject['package'] == plan['package'] and subject['state'] == 'CONSUMED'
             and subject['plan_sha256'] == digest(plan) and event['previous_sha256'] == plan['source_audit_sha256'],
             'foundation_lineage_record')
     binding_row = control.execute('SELECT * FROM recognition_admin_bindings WHERE generation=5').fetchone()
@@ -216,9 +241,13 @@ def validate_target(control, target, binding, profile, observed):
            'runtime_profile_schema_mismatch', 503)
     if expected != profile['target_schema_sha256']:
         event_schema.check_schema(target)
+        plan = verify(control)
+        if plan['package'] == RUNTIME_PACKAGE:
+            from . import execution_schema
+            execution_schema.check_schema(target)
         objects = [list(row) for row in target.execute(
             "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name")
-                   if row[1] not in event_schema.definitions()]
+                   if row[1] not in additions(plan)]
         reconstructed = digest(dict(objects=objects, application_id=target.execute('PRAGMA application_id').fetchone()[0],
                                     user_version=target.execute('PRAGMA user_version').fetchone()[0]))
         require(reconstructed == profile['target_schema_sha256'], 'foundation_source_projection_mismatch')
