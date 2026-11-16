@@ -59,6 +59,9 @@ Any change in a bound observation requires a new preview and approval.
 
 ## Protected interface and approval
 
+For separately approved operator key setup and public-only root installation, use
+the [minimal governance bootstrap runbook](recognition-governance-bootstrap.md).
+
 The existing owner/CSRF-protected administration blueprint provides:
 
 | Method and suffix under `/api/admin/recognition-control/` | Exact request JSON |
