@@ -1,13 +1,51 @@
 """Local owner control, activation ceremony and fixed approval orchestration."""
 
 from dataclasses import asdict
+from contextlib import contextmanager
 from datetime import datetime, timezone
 import hmac
 import sqlite3
 
-from flask import Blueprint, current_app, g, jsonify, request, session, render_template
+from flask import Blueprint, current_app, g, has_request_context, jsonify, request, session, render_template
 
 from . import admin_auth as auth, administration as a
+
+
+def _log_admin_failure(stage, error):
+    endpoints = {'recognition_control.runtime_foundation_preview': 'foundation_preview',
+                 'recognition_control.runtime_activation_readiness': 'readiness'}
+    if (not has_request_context() or isinstance(error, a.AdminError) or request.endpoint not in endpoints
+            or getattr(g, 'recognition_admin_failure_logged', False)):
+        return
+    stages = ('configuration', 'target_access', 'control_access', 'owner_access',
+              'authentication_backend', 'get_admin_identity', 'admin_session')
+    stage = stage if stage in stages else endpoints[request.endpoint]
+    if isinstance(error, sqlite3.Error):
+        failure_class = 'database_access_failed'
+    elif isinstance(error, OSError):
+        failure_class = 'filesystem_access_failed'
+    elif isinstance(error, ImportError):
+        failure_class = 'dependency_import_failed'
+    elif isinstance(error, ValueError):
+        failure_class = 'validation_failed'
+    else:
+        return
+    g.recognition_admin_failure_logged = True
+    try:
+        current_app.logger.error('RECOGNITION_ADMIN_FAILURE stage=%s failure_class=%s', stage, failure_class)
+    except Exception:
+        pass  # A failed log sink cannot replace the original failure.
+
+
+@contextmanager
+def _admin_failure_boundary(stage):
+    try:
+        yield
+    except a.AdminError:
+        raise
+    except (OSError, sqlite3.Error, ValueError, ImportError) as error:
+        _log_admin_failure(stage, error)
+        raise
 
 
 def now_utc():
@@ -33,7 +71,7 @@ def authentication_backend(config):
     """Durable format dispatch for authentication only; no fallback on failure."""
     from . import administration_schema, runtime_profile_schema, readiness_diagnostics
     from .trust import load
-    with readiness_diagnostics.stage('history_validation'), a.connect(config.control) as conn:
+    with _admin_failure_boundary('control_access'), readiness_diagnostics.stage('history_validation'), a.connect(config.control) as conn:
         administration_schema.check_control(conn)
         rows = conn.execute('SELECT body_json FROM recognition_admin_bindings ORDER BY generation').fetchall()
         a.need(bool(rows), 'installation_not_initialized', 503)
@@ -84,6 +122,7 @@ def register_admin_routes(app):
         return payload
 
     def unavailable(_error):
+        _log_admin_failure('operation', _error)
         return error_payload('administrative_control_unavailable'), 503
 
     for error_type in (OSError, sqlite3.Error, ValueError, ImportError):
@@ -91,17 +130,21 @@ def register_admin_routes(app):
 
     def context(*, administrative=False, authentication_only=False):
         from . import readiness_diagnostics
-        with readiness_diagnostics.stage('configuration'):
+        with _admin_failure_boundary('configuration'), readiness_diagnostics.stage('configuration'):
             config = configuration()
             a.need(config is not None, "administrative_control_not_configured", 503)
-        with readiness_diagnostics.stage('owner_access'):
-            from src.review.admin_dashboard import owner_access
+        with readiness_diagnostics.stage('owner_access'), _admin_failure_boundary('target_access'):
+            with _admin_failure_boundary('owner_access'):
+                from src.review.admin_dashboard import owner_access
             with a.connect(config.target) as conn:
-                allowed, _ = owner_access(conn, session.get("authenticated_reviewer_id"), session.get("reviewer_key"))
+                with _admin_failure_boundary('owner_access'):
+                    allowed, _ = owner_access(conn, session.get("authenticated_reviewer_id"), session.get("reviewer_key"))
             a.need(allowed, "recognition_owner_required", 403)
         primary = session.get("recognition_primary")
-        backend = authentication_backend(config) if authentication_only else auth
-        identity = backend.get_admin_identity(config, primary, now=now_utc())
+        with _admin_failure_boundary('authentication_backend'):
+            backend = authentication_backend(config) if authentication_only else auth
+        with _admin_failure_boundary('get_admin_identity'):
+            identity = backend.get_admin_identity(config, primary, now=now_utc())
         a.need(identity.actor_id == session.get("authenticated_reviewer_id"), "owner_identity_mismatch")
         if administrative:
             if backend is auth:
@@ -109,7 +152,8 @@ def register_admin_routes(app):
                     row, _ = auth._session(conn, target, binding, session.get("recognition_admin"), now_utc())
                     a.need(row["primary_hash"] == a.token_hash(primary), "administrative_browser_session_mismatch")
             else:
-                backend.require_recognition_admin(config, session.get('recognition_admin'), primary_token=primary, now=now_utc())
+                with _admin_failure_boundary('admin_session'):
+                    backend.require_recognition_admin(config, session.get('recognition_admin'), primary_token=primary, now=now_utc())
         return config
 
     def data(fields):
@@ -204,7 +248,8 @@ def register_admin_routes(app):
                     a.need(authentication_backend(config) is runtime_activation, 'runtime_profile_required')
                 return jsonify(runtime_activation.assess(config, session['recognition_admin'],
                                primary_token=session['recognition_primary']))
-            except Exception:
+            except Exception as error:
+                _log_admin_failure('operation', error)
                 g.recognition_control_diagnostic = diagnostic_scope.get('diagnostic')
                 raise
 
@@ -221,7 +266,8 @@ def register_admin_routes(app):
                         from . import runtime_target_schema_completion as completion
                         return jsonify(completion.preview(config, session['recognition_admin'],
                             primary_token=session['recognition_primary'], operator=value['operator'], reason=value['reason']))
-            except Exception:
+            except Exception as error:
+                _log_admin_failure('operation', error)
                 # The assessment ContextVar resets before Flask handles the error.
                 # Copy only the fixed classification, never the exception itself.
                 g.recognition_control_diagnostic = diagnostic_scope.get('diagnostic')
