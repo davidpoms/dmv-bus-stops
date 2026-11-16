@@ -16,6 +16,7 @@ from . import administration as a, admin_auth as auth, runtime_auth
 from . import runtime_validation as runtime, runtime_activation as owner, local_readiness
 from . import event_schema, execution_schema, runtime_target_schema_lineage as lineage
 from . import runtime_execution_claim_schema as claims, runtime_production_governance as governance
+from . import readiness_diagnostics as diagnostics
 from .rules import canonical, digest
 from .trust import require, load, utc
 
@@ -135,7 +136,7 @@ def _plan(config, control, target, session, primary, *, operator, reason, create
                     and not check.execute('PRAGMA foreign_key_check').fetchone(), 'foundation_integrity_failure')
     # Backup through a separate RO reader: backing up an active writer connection
     # can wait on its own reservation. The runtime owner already holds both writers.
-    with tempfile.TemporaryDirectory(prefix='recognition-foundation-preview-') as directory:
+    with diagnostics.stage('foundation_copy'), tempfile.TemporaryDirectory(prefix='recognition-foundation-preview-') as directory:
         preview_path = Path(directory)/'preview.db'
         with a.connect(config.target) as reader, closing(sqlite3.connect(preview_path)) as preview:
             reader.backup(preview)
@@ -143,11 +144,13 @@ def _plan(config, control, target, session, primary, *, operator, reason, create
             preview.execute('PRAGMA foreign_keys=ON')
             require(_fingerprint(preview,'main') == profile['target_schema_sha256'], 'foundation_preview_source_mismatch')
             preview.execute('BEGIN')
-            for sql in event_schema.definitions().values():
-                preview.execute(sql)
-            execution_schema.check_schema(preview)  # All readiness target schemas, not just event tables.
-            assessment = local_readiness._assess_inventory(control,preview,binding,runtime._utc_now(),config=config)
-            require(assessment['activation_ready'], 'foundation_other_readiness_prerequisites')
+            with diagnostics.stage('foundation_schema'):
+                for sql in event_schema.definitions().values():
+                    preview.execute(sql)
+                execution_schema.check_schema(preview)  # All readiness target schemas, not just event tables.
+            with diagnostics.stage('foundation_inventory'):
+                assessment = local_readiness._assess_inventory(control,preview,binding,runtime._utc_now(),config=config)
+                require(assessment['activation_ready'], 'foundation_other_readiness_prerequisites')
             h1 = _fingerprint(preview,'main')
     now = runtime._utc_now()
     created_at = now if created_at is None else created_at
@@ -177,7 +180,8 @@ def preview(config, session_token, *, primary_token, operator, reason):
         owner._view(context).validate_session(session_token, primary_token=primary_token)
         with a.connect(config.control) as control, a.connect(config.target) as target:
             control.execute('BEGIN');target.execute('BEGIN')
-            plan = _plan(config,control,target,session_token,primary_token,operator=operator,reason=reason)
+            with diagnostics.stage('foundation_prerequisites'):
+                plan = _plan(config,control,target,session_token,primary_token,operator=operator,reason=reason)
     return dict(plan=plan,plan_sha256=digest(plan),execution_authority=False)
 
 

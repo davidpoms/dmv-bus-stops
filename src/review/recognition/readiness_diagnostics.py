@@ -15,7 +15,10 @@ from .trust import TrustError
 _scope = ContextVar('recognition_readiness_diagnostic_scope', default=None)
 _logger = logging.getLogger(__name__)
 _STAGES = frozenset(('readiness_request', 'history_validation', 'runtime_identity_validation',
-                     'authentication', 'claim_inspection', 'readiness_inventory'))
+                     'authentication', 'claim_inspection', 'readiness_inventory',
+                     'configuration', 'owner_access', 'foundation_request',
+                     'foundation_prerequisites', 'foundation_copy', 'foundation_schema',
+                     'foundation_inventory'))
 _ADMIN_CLASSES = {code: code for code in (
     'runtime_profile_identity_mismatch', 'runtime_identity_changed', 'runtime_profile_not_enrolled',
     'runtime_profile_enrollment_invalid', 'administrative_clock_rollback',

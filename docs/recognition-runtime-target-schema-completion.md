@@ -74,6 +74,17 @@ Responses inherit the blueprint's `no-store` policy and existing error handling.
 There is no public signing endpoint, private signing key, caller SQL, package
 selector, arbitrary hash override or browser activation action.
 
+If browser preview returns `administrative_control_unavailable`, its private
+`RECOGNITION_READINESS_DIAGNOSTIC` record now identifies a fixed stage and failure
+class without exception text or request values. `configuration` and `owner_access`
+precede authentication; existing history/runtime-identity stages still apply.
+`foundation_prerequisites` covers source-plan checks, `foundation_copy` covers the
+temporary target copy, `foundation_schema` checks the copy after installing the
+fixed package, and `foundation_inventory` checks its remaining readiness requirements.
+The record preserves the original HTTP response and never authorizes a retry or
+relaxes a prerequisite. A generic 503 alone does not establish which check failed.
+Browser preview does not load the governance root; signed completion does.
+
 Approval reuses the existing independently installed production-governance public
 root (`<control filename>.governance-root.json`), Ed25519 domain and canonical
 `recognition-runtime-production-governance-v1` body. Its subject is exactly

@@ -389,6 +389,59 @@ class TargetSchemaCompletionTests(unittest.TestCase):
             control.commit()
         self.assertEqual('COMPLETED',completion.inspect(self.config)['state'])
 
+    def test_http_preview_private_stage_diagnostics_preserve_response_and_state(self):
+        import json
+        from flask import Flask
+        from src.review import admin_dashboard
+        from src.review.recognition import admin_routes, readiness_diagnostics as diagnostics
+        from src.review.recognition.qualification import Quarantined
+        from src.review.recognition.trust import TrustError
+        app = Flask(__name__)
+        app.config.update(TESTING=True, SECRET_KEY='synthetic-preview-diagnostic')
+        admin_routes.register_admin_routes(app)
+        client = app.test_client()
+        with client.session_transaction() as browser:
+            browser.update(authenticated_reviewer_id=1, reviewer_key='owner-key',
+                           recognition_primary=self.primary, recognition_admin=self.session,
+                           auth_csrf='synthetic-csrf')
+        secret = '/secret/path nonce=secret-nonce token=secret-token approval=secret-approval'
+        cases = [
+            (admin_routes, 'configuration', OSError(secret), 'configuration', 'filesystem_access_failed'),
+            (admin_dashboard, 'owner_access', sqlite3.DatabaseError(secret), 'owner_access', 'database_access_failed'),
+            (owner, 'get_admin_identity', ImportError(secret), 'authentication', 'dependency_import_failed'),
+            (completion, '_journal', TrustError(secret), 'foundation_prerequisites', 'trust_validation_failed'),
+            (completion.tempfile, 'TemporaryDirectory', OSError(secret), 'foundation_copy', 'filesystem_access_failed'),
+            (completion.execution_schema, 'check_schema', Quarantined(secret), 'foundation_schema', 'recognition_inventory_rejected'),
+            (readiness, '_assess_inventory', TrustError(secret), 'foundation_inventory', 'trust_validation_failed'),
+        ]
+        before = self.dump(self.config.target), self.dump(self.config.control)
+        with patch.object(admin_routes, 'configuration', return_value=self.config):
+            for module, name, error, stage, classification in cases:
+                for broken_sink in (False, True):
+                    with self.subTest(stage=stage, broken_sink=broken_sink), \
+                         patch.object(module, name, side_effect=error), \
+                         patch.object(diagnostics._logger, 'warning',
+                                      side_effect=RuntimeError(secret) if broken_sink else None) as log:
+                        response = client.post('/api/admin/recognition-control/runtime-foundation/preview',
+                            json=dict(csrf_token='synthetic-csrf', operator='fixture', reason='review'))
+                        self.assertEqual(503, response.status_code)
+                        self.assertEqual({'error': 'administrative_control_unavailable'}, response.get_json())
+                        self.assertEqual('no-store', response.headers['Cache-Control'])
+                        log.assert_called_once()
+                        record = json.loads(log.call_args.args[1])
+                        self.assertEqual(stage, record['stage'])
+                        self.assertEqual(classification, record['failure_class'])
+                        self.assertNotIn(secret, repr(log.call_args))
+                        self.assertNotIn('exc_info', log.call_args.kwargs)
+                    self.assertEqual(before, (self.dump(self.config.target), self.dump(self.config.control)))
+            with patch.object(diagnostics._logger, 'warning') as log:
+                response = client.post('/api/admin/recognition-control/runtime-foundation/preview',
+                    json=dict(csrf_token='synthetic-csrf', operator='fixture', reason='review'))
+                self.assertEqual(200, response.status_code)
+                self.assertFalse(response.get_json()['execution_authority'])
+                log.assert_not_called()
+            self.assertEqual(before, (self.dump(self.config.target), self.dump(self.config.control)))
+
     def test_protected_http_csrf_preview_apply_and_status(self):
         from flask import Flask
         from src.review.recognition import admin_routes

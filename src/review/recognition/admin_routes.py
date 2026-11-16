@@ -83,12 +83,15 @@ def register_admin_routes(app):
         routes.register_error_handler(error_type, unavailable)
 
     def context(*, administrative=False, authentication_only=False):
-        config = configuration()
-        a.need(config is not None, "administrative_control_not_configured", 503)
-        from src.review.admin_dashboard import owner_access
-        with a.connect(config.target) as conn:
-            allowed, _ = owner_access(conn, session.get("authenticated_reviewer_id"), session.get("reviewer_key"))
-        a.need(allowed, "recognition_owner_required", 403)
+        from . import readiness_diagnostics
+        with readiness_diagnostics.stage('configuration'):
+            config = configuration()
+            a.need(config is not None, "administrative_control_not_configured", 503)
+        with readiness_diagnostics.stage('owner_access'):
+            from src.review.admin_dashboard import owner_access
+            with a.connect(config.target) as conn:
+                allowed, _ = owner_access(conn, session.get("authenticated_reviewer_id"), session.get("reviewer_key"))
+            a.need(allowed, "recognition_owner_required", 403)
         primary = session.get("recognition_primary")
         backend = authentication_backend(config) if authentication_only else auth
         identity = backend.get_admin_identity(config, primary, now=now_utc())
@@ -196,11 +199,14 @@ def register_admin_routes(app):
 
     @routes.post('/runtime-foundation/preview')
     def runtime_foundation_preview():
-        value = data(('operator','reason'))
-        config = context(administrative=True, authentication_only=True)
-        from . import runtime_target_schema_completion as completion
-        return jsonify(completion.preview(config, session['recognition_admin'],
-            primary_token=session['recognition_primary'], operator=value['operator'], reason=value['reason']))
+        from . import readiness_diagnostics
+        with readiness_diagnostics.assessment(), readiness_diagnostics.stage('foundation_request'):
+            value = data(('operator','reason'))
+            with readiness_diagnostics.stage('authentication'):
+                config = context(administrative=True, authentication_only=True)
+            from . import runtime_target_schema_completion as completion
+            return jsonify(completion.preview(config, session['recognition_admin'],
+                primary_token=session['recognition_primary'], operator=value['operator'], reason=value['reason']))
 
     @routes.post('/runtime-foundation/complete')
     def runtime_foundation_complete():
