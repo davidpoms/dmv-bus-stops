@@ -299,6 +299,79 @@ later packages; their existing installation APIs remain separately gated.
 
 ## Eventual PythonAnywhere preflight
 
+### Recording genuine deployment-rehearsal observations
+
+`local_readiness.record_deployment_rehearsal()` retains its legacy transaction and
+audit format. Generation-5 v3 recording uses the existing runtime transaction,
+strict enrolled identity/profile checks, target/control reservations and final
+scope revalidation. Its v3 branch is pre-activation only. It appends only the
+existing `local_deployment_rehearsal_recorded` record; it neither assesses
+readiness nor invokes foundation completion, activation or recognition execution.
+Evidence is copied and checked again before commit; pre-commit failure rolls back
+the audit. A lost commit acknowledgement can leave a complete durable record;
+inspect trusted durable state before retrying an unconfirmed outcome.
+
+The evidence file/request is exactly a JSON object mapping all twelve
+`local_readiness.REHEARSAL_CHECKS` names to lowercase 64-character SHA256 digests:
+`sqlite_locking`, `concurrent_workers`, `filesystem_permissions`,
+`control_persistence`, `backup_creation`, `backup_restoration`, `background_jobs`,
+`restart_behavior`, `process_lifecycle`, `secret_protection`,
+`no_startup_activation`, and `writer_lock`. No extra fields are accepted.
+Each digest must identify actual preserved evidence from the approved disposable
+host rehearsal documented in `recognition-deployment-rehearsal-slice-f.md`,
+applicable to this installation/generation. Backup evidence must support the
+unchanged declaration of daily backups, 30-day retention and a verified restore.
+The recorder validates hashes and scope; it does not perform the rehearsal or
+prove that submitted hashes came from genuine observations. Never supply hashes
+of check names, placeholders, local/synthetic test outputs claimed as hosted evidence, or invented
+observations. No source artifacts or credentials are printed or uploaded by it.
+
+For the enrolled serving context, the existing owner/admin blueprint accepts
+`POST /api/admin/recognition-control/runtime-activation/rehearsal` with exactly
+`{csrf_token, generation: 5, operator, reason, evidence}`. Existing owner,
+MFA/admin-session and CSRF checks apply; the session proofs are revalidated inside
+the recorder transaction. No tokens are returned or copied to form fields.
+On the already-authenticated Owner Activation page, the existing `call()` helper
+can submit this action with the operator's real evidence map and adds CSRF itself:
+
+```javascript
+await call('runtime-activation/rehearsal', {
+  generation: 5, operator: rehearsalOperator,
+  reason: rehearsalReason, evidence: rehearsalEvidence
+})
+```
+
+The three variables above are operator inputs, not generated evidence. The helper
+uses the existing browser session; no raw primary/admin token is supplied.
+
+Trusted-host tooling exposes the same recorder (no browser token or new signing
+ceremony) through `manage_recognition_administration.py record-deployment-rehearsal`:
+
+```bash
+: "${REHEARSAL_EVIDENCE_FILE:?Set the absolute JSON evidence-map path}"
+: "${REHEARSAL_OPERATOR:?Set the verified operator name}"
+: "${REHEARSAL_REASON:?Set the factual reason identifying the actual rehearsal}"
+RECOGNITION_SQLITE_LIBRARY=/home/davidpoms/sqlite-runtime/3.54.1/lib/libsqlite3.so.0 \
+python scripts/active/manage_recognition_administration.py record-deployment-rehearsal \
+  --target /home/davidpoms/dmv_bus_stops.db \
+  --control /home/davidpoms/recognition-admin-control.db \
+  --key-file /home/davidpoms/recognition-admin.key \
+  --expected-generation 5 --evidence-file "$REHEARSAL_EVIDENCE_FILE" \
+  --operator "$REHEARSAL_OPERATOR" --reason "$REHEARSAL_REASON"
+```
+
+The CLI file must be absolute, regular, non-symlink, single-link, bounded to 16 KiB
+and distinct from the target/control/key files. Recording uses fresh time after
+reservations and leaves the original audit target/binding representation intact.
+A console with a different enrolled hostname/device/inode cannot use this CLI;
+it must not bypass that refusal or reuse filesystem-recovery authorization.
+Use the authenticated serving-context route instead. A successful action returns
+`{"state":"RECORDED","generation":5,"evidence_checks":12,"execution_authority":false}`.
+Then run the existing separate read-only preview/readiness action. Records must
+match the current binding scope and be less than 86,400 seconds old, as before.
+
+### Completion preflight
+
 The manual syntax above does not authorize skipping preflight. Before approving
 deployment or consumption, establish all of the following in the real serving context:
 

@@ -237,6 +237,17 @@ def register_admin_routes(app):
             value['code'], primary_token=session['recognition_primary'], action=value['action'],
             installation_id=value['installation_id'], generation=value['generation']))
 
+    @routes.post('/runtime-activation/rehearsal')
+    def runtime_deployment_rehearsal():
+        value = data(('operator','reason','evidence','generation'))
+        a.need(type(value['generation']) is int and value['generation'] == 5, 'deployment_rehearsal_generation_mismatch', 400)
+        config = context(administrative=True, authentication_only=True)
+        from . import local_readiness
+        local_readiness.record_deployment_rehearsal(config,operator=value['operator'],reason=value['reason'],
+            evidence=value['evidence'],now=now_utc(),expected_generation=value['generation'],
+            session_token=session['recognition_admin'],primary_token=session['recognition_primary'])
+        return dict(state='RECORDED',generation=5,evidence_checks=12,execution_authority=False)
+
     @routes.get('/runtime-activation/readiness')
     def runtime_activation_readiness():
         from . import readiness_diagnostics

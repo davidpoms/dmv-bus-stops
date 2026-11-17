@@ -85,11 +85,56 @@ def install(config, *, operator, reason, now):
             control.execute("RELEASE install_local_readiness")
 
 
-def record_deployment_rehearsal(config, *, operator, reason, evidence, now):
+def record_deployment_rehearsal(config, *, operator, reason, evidence, now, expected_generation=None,
+                                session_token=None, primary_token=None):
     """Trusted host's explicit later rehearsal observations; no external access."""
     a.need(type(operator) is str and bool(operator.strip()) and type(reason) is str and bool(reason.strip()), "deployment_observation_ceremony_required")
     a.need(type(evidence) is dict and set(evidence) == REHEARSAL_CHECKS and all(operations._sha(v) for v in evidence.values()), "deployment_rehearsal_evidence_required")
+    # Dispatch only; a v3 history can never fall back to deployment/v2 identity.
+    from .trust import load
+    from . import runtime_profile_schema, runtime_validation, runtime_activation
+    a.need(type(config) is a.LocalAdministration, 'local_administration_required', 503)
+    config.paths()
+    with a.connect(config.control) as control:
+        bodies = [load(row[0]) for row in control.execute('SELECT body_json FROM recognition_admin_bindings ORDER BY generation')]
+        a.need(all(type(body) is dict for body in bodies), 'installation_history_integrity_failure', 503)
+        runtime = any(body.get('format') == runtime_profile_schema.V3 for body in bodies)
+    if runtime:
+        frozen = dict(evidence)
+        evidence_sha256 = digest(frozen)
+        with runtime_activation._transaction(config) as context:
+            if session_token is not None or primary_token is not None:
+                # Protected HTTP callers must retain their existing MFA/session
+                # authority through this transaction, not just a prior route check.
+                runtime_activation._view(context).validate_session(session_token,primary_token=primary_token)
+            control, _, binding, scope = runtime_activation._read_parts(context)
+            a.need(binding['generation'] == 5 and (expected_generation is None or
+                   (type(expected_generation) is int and expected_generation == 5)),
+                   'deployment_rehearsal_generation_mismatch', 503)
+            a.need(binding['production_state'] == 'NOT_ACTIVATED' and _state(control,binding)['state'] == 'NOT_ACTIVATED',
+                   'deployment_rehearsal_requires_not_activated', 503)
+            target = canonical(production_operations.local_target(binding))
+            binding_sha256 = digest(binding)
+            def revalidate():
+                a.need(type(evidence) is dict and set(evidence) == REHEARSAL_CHECKS
+                       and all(operations._sha(v) for v in evidence.values()) and evidence == frozen
+                       and digest(frozen) == evidence_sha256,
+                       'deployment_rehearsal_evidence_changed', 503)
+                _, _, current, current_scope = runtime_activation._read_parts(context)
+                a.need(current_scope == scope and digest(current) == binding_sha256
+                       and canonical(production_operations.local_target(current)) == target,
+                       'deployment_rehearsal_scope_changed', 503)
+            revalidate()
+            a._audit(control, 'local_deployment_rehearsal_recorded', operator, runtime_validation._utc_now(),
+                     dict(target=load(target),evidence=frozen,reason=reason,
+                          backup=dict(frequency='daily',retention_days=30,restore_verified=True)))
+            revalidate()  # The manager then rechecks identity/activation under both reservations and commits.
+        return
     with a.transaction(config, lock_target=True) as (control, _, binding):
+        if session_token is not None or primary_token is not None:
+            a.need(False, 'runtime_profile_required', 503)
+        if expected_generation is not None:
+            a.need(binding['generation'] == expected_generation, 'deployment_rehearsal_generation_mismatch', 503)
         a._audit(control, "local_deployment_rehearsal_recorded", operator, now,
                  dict(target=production_operations.local_target(binding), evidence=evidence, reason=reason,
                       backup=dict(frequency="daily", retention_days=30, restore_verified=True)))

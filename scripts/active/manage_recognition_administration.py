@@ -19,7 +19,7 @@ from src.review.recognition.rules import canonical, digest
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("preview", "inspect-filesystem-rebind", "install", "install-approvals", "install-readiness", "readiness", "install-contracts", "create-operation", "inspect-operation", "scan-approved", "advance-restore", "rebind-filesystem-identity", "migrate-runtime-profile-contract", "migrate-runtime-execution-attempt-storage", "migrate-runtime-enrollment-transition-storage", "issue-runtime-challenge", "enroll-runtime-profile", "enroll-transition-runtime-profile", "reset-mfa"))
+    parser.add_argument("action", choices=("preview", "inspect-filesystem-rebind", "install", "install-approvals", "install-readiness", "readiness", "install-contracts", "create-operation", "inspect-operation", "scan-approved", "advance-restore", "rebind-filesystem-identity", "migrate-runtime-profile-contract", "migrate-runtime-execution-attempt-storage", "migrate-runtime-enrollment-transition-storage", "issue-runtime-challenge", "enroll-runtime-profile", "enroll-transition-runtime-profile", "record-deployment-rehearsal", "reset-mfa"))
     parser.add_argument("--target", type=Path, required=True)
     parser.add_argument("--control", type=Path, required=True)
     parser.add_argument("--key-file", type=Path, help="existing host-held Fernet key file; never generated here; not needed for inspect-filesystem-rebind")
@@ -58,6 +58,34 @@ def main(argv=None):
         parser.error('--key-file is required for this action')
     config = a.LocalAdministration(args.target, args.control, args.key_file)
     config.paths()
+    if args.action == 'record-deployment-rehearsal':
+        if args.expected_generation != 5 or args.evidence_file is None or not args.operator or not args.reason:
+            parser.error('record-deployment-rehearsal requires --expected-generation 5, --evidence-file, --operator and --reason')
+        import os
+        import stat
+        from src.review.recognition import local_readiness
+        from src.review.recognition.trust import load
+        try:
+            path = args.evidence_file
+            a.need(path.is_absolute() and not path.is_symlink(), 'explicit_rehearsal_evidence_file_required')
+            with path.open('rb') as source:
+                opened = os.fstat(source.fileno())
+                a.need(stat.S_ISREG(opened.st_mode) and opened.st_nlink == 1 and opened.st_size <= 16384,
+                       'rehearsal_evidence_file_required')
+                for protected in (config.target,config.control,config.key_file):
+                    observed = protected.stat()
+                    a.need((opened.st_dev,opened.st_ino) != (observed.st_dev,observed.st_ino),
+                           'separate_rehearsal_evidence_file_required')
+                encoded = source.read(16385)
+                a.need(len(encoded) <= 16384, 'rehearsal_evidence_file_required')
+            evidence = load(encoded.decode('utf-8'))
+            local_readiness.record_deployment_rehearsal(config,operator=args.operator,reason=args.reason,
+                evidence=evidence,now=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),expected_generation=5)
+        except Exception:
+            print('Deployment rehearsal record failed or outcome unconfirmed; inspect trusted state before retrying.',file=sys.stderr)
+            raise SystemExit(1) from None
+        print(canonical(dict(state='RECORDED',generation=5,evidence_checks=12,execution_authority=False)))
+        return
     if args.action == "preview":
         with a.connect(config.target) as conn:
             observation = a.observe_target(conn)
