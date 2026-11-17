@@ -3,6 +3,9 @@
 from copy import deepcopy
 import base64
 import io
+from pathlib import Path
+import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -30,6 +33,20 @@ class RuntimeFoundationCompletionTests(unittest.TestCase):
 
     def snapshot(self):
         return self.f.dump(self.config.target), self.f.dump(self.config.control)
+
+    def test_fresh_process_browser_v2_preview_uses_canonical_lineage_api(self):
+        before = self.snapshot()
+        options = dict(paths=[str(self.config.target),str(self.config.control),str(self.config.key_file)],
+                       primary=self.f.primary,session=self.f.session,now=runtime._utc_now())
+        for first in ('runtime_target_schema_lineage','runtime_target_schema_completion'):
+            options['first'] = first
+            with self.subTest(first=first):
+                result = subprocess.run([sys.executable,'-B','-c',BROWSER_PREVIEW_CHILD],
+                    input=canonical(options),text=True,capture_output=True,timeout=90,
+                    cwd=Path(__file__).resolve().parents[1])
+                self.assertEqual(0,result.returncode,result.stderr)
+                self.assertEqual(dict(status=200,package=lineage.RUNTIME_PACKAGE,canonical_api=True),load(result.stdout))
+                self.assertEqual(before,self.snapshot())
 
     def sign(self, body):
         encoded = canonical(body)
@@ -259,4 +276,49 @@ class RuntimeFoundationCompletionTests(unittest.TestCase):
         for action, name in ((s.SQLITE_CREATE_TABLE,'arbitrary'),(s.SQLITE_CREATE_TRIGGER,'arbitrary'),
                              (s.SQLITE_INSERT,'recognition_operation_contracts')):
             self.assertEqual(s.SQLITE_DENY,completion._authorizer(action,name,None,completion.ALIAS,None,additions=definitions))
+
+
+BROWSER_PREVIEW_CHILD = r'''
+import importlib,json,sys,tempfile
+from pathlib import Path
+from unittest.mock import patch
+from flask import Flask
+options=json.loads(sys.stdin.read())
+root=Path.cwd().resolve()
+assert all(Path(p).resolve().is_relative_to(Path(tempfile.gettempdir()).resolve()) for p in options['paths'])
+importlib.import_module('src.review.recognition.'+options['first'])
+from src.review.recognition import runtime_target_schema_lineage as lineage,runtime_target_schema_completion as completion
+from src.review.recognition import admin_routes,administration as a,runtime_validation as runtime,event_schema,operation_schema,execution_schema
+from src.review.recognition.rules import digest
+assert completion.lineage is lineage
+for module in (lineage,completion):
+    assert Path(module.__file__).resolve().is_relative_to(root/'src/review/recognition'), 'unexpected_module_origin'
+assert callable(getattr(lineage,'package_definitions',None)), 'canonical_lineage_api_missing'
+assert lineage.package_definitions(lineage.PACKAGE)==event_schema.definitions()
+expected={**event_schema.definitions(),**operation_schema.definitions(),**execution_schema.definitions()}
+assert lineage.package_definitions(lineage.RUNTIME_PACKAGE)==expected
+config=a.LocalAdministration(*(Path(p) for p in options['paths']))
+runtime._utc_now=lambda:options['now']
+app=Flask(__name__)
+app.config.update(TESTING=True,SECRET_KEY='synthetic-fresh-browser-preview')
+admin_routes.register_admin_routes(app)
+client=app.test_client()
+with client.session_transaction() as browser:
+    browser.update(authenticated_reviewer_id=1,reviewer_key='owner-key',auth_csrf='synthetic-csrf',
+                   recognition_primary=options['primary'],recognition_admin=options['session'])
+with patch.object(admin_routes,'configuration',return_value=config):
+    response=client.post('/api/admin/recognition-control/runtime-foundation/preview',
+        json=dict(csrf_token='synthetic-csrf',operator='fixture-owner',reason='fresh process read-only review'))
+assert response.status_code==200, 'v2_browser_preview_failed'
+assert response.is_json, 'v2_browser_preview_not_json'
+value=response.get_json()
+assert value['plan']['package']==lineage.RUNTIME_PACKAGE
+assert value['plan']['definitions_sha256']==digest(expected)
+assert not value['execution_authority']
+assert {'recognition_operation_contracts','recognition_operation_receipts','recognition_execution_claims',
+        'recognition_execution_seals'}<=set(value['plan']['added_objects'])
+assert options['primary'] not in response.get_data(as_text=True)
+assert options['session'] not in response.get_data(as_text=True)
+print(json.dumps(dict(status=response.status_code,package=value['plan']['package'],canonical_api=True)))
+'''
 
