@@ -248,6 +248,17 @@ def register_admin_routes(app):
             session_token=session['recognition_admin'],primary_token=session['recognition_primary'])
         return dict(state='RECORDED',generation=5,evidence_checks=12,execution_authority=False)
 
+    @routes.post('/runtime-activation/qualification')
+    def runtime_deployment_qualification():
+        value = data(('operator','reason','evidence','backups','generation'))
+        a.need(type(value['generation']) is int and value['generation'] == 5, 'deployment_qualification_generation_mismatch', 400)
+        config = context(administrative=True, authentication_only=True)
+        from . import deployment_qualification
+        deployment_qualification.record(config,operator=value['operator'],reason=value['reason'],
+            evidence=value['evidence'],backups=value['backups'],expected_generation=value['generation'],
+            session_token=session['recognition_admin'],primary_token=session['recognition_primary'])
+        return dict(state='RECORDED',generation=5,execution_authority=False)
+
     @routes.get('/runtime-activation/readiness')
     def runtime_activation_readiness():
         from . import readiness_diagnostics

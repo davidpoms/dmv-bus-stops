@@ -499,7 +499,9 @@ def _historical_scope(conn, body):
     require(canonical(step['subject']) == canonical(confirm['subject']) == canonical(expected)
             and digest(expected['readiness']) == body['readiness']['assessment_sha256']
             and expected['readiness'].get('code_ready') is True
-            and expected['readiness'].get('rehearsal_evidence_present') is True
+            and (expected['readiness'].get('safety_ready') is True
+                 or ('safety_ready' not in expected['readiness']
+                     and expected['readiness'].get('rehearsal_evidence_present') is True))
             and expected['readiness'].get('activation_state') == 'ACTIVATED'
             and confirm['step_artifact_sha256'] == digest(step) and confirm['token_sha256'] == ceremony['confirmation_token_sha256'],
             'runtime_authority_confirmation_scope')

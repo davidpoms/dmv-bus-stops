@@ -291,14 +291,20 @@ class ExecutionAttemptCreationTests(unittest.TestCase):
             mock.start(); self.addCleanup(mock.stop)
         self.rejected_change(changed)
 
-    def test_actual_readiness_rehearsal_change_rejected(self):
-        def changed(owner):
+    def test_actual_readiness_rehearsal_change_is_advisory(self):
+        with self.coordinator() as owner:
+            protected = self.protected()
             with a.connect(self.config.control,write=True) as conn:
                 row = conn.execute("SELECT body_json FROM recognition_admin_audit WHERE "
                     "json_extract(body_json,'$.action')='local_deployment_rehearsal_recorded' ORDER BY sequence DESC LIMIT 1").fetchone()
                 subject = deepcopy(load(row[0])['subject']); subject['target']['restore_generation'] += 1
                 a._audit(conn,'local_deployment_rehearsal_recorded','fixture',v._utc_now(),subject); conn.commit()
-        self.rejected_change(changed)
+            result = owner.create_attempt()
+            self.assertFalse(result.snapshot['execution_authority'])
+            self.assertEqual('ATTEMPT_CREATED',result.snapshot['state'])
+            self.assertEqual(protected,self.protected())
+        self.assertEqual(1,self.count(attempts.ATTEMPTS))
+        self.assert_no_downstream()
 
     def test_actual_emergency_stop_rejected(self):
         def changed(owner):

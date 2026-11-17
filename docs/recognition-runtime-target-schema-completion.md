@@ -96,11 +96,17 @@ The source must have all of the following:
 Preview runs under the existing runtime owner's target/control writer reservations.
 It backs up the target through an independent read-only connection into a private
 temporary database, installs only the fixed definitions there, and invokes the
-current complete execution-schema checker and readiness inventory. Every other
-readiness prerequisite must already pass, including emergency-stop state and
-current genuine deployment rehearsal evidence. Preview creates no rehearsal
-evidence. It rejects other missing schemas or prerequisites instead of offering a
+current complete execution-schema checker and readiness inventory. Every
+substantive safety prerequisite must pass, including emergency-stop state.
+The full twelve-check rehearsal is advisory; preview reports its absence/expiry.
+Preview creates no rehearsal evidence. It rejects other missing schemas or safety prerequisites instead of offering a
 partial completion.
+
+Completion additionally requires focused deployment qualification and a verified
+recoverable pre-change target/control backup pair. Existing exact signed-plan
+approval and atomic H0/H1 lineage are unchanged. Qualify before obtaining the
+final preview/signature: adding or changing qualification changes the plan's
+readiness digest and requires a new preview and approval.
 
 The plan binds H0/H1, fixed definitions digest, installation/target/owner/generation,
 original binding/profile/enrollment digests, exact target/control physical
@@ -299,7 +305,7 @@ later packages; their existing installation APIs remain separately gated.
 
 ## Eventual PythonAnywhere preflight
 
-### Recording genuine deployment-rehearsal observations
+### Optional: recording genuine deployment-rehearsal observations
 
 `local_readiness.record_deployment_rehearsal()` retains its legacy transaction and
 audit format. Generation-5 v3 recording uses the existing runtime transaction,
@@ -369,6 +375,96 @@ Use the authenticated serving-context route instead. A successful action returns
 `{"state":"RECORDED","generation":5,"evidence_checks":12,"execution_authority":false}`.
 Then run the existing separate read-only preview/readiness action. Records must
 match the current binding scope and be less than 86,400 seconds old, as before.
+
+### Focused deployment qualification
+
+No second PythonAnywhere account or persistent hosted rehearsal harness is needed
+for the reduced contract. A qualification is a trusted operator observation, not
+external attestation, a governance signature, activation or execution authority.
+It is stored as `local_deployment_qualification_recorded` in the existing audit,
+without adding tables or modifying binding/profile/authentication records.
+
+Before recording it:
+
+1. Review actual private DB/key files and parents, static-file mappings and logs;
+   verify no secret exposure and that ordinary startup remains NOT_ACTIVATED.
+2. Verify persistent target/control placement and observed persistence across the
+   real deployment lifecycle. Preserve factual sanitized observations.
+3. The recorder performs an actual independent-process DELETE/FULL locking/visibility
+   probe on fresh disposable sibling files on each configured DB filesystem.
+   It never performs probe writes against the target/control databases. The
+   child must use the same SQLite version; a configured private loader is used
+   before sqlite3 imports. Any timeout or unexpected writer admission rejects.
+4. Create a coherent pre-change target/control backup pair using SQLite backup
+   APIs, under a controlled/quiescent maintenance window. Do not copy open DBs
+   with filesystem copy commands. Keep the pair in private storage. Recording
+   compares both complete schemas and typed contents with the reserved live
+   stores, reopens both copies, checks integrity/foreign keys, and records SHA256s.
+   Concurrent changes cause rejection; do not relabel a stale pair as current.
+   This verifies readable recovery copies, not a full hosted restart/restore drill.
+
+The request contains `evidence` (exactly four real artifact SHA256s:
+control_persistence, filesystem_permissions, secret_protection,
+no_startup_activation) and `backups` with absolute `target` and
+`control` backup paths. Never supply hashes of check names or synthetic tests as
+observations of production. The actual file/locking/backup verification is not
+replaced by operator assertions. Successful locking/concurrency/writer checks are
+recorded by the actual probe, not supplied as additional operator hashes. The
+active `sys.prefix` must contain a launchable Python interpreter with the same
+SQLite runtime; unavailable child execution fails closed.
+The bounded probe qualifies this client context; it is not provider attestation,
+cross-host locking certification or proof against storage hardware failure.
+Ordinary runtime physical identity checks remain unchanged. POSIX owner/mode
+checks apply on production; Windows fixture runs do not certify production ACLs.
+
+Use the existing authenticated Owner Activation page helper in the enrolled
+serving context (no copying raw tokens):
+
+```javascript
+await call('runtime-activation/qualification', {
+  generation: 5, operator: qualificationOperator, reason: qualificationReason,
+  evidence: qualificationEvidence, backups: qualificationBackupPaths
+})
+```
+
+Existing owner, recent primary, MFA/admin session and CSRF checks apply and the
+session is revalidated under reservations. Inputs above are real operator inputs,
+not generated examples. Success returns `state=RECORDED`, `generation=5`,
+`execution_authority=false`. No source schema/data is changed.
+
+The same trusted-host operation is exposed as:
+
+```bash
+python scripts/active/manage_recognition_administration.py record-deployment-qualification \
+  --target /home/davidpoms/dmv_bus_stops.db \
+  --control /home/davidpoms/recognition-admin-control.db \
+  --key-file /home/davidpoms/recognition-admin.key \
+  --expected-generation 5 --operator "$QUALIFICATION_OPERATOR" \
+  --reason "$QUALIFICATION_REASON" --evidence-file "$QUALIFICATION_FILE"
+```
+
+Set the existing `RECOGNITION_SQLITE_LIBRARY` before running the CLI. The protected
+input file is an exact JSON object `{evidence, backups}`. The CLI must itself run
+in the enrolled physical context; a differently bound PA console cannot use it.
+Use the authenticated serving-context route in that case.
+
+Qualification binds the binding digest, generation/logical target, exact current
+target/control physical identities, SQLite version and relevant implementation
+digests. Changed scope requires new genuine observations and a fresh pair. It
+has no arbitrary 24-hour rehearsal expiry. Backup files must remain unchanged,
+private, single-link and without live journal/WAL artifacts. Missing, substituted
+or modified copies block completion/activation. Before foundation mutation the
+current target contents must still match the verified recovery point; otherwise
+create a fresh pair and requalify. Completion repeats the locking check, and
+rechecks qualification/permissions/backups before commit. Activation also repeats
+the locking check before consuming confirmation and changing state.
+
+After successful completion H0 remains immutable provenance and verified lineage
+admits H1. Existing activation confirmation is still required. Full rehearsal
+warnings may remain visible. Daily backup scheduling and retention remain an
+operational policy, not twelve fresh prerequisites to every execution admission.
+Any later restore must use the existing controlled restore/fencing procedure;
+these backup paths are never permission to copy old stores over a live deployment.
 
 ### Completion preflight
 

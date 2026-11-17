@@ -357,6 +357,8 @@ def change_state(config, session_token, step_token, *, primary_token, state, rea
             a.need(old['state'] == 'NOT_ACTIVATED', 'invalid_local_activation_transition')
             assessment = _assessment(context, session_token, primary_token)
             a.need(assessment['activation_ready'], 'local_activation_readiness_not_satisfied')
+            from . import deployment_qualification
+            deployment_qualification.qualify_locking(config)
             confirmation = owner.control.execute('SELECT * FROM recognition_admin_confirmations WHERE token_hash=?',
                                                   (a.token_hash(confirmation_token),)).fetchone()
             a.need(confirmation is not None and not confirmation['used']

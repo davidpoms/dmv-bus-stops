@@ -183,7 +183,7 @@ def _verify(control, target, binding, session_token, approval_id, now, *, contex
             production_operations.activation_guard(control, target, binding)
         from . import local_readiness
         a.need(local_readiness._state(control, binding)["state"] == "ACTIVATED", "activation_not_permitted")
-        a.need(local_readiness._assess(control, target, binding, now, config=_context(context)["config"], exclude_operation_id=e["operation_id"])["activation_ready"], "local_execution_readiness_not_satisfied")
+        a.need(local_readiness._assess(control, target, binding, now, config=_context(context)["config"], exclude_operation_id=e["operation_id"])["safety_ready"], "local_execution_readiness_not_satisfied")
     if type(context) is not production_operations.ProductionOperationContext:
         a.need(_enabled(control, binding), "activation_not_permitted")
     # Same whole-population regeneration as the actual writer, under its lock.

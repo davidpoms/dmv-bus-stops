@@ -179,7 +179,7 @@ def _plan(config, control, target, session, primary, *, operator, reason, create
                 execution_schema.check_schema(preview)  # All readiness target schemas, not just event tables.
             with diagnostics.stage('foundation_inventory'):
                 assessment = local_readiness._assess_inventory(control,preview,binding,runtime._utc_now(),config=config)
-                require(assessment['activation_ready'], 'foundation_other_readiness_prerequisites')
+                require(assessment.get('safety_ready') is True, 'foundation_other_readiness_prerequisites')
             h1 = _fingerprint(preview,'main')
     now = runtime._utc_now()
     created_at = now if created_at is None else created_at
@@ -213,7 +213,20 @@ def preview(config, session_token, *, primary_token, operator, reason):
             control.execute('BEGIN');target.execute('BEGIN')
             with diagnostics.stage('foundation_prerequisites'):
                 plan = _plan(config,control,target,session_token,primary_token,operator=operator,reason=reason)
-    return dict(plan=plan,plan_sha256=digest(plan),execution_authority=False)
+    return dict(plan=plan,plan_sha256=digest(plan),execution_authority=False,
+                operational_assurance_warnings=_assurance_warnings(config))
+
+
+def _assurance_warnings(config):
+    # Display only; never used as authority or substituted for qualification.
+    with a.connect(config.control) as control:
+        row = control.execute("SELECT body_json FROM recognition_admin_audit WHERE json_extract(body_json,'$.action')='local_deployment_rehearsal_recorded' ORDER BY sequence DESC LIMIT 1").fetchone()
+        binding, _, _ = runtime._history(control)
+        if row:
+            body = load(row[0])
+            if body['subject']['target'] == local_readiness.production_operations.local_target(binding) and 0 <= a.timestamp(runtime._utc_now())-a.timestamp(body['at_utc']) < 86400:
+                return []
+    return ['deployment_rehearsal_absent_or_expired']
 
 
 def _authorizer(action, first, second, database, source, *, additions=None):
@@ -303,7 +316,9 @@ def preview_approved(config, *, serialized_approval, signature):
                 preconditions=['enrolled_generation_5_h0','exact_profile_physical_identity','verified_owner',
                                'live_profile_scoped_primary_and_mfa_admin_records','independent_signed_authorization',
                                'not_activated','delete_journals_full_synchronization','empty_work_and_claims',
-                               'exact_control_topology','all_other_readiness_prerequisites'])
+                               'exact_control_topology','all_substantive_readiness_prerequisites',
+                               'verified_recoverable_backup_before_completion'],
+                operational_assurance_warnings=_assurance_warnings(config))
 
 
 def _approval_input(serialized_approval,signature):
@@ -373,6 +388,12 @@ def _complete(config, session_token, primary_token, serialized_approval, signatu
                             created_at=plan['created_at_utc'],deadline=plan['deadline_at_utc'],
                             signed_authorization=(serialized_approval,signature) if signed else None)
             require(current == plan, 'foundation_plan_changed')
+            from . import deployment_qualification
+            binding, _, _ = runtime._history(control)
+            qualification = deployment_qualification.assess(config,control,binding,runtime._utc_now(),
+                                                            target=target,before_mutation=True)
+            require(qualification['ready'], 'foundation_deployment_qualification_required')
+            deployment_qualification.qualify_locking(config)
         additions = lineage.additions(plan)
         db.set_authorizer(lambda *args: _authorizer(*args, additions=additions))
         if plan['package'] == lineage.PACKAGE:
@@ -389,6 +410,9 @@ def _complete(config, session_token, primary_token, serialized_approval, signatu
         lineage.verify(db)
         for key,path in (('control',config.control),('target',config.target)):
             require(asdict(a.target_identity(path)) == plan['physical'][key], 'foundation_physical_changed')
+        # Revalidate backup files and current permissions immediately before commit.
+        require(deployment_qualification.assess(config,db,binding,runtime._utc_now()) == qualification,
+                'foundation_deployment_qualification_changed')
         clock.read()
         require(a.timestamp(runtime._utc_now()) < min(a.timestamp(plan['deadline_at_utc']),a.timestamp(approval['expires_at_utc'])),
                 'foundation_approval_expired')

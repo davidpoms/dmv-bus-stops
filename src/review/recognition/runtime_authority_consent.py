@@ -47,7 +47,7 @@ def _subject(state):
     inventory = disposition._inspect_reserved(state.control, binding, profile, head, state.clock)
     require(not any(row['blocks_readiness'] for row in inventory['claims']), 'authority_consent_claim_disposition_blocked')
     assessment = readiness._assess_authority_consent(view, state.session, state.primary)
-    require(assessment['code_ready'] is True and assessment['rehearsal_evidence_present'] is True
+    require(assessment.get('safety_ready') is True
             and assessment['activation_state'] == 'ACTIVATED', 'authority_consent_readiness_blocked')
     _, _, activation = owner._current(state)
     reference = {k:op[k] for k in ('operation_id', 'event_id', 'event_sha256', 'preparation_id',

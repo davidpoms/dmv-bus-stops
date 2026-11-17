@@ -385,14 +385,14 @@ class RuntimeExecutionCoordinatorTests(unittest.TestCase):
                 _ = owner.snapshot
         self.assertTrue(entered)
 
-    def test_protected_key_and_rehearsal_checks_are_not_bypassed(self):
+    def test_protected_key_rechecked_and_rehearsal_is_advisory(self):
         cipher = admin_auth._cipher
         calls = []
         entered = []
         def protected(config):
             calls.append(1)
             return cipher(config)
-        with self.assertRaises(ValueError), patch.object(admin_auth,'_cipher',side_effect=protected):
+        with patch.object(admin_auth,'_cipher',side_effect=protected):
             with self.coordinator() as owner:
                 entered.append(True)
                 before = len(calls)
@@ -402,8 +402,9 @@ class RuntimeExecutionCoordinatorTests(unittest.TestCase):
                     row = control.execute("SELECT body_json FROM recognition_admin_audit WHERE json_extract(body_json,'$.action')='local_deployment_rehearsal_recorded' ORDER BY sequence DESC LIMIT 1").fetchone()
                     subject = deepcopy(load(row[0])['subject']); subject['target']['restore_generation'] += 1
                     a._audit(control,'local_deployment_rehearsal_recorded','fixture',v._utc_now(),subject); control.commit()
-                with self.assertRaisesRegex(ValueError,'readiness_blocked'): _ = owner.snapshot
-                self.assertTrue(c._coordinators[owner].poisoned)
+                _ = owner.snapshot
+                self.assertFalse(c._coordinators[owner].poisoned)
+                self.assertGreater(len(calls), before)
         self.assertTrue(entered)
 
     def test_faults_before_control_commit_rollback_all_mutations(self):

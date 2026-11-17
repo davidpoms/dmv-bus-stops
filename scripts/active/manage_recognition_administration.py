@@ -19,7 +19,7 @@ from src.review.recognition.rules import canonical, digest
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("preview", "inspect-filesystem-rebind", "install", "install-approvals", "install-readiness", "readiness", "install-contracts", "create-operation", "inspect-operation", "scan-approved", "advance-restore", "rebind-filesystem-identity", "migrate-runtime-profile-contract", "migrate-runtime-execution-attempt-storage", "migrate-runtime-enrollment-transition-storage", "issue-runtime-challenge", "enroll-runtime-profile", "enroll-transition-runtime-profile", "record-deployment-rehearsal", "reset-mfa"))
+    parser.add_argument("action", choices=("preview", "inspect-filesystem-rebind", "install", "install-approvals", "install-readiness", "readiness", "install-contracts", "create-operation", "inspect-operation", "scan-approved", "advance-restore", "rebind-filesystem-identity", "migrate-runtime-profile-contract", "migrate-runtime-execution-attempt-storage", "migrate-runtime-enrollment-transition-storage", "issue-runtime-challenge", "enroll-runtime-profile", "enroll-transition-runtime-profile", "record-deployment-rehearsal", "record-deployment-qualification", "reset-mfa"))
     parser.add_argument("--target", type=Path, required=True)
     parser.add_argument("--control", type=Path, required=True)
     parser.add_argument("--key-file", type=Path, help="existing host-held Fernet key file; never generated here; not needed for inspect-filesystem-rebind")
@@ -58,9 +58,9 @@ def main(argv=None):
         parser.error('--key-file is required for this action')
     config = a.LocalAdministration(args.target, args.control, args.key_file)
     config.paths()
-    if args.action == 'record-deployment-rehearsal':
+    if args.action in ('record-deployment-rehearsal', 'record-deployment-qualification'):
         if args.expected_generation != 5 or args.evidence_file is None or not args.operator or not args.reason:
-            parser.error('record-deployment-rehearsal requires --expected-generation 5, --evidence-file, --operator and --reason')
+            parser.error('recording requires --expected-generation 5, --evidence-file, --operator and --reason')
         import os
         import stat
         from src.review.recognition import local_readiness
@@ -79,12 +79,19 @@ def main(argv=None):
                 encoded = source.read(16385)
                 a.need(len(encoded) <= 16384, 'rehearsal_evidence_file_required')
             evidence = load(encoded.decode('utf-8'))
-            local_readiness.record_deployment_rehearsal(config,operator=args.operator,reason=args.reason,
-                evidence=evidence,now=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),expected_generation=5)
+            if args.action == 'record-deployment-qualification':
+                from src.review.recognition import deployment_qualification
+                a.need(type(evidence) is dict and set(evidence) == {'evidence','backups'}, 'deployment_qualification_input_required')
+                deployment_qualification.record(config,operator=args.operator,reason=args.reason,
+                    evidence=evidence['evidence'],backups=evidence['backups'],expected_generation=5)
+            else:
+                local_readiness.record_deployment_rehearsal(config,operator=args.operator,reason=args.reason,
+                    evidence=evidence,now=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),expected_generation=5)
         except Exception:
-            print('Deployment rehearsal record failed or outcome unconfirmed; inspect trusted state before retrying.',file=sys.stderr)
+            label = 'Deployment rehearsal' if args.action == 'record-deployment-rehearsal' else 'Deployment qualification'
+            print(label+' record failed or outcome unconfirmed; inspect trusted state before retrying.',file=sys.stderr)
             raise SystemExit(1) from None
-        print(canonical(dict(state='RECORDED',generation=5,evidence_checks=12,execution_authority=False)))
+        print(canonical(dict(state='RECORDED',generation=5,evidence_checks=12 if args.action == 'record-deployment-rehearsal' else 4,execution_authority=False)))
         return
     if args.action == "preview":
         with a.connect(config.target) as conn:

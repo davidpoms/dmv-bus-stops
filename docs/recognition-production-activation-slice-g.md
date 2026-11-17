@@ -35,15 +35,20 @@ remain separate and unchanged.
 
 The existing assessment checks exact installation/target/control identity and
 schema, owner/MFA/protected key, stop history, unfinished claims and projections,
-compatible pending contracts, current-generation rehearsal observations and known
+compatible pending contracts, current focused deployment qualification and known
 fixed writer/recovery interfaces. G additionally binds pending operation,
 approval and dependency state into the assessment and blocks stale pending
 dependencies or mismatched approval bindings. Invalidated/superseded history is
 not executable pending work. Stale pending approvals must be deliberately
 reconciled; readiness does not repair or reapprove them.
 
-Deployment observations still require all twelve existing named checks and expire
-after 24 hours. They are trusted operator observations, not external attestation.
+The optional full rehearsal still requires all twelve named checks and expires
+after 24 hours. Missing or expired rehearsal observations are advisory and cannot
+disable otherwise safe execution. Focused deployment qualification, current
+private permissions, substantive safety and no unresolved recovery remain
+mandatory for activation. Existing owner/MFA step-up, one-use confirmation,
+final revalidation and per-operation authorization remain unchanged.
+See [focused qualification](recognition-runtime-target-schema-completion.md#focused-deployment-qualification).
 Readiness is data, never activation or writer authority. Positive test observations
 are synthetic and do not establish PythonAnywhere compatibility.
 

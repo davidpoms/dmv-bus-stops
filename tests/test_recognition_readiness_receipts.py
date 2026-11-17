@@ -32,8 +32,12 @@ class ReadinessReceiptTests(unittest.TestCase):
         self.create()
         self.approve(90)
         r.install(self.config, operator="disposable-host", reason="explicit test install", now=at(90))
+        from tests.recognition_deployment_qualification_fixture import private_files
+        private_files(self.config)
 
     def deployment(self, seconds=90):
+        from tests.recognition_deployment_qualification_fixture import prepare
+        prepare(self,self.config,now=at(seconds))
         r.record_deployment_rehearsal(self.config, operator="disposable-host", reason="synthetic fixture evidence only",
             evidence={key: production.sha(dict(disposable_check=key)) for key in r.REHEARSAL_CHECKS}, now=at(seconds))
 

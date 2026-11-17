@@ -258,7 +258,7 @@ def _subject_for_owner(context):
         assessment = finalization._readiness(state)
     else:
         assessment = load(readiness._assess_coordinator(view, state.session, state.primary).canonical_json)
-    require(assessment['code_ready'] is True and assessment['rehearsal_evidence_present'] is True
+    require(assessment.get('safety_ready') is True
             and assessment['activation_state'] == 'ACTIVATED', 'authority_consent_readiness_blocked')
     state.assessed_at_utc = assessment['assessment_at_utc']
     if type(context) is IssuanceContext:

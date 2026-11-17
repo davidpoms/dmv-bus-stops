@@ -48,6 +48,8 @@ class RuntimeActivatedOwnerTests(unittest.TestCase):
             self.f.setUp()
         self.addCleanup(self.f.doCleanups)
         self.config = self.f.config
+        from tests.recognition_deployment_qualification_fixture import private_files
+        private_files(self.config)
         self.primary, self.session = self.f.f.primary, self.f.f.session
         self.approval = self.f.f.approval
         self.reference = self.f.f.reference
@@ -145,6 +147,7 @@ class RuntimeActivatedOwnerTests(unittest.TestCase):
                 seed = control.execute('SELECT seed_ciphertext FROM recognition_admin_mfa WHERE actor=1').fetchone()[0]
             for secret in (self.primary, self.session, seed, self.config.key_file.read_text().strip()):
                 self.assertNotIn(secret, text)
+
             for name in ('control', 'target', 'view', 'cipher', 'seed', 'writer', 'consume', 'activate'):
                 self.assertFalse(hasattr(result, name))
             with self.assertRaises(TypeError): pickle.dumps(result)
@@ -157,6 +160,17 @@ class RuntimeActivatedOwnerTests(unittest.TestCase):
             v.validate_runtime_snapshot(self.config)
         with self.assertRaisesRegex(a.AdminError, 'runtime_profile_contract_not_enabled'):
             a.get_installation_control(self.config)
+
+    def test_advisory_rehearsal_absence_does_not_block_activated_admission(self):
+        assess = readiness._assess_runtime
+        def without_assurance(*args, **kwargs):
+            result = assess(*args, **kwargs)
+            result.update(rehearsal_evidence_present=False, deployment_verified=False,
+                          operational_assurance=dict(status='ABSENT_OR_EXPIRED'))
+            return result
+        with patch.object(readiness,'_assess_runtime',side_effect=without_assurance):
+            with self.validate() as result:
+                self.assert_no_authority(result)
 
     def test_authentication_denial_persists_existing_reductions_control_only(self):
         self.sql('UPDATE recognition_admin_primary SET expires=? WHERE token_hash=?',

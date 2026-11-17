@@ -372,22 +372,37 @@ def _assess_inventory(control, target, binding, now, *, config, exclude_operatio
         record = load(observation[0])
         if record["subject"]["target"] == production_operations.local_target(binding) and 0 <= a.timestamp(now)-a.timestamp(record["at_utc"]) < 86400:
             prerequisites = []
-    status = "RECOVERY_REQUIRED" if recovery else "BLOCKED" if issues else "READY_FOR_DEPLOYMENT" if prerequisites else "READY_FOR_ACTIVATION"
+    from . import deployment_qualification as qualification
+    # Access protection is substantive safety, not an operator assurance flag.
+    try:
+        qualification.permissions(config)
+    except a.AdminError as error:
+        issues.append(error.code)
+    except OSError:
+        issues.append('deployment_unsafe_permissions')
+    focused = qualification.assess(config, control, binding, now)
+    safety_ready = not issues and not recovery
+    activation_ready = safety_ready and focused['ready']
+    status = "RECOVERY_REQUIRED" if recovery else "BLOCKED" if issues else "READY_FOR_ACTIVATION" if activation_ready else "READY_FOR_DEPLOYMENT"
     return dict(format="recognition-local-readiness-v1", status=status, target=production_operations.local_target(binding),
         activation_state=state["state"], issues=sorted(set(issues)), unresolved_recovery=sorted(recovery), deployment_prerequisites=prerequisites,
         code_ready=not issues and not recovery, deployment_verified=not prerequisites and not local_execution._fixture_target(target),
-        rehearsal_evidence_present=not prerequisites, activation_ready=not issues and not recovery and not prerequisites,
-        admission_state_sha256=digest(dict(pending=pending, stop=stop, deployment_observation=record if observation else None)),
-        deployment_status="REHEARSAL_REQUIRED" if prerequisites else "DISPOSABLE_REHEARSAL_ONLY" if local_execution._fixture_target(target) else "DEPLOYMENT_OBSERVATIONS_VERIFIED",
+        safety_ready=safety_ready, focused_qualification=focused,
+        operational_assurance=dict(status='CURRENT' if not prerequisites else 'ABSENT_OR_EXPIRED',
+                                   warnings=['deployment_rehearsal_absent_or_expired'] if prerequisites else []),
+        rehearsal_evidence_present=not prerequisites, activation_ready=activation_ready,
+        admission_state_sha256=digest(dict(pending=pending, stop=stop)),
+        deployment_status="ASSURANCE_ADVISORY" if prerequisites else "DISPOSABLE_REHEARSAL_ONLY" if local_execution._fixture_target(target) else "DEPLOYMENT_OBSERVATIONS_VERIFIED",
         production_authorization="PER_OPERATION_APPROVAL_REQUIRED" if activated else "BLOCKED",
-        production_execution="FINAL_ADMISSION_REQUIRED" if activated and not issues and not recovery and not prerequisites else "BLOCKED",
+        production_execution="FINAL_ADMISSION_REQUIRED" if activated and safety_ready else "BLOCKED",
         production_activation="ACTIVATED" if activated else "BLOCKED",
-        backup_requirement=dict(frequency="daily", retention_days=30, verified_restore_required=True),
+        backup_requirement=dict(verified_prechange_pair_required=True,
+                                operational_policy=dict(frequency="daily", retention_days=30)),
         assessment_at_utc=now, scope="disposable-contract-assessment" if local_execution._fixture_target(target) else "local-deployment-observation-not-authority")
 
 
 def _blocked(issue):
-    return dict(status="BLOCKED", issues=[issue], code_ready=False, deployment_verified=False, activation_ready=False,
+    return dict(status="BLOCKED", issues=[issue], code_ready=False, safety_ready=False, deployment_verified=False, activation_ready=False,
                 production_authorization="BLOCKED", production_execution="BLOCKED", production_activation="BLOCKED")
 
 
@@ -428,7 +443,11 @@ def assess(config, *, now, selected_provider=None, session_token=None, primary_t
 
 def _assessment_binding(readiness):
     # The clock controls freshness but is not itself the reviewed subject.
-    return {key: value for key, value in readiness.items() if key != "assessment_at_utc"}
+    # Advisory observation freshness must not invalidate a signed plan, an
+    # activation confirmation or execution admission. It is still displayed.
+    advisory = {'assessment_at_utc', 'operational_assurance', 'rehearsal_evidence_present',
+                'deployment_prerequisites', 'deployment_verified', 'deployment_status'}
+    return {key: value for key, value in readiness.items() if key not in advisory}
 
 
 def _ceremony(binding, old, readiness):
@@ -489,6 +508,8 @@ def _transition(config_or_fixture, session_token, step_token, *, state, reason, 
         confirmation = None
         if state == "ACTIVATED":
             a.need(readiness["activation_ready"], "local_activation_readiness_not_satisfied")
+            from . import deployment_qualification
+            deployment_qualification.qualify_locking(config)
             if not fixture:
                 if confirmation_token is None:
                     a._audit(control, "production_activation_attempt_blocked", session["actor"], now, dict(reason="activation_confirmation_required"))

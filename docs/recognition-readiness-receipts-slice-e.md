@@ -27,12 +27,12 @@ Results distinguish:
 
 | Result | Meaning |
 | --- | --- |
-| READY_FOR_DEPLOYMENT | Installed code/configuration is a candidate for deployment rehearsal; listed host requirements remain unverified. This does NOT mean the deployed platform is verified. |
-| READY_FOR_ACTIVATION | Current generation has explicit, recent rehearsal observations and passes local checks. Still not production authority or activation. |
+| READY_FOR_DEPLOYMENT | Substantive checks pass, but focused deployment qualification is missing or invalid. |
+| READY_FOR_ACTIVATION | Substantive checks and focused deployment qualification pass. Still not production authority or activation. |
 | BLOCKED | Identity, MFA/key, schema, stop, compatibility or required infrastructure failed. |
 | RECOVERY_REQUIRED | An unfinished claim, missing/conflicting projection or unverifiable committed outcome needs deliberate recovery/reconciliation. |
 
-`code_ready`, `deployment_verified`, `deployment_status`, `activation_ready`,
+`safety_ready`, `code_ready`, `deployment_verified`, `deployment_status`, `activation_ready`,
 scope and explicit BLOCKED production fields make the boundaries separate.
 Disposable reports say `disposable-contract-assessment` and
 `DISPOSABLE_REHEARSAL_ONLY`; their `deployment_verified` is always false even if
@@ -46,6 +46,32 @@ restore signoff. It expires after 24 hours and cannot survive a target rebind.
 This is a local trusted-host observation ceremony, not external attestation or
 automatic validation of a hosting provider. No actual deployment evidence was
 obtained during this slice; tests use clearly synthetic evidence references.
+
+### Reduced first-activation contract
+
+The twelve-check rehearsal is operational assurance, not a universal activation
+or execution gate. Its recorder, exact evidence map, audit scope and 24-hour
+freshness remain supported. Absence/expiry reports `ABSENT_OR_EXPIRED` and an
+advisory warning; it never becomes a fabricated successful rehearsal.
+The retained `deployment_prerequisites` field lists those outstanding optional
+checks for compatibility; it no longer determines activation eligibility.
+
+`safety_ready` requires the existing identity, schema/history, owner/MFA/key,
+stop, dependency, writer/recovery and unresolved-work checks, plus current private
+file/parent permissions. `activation_ready` additionally requires a scoped
+focused deployment qualification. It means eligible for the existing owner/MFA
+confirmation ceremony, not authority to activate. Execution admission uses
+substantive safety and the existing activation/approval/claim gates, never
+rehearsal freshness. Pending-work and stop digests remain binding; advisory
+fields are excluded from plan/confirmation subjects.
+Historical authority artifacts retain their original readiness interpretation;
+new artifacts explicitly bind `safety_ready`. No historical audit is rewritten.
+
+See the focused qualification procedure in
+[target schema completion](recognition-runtime-target-schema-completion.md#focused-deployment-qualification).
+The full hosted procedure below remains the optional stronger assessment.
+Historical slice reports below do not supersede current generation-5 governance
+signatures, runtime-profile validation or schema-lineage requirements.
 
 ## Activation state, API and installation
 

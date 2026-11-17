@@ -89,9 +89,10 @@ class TargetSchemaCompletionTests(unittest.TestCase):
             body=dict(sequence=1,active=False,reason='synthetic stop',actor=1,recorded_at_utc=runtime._utc_now(),previous_sha256=None)
             from src.review.recognition import events
             events._insert(control,'recognition_execution_stops','sequence',(1,),body)
-            a._audit(control,'local_deployment_rehearsal_recorded','fixture',runtime._utc_now(),
-                dict(target=production_operations.local_target(binding),evidence={key:digest(key) for key in readiness.REHEARSAL_CHECKS},
-                     reason='synthetic observations',backup=dict(frequency='daily',retention_days=30,restore_verified=True)))
+            if not getattr(self, 'omit_rehearsal', False):
+                a._audit(control,'local_deployment_rehearsal_recorded','fixture',runtime._utc_now(),
+                    dict(target=production_operations.local_target(binding),evidence={key:digest(key) for key in readiness.REHEARSAL_CHECKS},
+                         reason='synthetic observations',backup=dict(frequency='daily',retention_days=30,restore_verified=True)))
             control.commit()
         claims.migrate(self.config,expected_generation=5,operator='fixture',reason='test')
         self.primary=owner.record_primary_authentication(self.config,actor_id=1,reviewer_key='owner-key')
@@ -101,6 +102,9 @@ class TargetSchemaCompletionTests(unittest.TestCase):
         root=dict(format=governance.FORMAT,mandate=governance.contract.MANDATE,installation_id=binding['installation_id'],owner_id=1,public_key=public)
         governance.trust_path(self.config).write_text(canonical(root),encoding='utf-8')
         governance.trust_path(self.config).chmod(0o600)
+        from tests.recognition_deployment_qualification_fixture import prepare
+        if not getattr(self, 'omit_qualification', False):
+            prepare(self,self.config)
 
     def preview(self):
         return completion.preview(self.config,self.session,primary_token=self.primary,operator='fixture-owner',reason='explicit fixture completion')

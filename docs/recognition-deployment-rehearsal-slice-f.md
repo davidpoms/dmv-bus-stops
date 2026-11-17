@@ -158,6 +158,13 @@ both stores or metadata-identical unreported in-place restoration.
 
 ## Remaining hosted procedure
 
+This is the optional stronger twelve-check operational assessment. It is no
+longer a universal first-activation prerequisite. Its evidence must still be
+genuine and its isolation requirements below remain unchanged when it is used.
+The smaller mandatory focused qualification is documented in
+[target schema completion](recognition-runtime-target-schema-completion.md#focused-deployment-qualification).
+That qualification does not require a hosted rehearsal harness or second account.
+
 An operator must first provide an explicitly disposable account/application and
 access method with no production storage or secrets accessible to its principal.
 Record the host, plan, Python/SQLite versions, mount/path identities, application

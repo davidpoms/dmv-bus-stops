@@ -40,6 +40,8 @@ class ActivationOwnerTests(unittest.TestCase):
         self.config, self.primary, self.session = self.f.config, self.f.primary, self.f.session
         self.clock = self.f.clock
         self.tick()
+        from tests.recognition_deployment_qualification_fixture import prepare
+        prepare(self,self.config)
 
     def tick(self):
         self.clock.return_value = base.at(a.timestamp(self.clock.return_value) - a.timestamp(base.NOW) + 30)
@@ -120,6 +122,24 @@ class ActivationOwnerTests(unittest.TestCase):
             with self.assertRaises(a.AdminError):
                 owner.begin_confirmation(self.config, self.session, token, primary_token=self.primary)
         self.assertEqual('NOT_ACTIVATED', self.durable()['state'])
+
+    def test_missing_focused_qualification_cannot_prepare_activation(self):
+        from src.review.recognition import deployment_qualification as qualification
+        token = self.step()
+        with patch.object(qualification,'assess',return_value=dict(ready=False,issues=['deployment_qualification_missing'],qualification_sha256=None)):
+            with self.assertRaisesRegex(a.AdminError,'local_activation_readiness_not_satisfied'):
+                owner.begin_confirmation(self.config,self.session,token,primary_token=self.primary)
+        self.assertEqual('NOT_ACTIVATED',self.durable()['state'])
+
+    def test_failed_final_locking_check_does_not_consume_confirmation_or_activate(self):
+        from src.review.recognition import deployment_qualification as qualification
+        self.prepare()
+        before = self.f.f.dump()
+        with patch.object(qualification,'qualify_locking',side_effect=a.AdminError('deployment_unsafe_locking',503)):
+            with self.assertRaisesRegex(a.AdminError,'deployment_unsafe_locking'):
+                self.activate()
+        self.assertEqual(before,self.f.f.dump())
+        self.assertEqual('NOT_ACTIVATED',self.durable()['state'])
 
     def test_confirmation_replay_and_already_active(self):
         self.prepare(); self.activate(); self.fresh()

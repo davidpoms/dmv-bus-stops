@@ -117,7 +117,7 @@ def _evaluate(state):
     inventory = disposition._inspect_reserved(state.control, binding, profile, head, state.clock)
     a.need(not any(row['blocks_readiness'] for row in inventory['claims']), 'activated_claim_disposition_blocked', 503)
     assessment = readiness._assess_runtime(view, state.session, state.primary)
-    a.need(assessment['code_ready'] and assessment['rehearsal_evidence_present']
+    a.need(assessment.get('safety_ready') is True
            and assessment['activation_state'] == 'ACTIVATED', 'activated_readiness_blocked', 503)
     _read_parts(state.context)
     _time(state)
