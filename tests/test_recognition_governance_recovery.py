@@ -16,7 +16,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
-from src.review.recognition import administration as a, admin_auth as auth, authorization
+from src.review.recognition import administration as a, admin_auth as auth, authorization, deployment_qualification
 from src.review.recognition import runtime_governance_recovery as recovery
 from src.review.recognition import runtime_production_governance as governance
 from src.review.recognition import runtime_target_schema_completion as completion, runtime_target_schema_lineage as lineage
@@ -30,6 +30,15 @@ from tests import test_recognition_administration as base
 
 def public(key):
     return base64.b64encode(key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)).decode()
+
+
+def complete_test_foundation(foundation, approval=None):
+    # The qualification fixture uses synthetic host evidence. Completing the
+    # foundation rechecks that evidence but must not depend on the host launcher.
+    with patch.object(deployment_qualification, 'qualify_locking') as probe:
+        result = foundation.apply(approval)
+    probe.assert_called_once_with(foundation.config)
+    return result
 
 
 def fixture_acl_checks(test):
@@ -499,9 +508,10 @@ class GovernanceRecoveryTests(unittest.TestCase):
         from tests.recognition_deployment_qualification_fixture import prepare
         prepare(self.f, self.config)
         preview = self.f.preview()['plan']
-        encoded, signature = self.f.approval(preview)
-        completion.complete(self.config, self.f.session, primary_token=self.f.primary,
-                            serialized_approval=encoded, signature=signature)
+        with patch.object(deployment_qualification, 'qualify_locking',
+                          side_effect=AssertionError('synthetic completion reached the host probe')) as host_probe:
+            complete_test_foundation(self.f, self.f.approval(preview))
+        host_probe.assert_not_called()
         before = self.protected()
         self.enroll(); self.rotate()
         with a.connect(self.config.control) as control:
@@ -519,7 +529,7 @@ class GovernanceRecoveryTests(unittest.TestCase):
     def _foundation(self):
         from tests.recognition_deployment_qualification_fixture import prepare
         prepare(self.f, self.config)
-        self.f.apply()
+        complete_test_foundation(self.f)
 
     def _proposal(self, *, orphan=False):
         from uuid import uuid4
@@ -610,7 +620,16 @@ class GovernanceRecoveryTests(unittest.TestCase):
             self.enroll()
             plan = recovery.plan(self.config, self.root_b, reason='synthetic offline signer')['plan']
             payload, output = folder/'plan.json', folder/'signed.json'
-            payload.write_text(canonical(plan))
+            # Exercise creation under a POSIX umask that allows group writes.
+            previous_umask = os.umask(0o002) if os.name == 'posix' else None
+            try:
+                payload.touch(mode=0o600, exist_ok=False)
+            finally:
+                if previous_umask is not None:
+                    os.umask(previous_umask)
+            if os.name == 'posix':
+                self.assertEqual(0o600, payload.stat().st_mode & 0o777)
+            payload.write_text(canonical(plan), encoding='utf-8')
             with patch.object(operator, '_password', return_value=password), patch('builtins.input', return_value=digest(plan)), redirect_stdout(logs):
                 tool.sign(private_path, public_path, payload, output)
             envelope = load(output.read_text())
@@ -765,7 +784,7 @@ class SuccessorRecoveryTests(unittest.TestCase):
         f.f.session = owner.open_admin_session(f.config, f.f.primary, base.independent_code(base.at(270)))
         prepare(self, f.config)
         foundation_plan = f.f.preview()['plan']
-        completed = f.f.apply(f.f.approval(foundation_plan))
+        completed = complete_test_foundation(f.f, f.f.approval(foundation_plan))
         self.assertEqual(('COMPLETED', 6, False),
             (completed['state'], completed['generation'], completed['execution_authority']))
         self.assertEqual('NOT_ACTIVATED', completed['production_state'])
