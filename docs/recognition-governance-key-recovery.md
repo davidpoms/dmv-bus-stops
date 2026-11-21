@@ -182,6 +182,36 @@ are non-echoed. Success is `READY` with the enrolled recovery-key digest. A
 failed/uncertain email send leaves a request without authority; inspect and let
 it expire before requesting another. Do not blindly rerun a failed enrollment.
 
+An enrollment error reports `governance_recovery_outcome_unconfirmed`,
+`inspect_before_retry: true`, `execution_authority: false`, and a `phase`.
+The phase identifies the last stage reached. Multiple checks can fail in a
+stage, so the phase alone does not establish the exact cause.
+
+During enrollment, the CLI suppresses stderr only while the SQLite loader
+runs. Both loader reports contain host paths, and the loader does not provide
+a separate sanitized output channel. A loader failure is reported as
+`startup`.
+
+| Phase | Stage |
+| --- | --- |
+| `startup`, `prompt` | SQLite or protected-root startup checks, or input collection |
+| `reservation` | Local file, database reservation, or storage checks |
+| `request_validation` | Recovery history, request identity, approved digest, or audit head |
+| `approval_clock` | Clock sampling or the approval window, including the final precommit check |
+| `email_challenge` | Email challenge verification |
+| `scope_validation` | Live scope and source root checks before TOTP verification |
+| `mfa_verification` | TOTP verification, seed access, throttling, or recording an MFA denial |
+| `final_validation` | Post-MFA scope, staged audit and file checks before commit |
+| `commit` | Enrollment commit or reservation cleanup, with durability still to be inspected |
+| `publication` | Postcommit certificate publication, inspection, or result output |
+| `unknown` | An error before a runtime stage could be recorded |
+
+An exact scope comparison can also report `scope_fields`, a list of predefined
+field names. Use read-only `inspect` and review the audit state before
+considering any retry. A denial can be durable during `mfa_verification`, and
+a commit or publication error can leave an enrollment committed. The diagnostic
+does not authorize a retry.
+
 Then plan the exact cutover (this operation changes no database contents):
 
 ```bash

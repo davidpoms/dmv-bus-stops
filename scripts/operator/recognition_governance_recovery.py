@@ -1,7 +1,9 @@
 """Explicit offline recovery + local custodian operations. No HTTP or activation."""
 import argparse
 import base64
+from contextlib import redirect_stderr
 import getpass
+from io import StringIO
 from pathlib import Path
 import sys
 import warnings
@@ -11,6 +13,12 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.operator import recognition_governance as operator
+
+_ENROLL_PHASES = (
+    'startup', 'prompt', 'reservation', 'request_validation', 'approval_clock',
+    'email_challenge', 'scope_validation', 'mfa_verification', 'final_validation',
+    'commit', 'publication', 'unknown',
+)
 
 
 def _read(path):
@@ -127,6 +135,7 @@ def main(argv=None):
         elif action == 'publish-committed':
             command.add_argument('--id', required=True)
     args = parser.parse_args(argv)
+    diagnostic = {'phase': 'startup'}
     try:
         if args.action == 'keygen':
             result = keygen(args.private_key, args.public_key, args.installation_id, args.owner_id)
@@ -136,7 +145,12 @@ def main(argv=None):
             # Supported production loader precedes ANY SQLite-dependent project
             # import on host operations. Offline operations never use PA files.
             from src.api.sqlite_runtime import load_production_sqlite
-            load_production_sqlite()
+            if args.action == 'enroll':
+                # The native loader's startup report contains host paths.
+                with redirect_stderr(StringIO()):
+                    load_production_sqlite()
+            else:
+                load_production_sqlite()
             from src.review.recognition import administration as a, runtime_governance_recovery as recovery
             config = a.LocalAdministration(args.target, args.control, args.key_file)
             original = recovery._original(config)
@@ -149,11 +163,14 @@ def main(argv=None):
             if args.action == 'request-enrollment':
                 result = recovery.request_enrollment(config, _read(args.recovery_public_key), reason=args.reason)
             elif args.action == 'enroll':
+                diagnostic['phase'] = 'prompt'
                 operator.require(input('Type the reviewed enrollment request SHA256: ') == args.approved_request_sha256)
                 email = _secret('Email recovery challenge (hidden): ')
                 code = _secret('Fresh authenticator code (hidden): ')
+                diagnostic['phase'] = 'unknown'
                 result = recovery.enroll(config, args.request_id, email_challenge=email, code=code,
-                                         approved_request_sha256=args.approved_request_sha256)
+                                         approved_request_sha256=args.approved_request_sha256,
+                                         _diagnostic=diagnostic)
             elif args.action == 'plan':
                 result = recovery.plan(config, _read(args.new_public_root), reason=args.reason)
             elif args.action == 'cutover':
@@ -169,8 +186,15 @@ def main(argv=None):
         print(operator.canonical(result))
         return 0
     except Exception:
-        print(operator.canonical(dict(error='governance_recovery_outcome_unconfirmed',
-            inspect_before_retry=True, execution_authority=False)), file=sys.stderr)
+        failure = dict(error='governance_recovery_outcome_unconfirmed',
+                       inspect_before_retry=True, execution_authority=False)
+        if args.action == 'enroll':
+            phase = diagnostic['phase']
+            failure['phase'] = phase if phase in _ENROLL_PHASES else 'unknown'
+            if failure['phase'] in ('scope_validation', 'final_validation') and 'scope_fields' in diagnostic:
+                failure['scope_fields'] = [name for name in recovery._SCOPE_FIELDS
+                                           if name in diagnostic['scope_fields']]
+        print(operator.canonical(failure), file=sys.stderr)
         return 1
 
 

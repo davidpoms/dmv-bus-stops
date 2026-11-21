@@ -12,6 +12,7 @@ import sqlite3
 import unittest
 from unittest.mock import patch
 
+from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
@@ -95,6 +96,92 @@ class GovernanceRecoveryTests(unittest.TestCase):
         request = self.request()
         return recovery.enroll(self.config, request['request_id'], email_challenge=self.mail[-1][1]['email_challenge'],
             code=base.independent_code(self.clock.return_value), approved_request_sha256=request['request_sha256'])
+
+    def run_enroll_cli(self, *, challenge=None, code=None, approved=None, startup=None):
+        from scripts.operator import recognition_governance_recovery as cli
+        from src.api import sqlite_runtime
+        request = self.requested
+        args = ['enroll', '--target', str(self.config.target), '--control', str(self.config.control),
+                '--key-file', str(self.config.key_file), '--installation-id', self.root_a['installation_id'],
+                '--owner-id', '1', '--original-public-key-sha256', recovery.fingerprint(self.root_a),
+                '--request-id', request['request_id'], '--approved-request-sha256', approved or request['request_sha256']]
+        inputs = (challenge or self.mail[-1][1]['email_challenge'], code or base.independent_code(self.clock.return_value))
+        with patch.object(sqlite_runtime, 'load_production_sqlite', side_effect=startup), \
+                patch('builtins.input', return_value=args[-1]), patch.object(cli, '_secret', side_effect=inputs), \
+                patch('sys.stdout', new_callable=io.StringIO) as out, patch('sys.stderr', new_callable=io.StringIO) as err:
+            status = cli.main(args)
+        return status, out.getvalue(), err.getvalue()
+
+    def assert_enroll_diagnostic(self, phase, *, scope_fields=None, **inputs):
+        before_target = self.config.target.read_bytes()
+        status, output, errors = self.run_enroll_cli(**inputs)
+        self.assertEqual(1, status)
+        self.assertEqual('', output)
+        expected = dict(error='governance_recovery_outcome_unconfirmed', inspect_before_retry=True,
+                        execution_authority=False, phase=phase)
+        if scope_fields is not None:
+            expected['scope_fields'] = scope_fields
+        self.assertEqual(canonical(expected) + '\n', errors)
+        self.assertEqual(before_target, self.config.target.read_bytes())
+
+    def counter(self):
+        with a.connect(self.config.control) as control:
+            return control.execute('SELECT last_counter FROM recognition_admin_mfa WHERE actor=1').fetchone()[0]
+
+    def test_operator_cli_success_keeps_enrollment_output_contract(self):
+        self.request()
+        fingerprint = recovery.fingerprint(self.root_a)
+        expected = dict(state='READY', root_sha256=digest(self.root_a), public_key_sha256=fingerprint,
+                        current_public_key_sha256=fingerprint, recovery_key_sha256=digest(self.recovery_key),
+                        pending_ids=[], execution_authority=False)
+
+        def startup():
+            import sys
+            print('recognition_sqlite_startup {"expected_library":"/synthetic/private/libsqlite3.so.0"}',
+                  file=sys.stderr)
+
+        self.assertEqual((0, canonical(expected) + '\n', ''), self.run_enroll_cli(startup=startup))
+        self.assertEqual(expected, recovery.inspect(self.config))
+
+    def test_enrollment_diagnostic_pre_mfa_failures(self):
+        self.request()
+        before = self.config.control.read_bytes()
+        self.assert_enroll_diagnostic('email_challenge', challenge='synthetic-wrong-email-challenge')
+        self.assert_enroll_diagnostic('prompt', code=EOFError('synthetic prompt detail'))
+        self.assert_enroll_diagnostic('request_validation', approved='0'*64)
+        with patch('socket.gethostname', return_value='synthetic-other-console'):
+            self.assert_enroll_diagnostic('scope_validation', scope_fields=['physical'])
+        with patch.object(recovery, '_reserved', side_effect=OSError('synthetic private path')):
+            self.assert_enroll_diagnostic('reservation')
+        with patch.object(recovery, 'enroll', side_effect=RuntimeError('synthetic secret')):
+            self.assert_enroll_diagnostic('unknown')
+        def startup():
+            import sys
+            print('synthetic SQLite library path', file=sys.stderr)
+            raise RuntimeError('synthetic environment value')
+        self.assert_enroll_diagnostic('startup', startup=startup)
+        self.clock.return_value = base.at(841)
+        self.assert_enroll_diagnostic('approval_clock')
+        self.assertEqual(before, self.config.control.read_bytes())
+        self.request()
+        with a.connect(self.config.control, write=True) as control:
+            a._audit(control, 'unrelated_fixture_audit', 1, self.clock.return_value)
+            control.commit()
+        before = self.config.control.read_bytes()
+        self.assert_enroll_diagnostic('request_validation')
+        self.assertEqual(before, self.config.control.read_bytes())
+
+    def test_enrollment_diagnostic_mfa_seed_and_durable_denial(self):
+        self.request()
+        before, counter = self.config.control.read_bytes(), self.counter()
+        with patch.object(Fernet, 'decrypt', side_effect=InvalidToken('synthetic ciphertext')):
+            self.assert_enroll_diagnostic('mfa_verification')
+        self.assertEqual(before, self.config.control.read_bytes())
+        self.assert_enroll_diagnostic('mfa_verification', code='synthetic-invalid-code')
+        self.assertEqual('administration_denied', self.records()[-1]['action'])
+        self.assertEqual(counter, self.counter())
+        with a.connect(self.config.control) as control:
+            self.assertEqual(1, control.execute('SELECT failures FROM recognition_admin_attempts WHERE actor=1').fetchone()[0])
 
     def signed(self, plan, key=None):
         return dict(serialized_approval=canonical(plan),
@@ -284,9 +371,12 @@ class GovernanceRecoveryTests(unittest.TestCase):
             recovery.cutover(self.config, self.signed(plan), approved_plan_sha256=digest(plan))
 
     def test_interrupted_enrollment_publication_blocks_then_explicitly_publishes(self):
+        self.request()
+        counter = self.counter()
         with patch.object(recovery, '_publish', side_effect=OSError('synthetic failure')):
-            with self.assertRaises(OSError):
-                self.enroll()
+            self.assert_enroll_diagnostic('publication')
+        self.assertEqual(recovery.ENROLLED, self.records()[-1]['action'])
+        self.assertGreater(self.counter(), counter)
         status = recovery.inspect(self.config)
         self.assertEqual('PUBLICATION_PENDING', status['state'])
         with self.assertRaisesRegex(ValueError, 'publication_pending'):
@@ -349,17 +439,22 @@ class GovernanceRecoveryTests(unittest.TestCase):
         options = dict(email_challenge=self.mail[-1][1]['email_challenge'],
             code=base.independent_code(self.clock.return_value), approved_request_sha256=requested['request_sha256'])
         before = self.config.control.read_bytes()
-        with patch.object(recovery, '_commit', side_effect=OSError('before commit')):
-            with self.assertRaises(OSError):
-                recovery.enroll(self.config, requested['request_id'], **options)
+        counter = self.counter()
+        with patch.object(recovery, '_final_files', side_effect=OSError('synthetic final failure')):
+            self.assert_enroll_diagnostic('final_validation')
         self.assertEqual(before, self.config.control.read_bytes())
+        with patch.object(recovery, '_commit', side_effect=OSError('before commit')):
+            self.assert_enroll_diagnostic('commit')
+        self.assertEqual(before, self.config.control.read_bytes())
+        self.assertEqual(counter, self.counter())
         commit = recovery._commit
         def lose_ack(control):
             commit(control)
             raise OSError('after commit')
         with patch.object(recovery, '_commit', side_effect=lose_ack):
-            with self.assertRaises(OSError):
-                recovery.enroll(self.config, requested['request_id'], **options)
+            self.assert_enroll_diagnostic('commit')
+        self.assertEqual(recovery.ENROLLED, self.records()[-1]['action'])
+        self.assertGreater(self.counter(), counter)
         self.assertEqual('PUBLICATION_PENDING', recovery.inspect(self.config)['state'])
         self.assertFalse(recovery.certificate_directory(self.config).exists())
         with self.assertRaises(ValueError):
@@ -712,7 +807,7 @@ class RecoveryToolTests(unittest.TestCase):
         self.assertEqual(directory.parent, opened.call_args.args[0])
         closed.assert_called_once_with(123)
 
-    def test_fixed_errors_and_parser_never_echo_secret_content(self):
+    def test_non_enrollment_failure_keeps_generic_error_contract(self):
         from scripts.operator import recognition_governance_recovery as tool
         from src.api import sqlite_runtime
         marker = 'SENTINEL-SECRET-KEY-PATH-TOTP-NEVER-PRINT'
@@ -729,8 +824,12 @@ class RecoveryToolTests(unittest.TestCase):
                 patch('sys.stdout', new_callable=io.StringIO) as out, patch('sys.stderr', new_callable=io.StringIO) as err:
             self.assertEqual(1, tool.main(args))
         self.assertEqual('', out.getvalue())
-        self.assertNotIn(marker, err.getvalue())
-        self.assertEqual('governance_recovery_outcome_unconfirmed', load(err.getvalue())['error'])
+        self.assertEqual(canonical(dict(error='governance_recovery_outcome_unconfirmed',
+                                        inspect_before_retry=True, execution_authority=False)) + '\n', err.getvalue())
+
+    def test_parser_never_echoes_secret_content(self):
+        from scripts.operator import recognition_governance_recovery as tool
+        marker = 'SENTINEL-SECRET-KEY-PATH-TOTP-NEVER-PRINT'
         with patch('sys.stderr', new_callable=io.StringIO) as err, self.assertRaises(SystemExit):
             tool.main(['keygen', '--passphrase', marker])
         self.assertNotIn(marker, err.getvalue())

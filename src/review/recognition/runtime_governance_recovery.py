@@ -29,6 +29,9 @@ REQUEST = 'governance_recovery_enrollment_requested'
 ENROLLED = 'governance_recovery_key_enrolled'
 CUTOVER = 'governance_root_recovery_committed'
 LIFETIME = 600
+_SCOPE_FIELDS = ('installation_id','owner_id','target_id','generation','binding_sha256','profile_sha256',
+    'target_schema_sha256','control_schema_sha256','physical','email_sha256','owner_key_sha256',
+    'auth_epoch','mfa_epoch','audit')
 
 
 def _now():
@@ -351,9 +354,7 @@ def _scope(config, control, target):
 
 
 def _validate_scope(scope):
-    fields(scope, ('installation_id','owner_id','target_id','generation','binding_sha256','profile_sha256',
-        'target_schema_sha256','control_schema_sha256','physical','email_sha256','owner_key_sha256',
-        'auth_epoch','mfa_epoch','audit'))
+    fields(scope, _SCOPE_FIELDS)
     for name in ('installation_id','target_id'):
         require(str(UUID(scope[name])) == scope[name], 'recovery_scope')
     for name in ('owner_id','generation','auth_epoch','mfa_epoch'):
@@ -461,9 +462,21 @@ def _publish(config, name, certificate):
             os.close(parent)
 
 
-def enroll(config, request_id, *, email_challenge, code, approved_request_sha256):
+def _require_enrollment_scope(observed, expected, diagnostic):
+    if observed != expected:
+        diagnostic['scope_fields'] = [name for name in _SCOPE_FIELDS if observed.get(name) != expected[name]]
+        require(False, 'recovery_scope_changed')
+
+
+def enroll(config, request_id, *, email_challenge, code, approved_request_sha256, _diagnostic=None):
+    # Only the local CLI reads this process-local record. Exceptions propagate
+    # unchanged through the reservation and transaction cleanup.
+    diagnostic = {} if _diagnostic is None else _diagnostic
+    diagnostic['phase'] = 'approval_clock'
     clock = _approval_clock()
+    diagnostic['phase'] = 'reservation'
     with _reserved(config) as (control, target):
+        diagnostic['phase'] = 'request_validation'
         require(_chain(config, control)[1] is None, 'recovery_already_enrolled')
         rows = [(r,b) for r,b in _records(control) if b['action'] == REQUEST
                 and b['subject']['request']['id'] == request_id]
@@ -471,23 +484,34 @@ def enroll(config, request_id, *, email_challenge, code, approved_request_sha256
         row, event = rows[0]; request = event['subject']['request']; _validate_request(request)
         require(digest(request) == approved_request_sha256 and _boundary(control)['sha256'] == row['body_sha256'],
                 'recovery_request_stale')
+        diagnostic['phase'] = 'approval_clock'
         _live_approval(clock, request, 'recovery_request_expired')
+        diagnostic['phase'] = 'email_challenge'
         require(type(email_challenge) is str and 20 <= len(email_challenge) <= 256
                 and hmac.compare_digest(hashlib.sha256(email_challenge.encode()).hexdigest(),
                                         event['subject']['email_token_sha256']), 'recovery_email_required')
+        diagnostic['phase'] = 'scope_validation'
         scope, binding, mfa, _ = _scope(config, control, target); scope['audit'] = request['scope']['audit']
-        require(scope == request['scope'] and current_root(config, control=control) == request['root'], 'recovery_scope_changed')
+        _require_enrollment_scope(scope, request['scope'], diagnostic)
+        require(current_root(config, control=control) == request['root'], 'recovery_scope_changed')
         # No staged recovery writes before this call: its documented denial
         # commit can persist only replay/throttle/denial changes allowed above.
-        auth._code(control, config, binding, mfa, code, _live_approval(clock, request, 'recovery_request_expired'))
+        diagnostic['phase'] = 'approval_clock'
+        stamp = _live_approval(clock, request, 'recovery_request_expired')
+        diagnostic['phase'] = 'mfa_verification'
+        auth._code(control, config, binding, mfa, code, stamp)
+        diagnostic['phase'] = 'final_validation'
         fresh, _, _, _ = _scope(config, control, target); fresh['audit'] = request['scope']['audit']
-        require(fresh == request['scope'], 'recovery_scope_changed')
+        _require_enrollment_scope(fresh, request['scope'], diagnostic)
         certificate = dict(format=KEY_FORMAT, id=request_id, request=request,
             approval=dict(kind='custodian_owner_email_totp', request_sha256=digest(request), mfa_epoch=mfa['epoch']))
         _append(control, ENROLLED, certificate)
         _final_files(config, control, target, request['scope'], request['root'])
+        diagnostic['phase'] = 'approval_clock'
         _live_approval(clock, request, 'recovery_request_expired')
+        diagnostic['phase'] = 'commit'
         _commit(control)  # Unknown acknowledgement: publish nothing; inspect first.
+    diagnostic['phase'] = 'publication'
     _publish(config, _certificate_name(0), certificate)
     return inspect(config)
 
