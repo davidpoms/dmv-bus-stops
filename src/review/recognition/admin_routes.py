@@ -104,6 +104,30 @@ def record_admin_login(actor_id, reviewer_key):
 def register_admin_routes(app):
     routes = Blueprint("recognition_control", __name__, url_prefix="/api/admin/recognition-control")
 
+    @routes.post('/runtime-profile-successor/<operation>')
+    def runtime_profile_successor(operation):
+        # A separate signed custodian boundary, never a runtime login or CSRF exemption
+        # for existing endpoints. No ambient browser credential supplies authority.
+        from . import runtime_profile_successor as successor
+        a.need(operation in ('describe', 'prepare', 'plan', 'complete', 'inspect'), 'runtime_successor_operation', 404)
+        a.need(request.content_length is not None and request.content_length <= 524288,
+               'runtime_successor_request_size', 413)
+        value = request.get_json(silent=True)
+        expected = {'authorization'} | ({'review', 'backups'} if operation == 'plan' else
+                                        {'nonce'} if operation == 'complete' else set())
+        a.need(type(value) is dict and set(value) == expected, 'runtime_successor_request', 400)
+        config = configuration()
+        a.need(config is not None, 'administrative_control_not_configured', 503)
+        if operation == 'describe':
+            from .runtime_profile_successor_contract import INSPECT
+            successor._signed(config, value['authorization'], INSPECT)
+            return jsonify(successor.describe(config))
+        if operation == 'plan':
+            return jsonify(successor.plan(config, value['authorization'], value['review'], value['backups']))
+        if operation == 'complete':
+            return jsonify(successor.complete(config, value['authorization'], value['nonce']))
+        return jsonify(getattr(successor, operation)(config, value['authorization']))
+
     @routes.after_request
     def private_response(response):
         response.headers["Cache-Control"] = "no-store"
@@ -251,13 +275,18 @@ def register_admin_routes(app):
     @routes.post('/runtime-activation/qualification')
     def runtime_deployment_qualification():
         value = data(('operator','reason','evidence','backups','generation'))
-        a.need(type(value['generation']) is int and value['generation'] == 5, 'deployment_qualification_generation_mismatch', 400)
+        a.need(type(value['generation']) is int and value['generation'] in (5,6), 'deployment_qualification_generation_mismatch', 400)
         config = context(administrative=True, authentication_only=True)
         from . import deployment_qualification
+        from . import runtime_validation, runtime_profile_successor
+        with a.connect(config.control) as control:
+            binding, _, _ = runtime_validation._history(control)
+            a.need(value['generation'] == binding['generation'] and runtime_profile_successor.eligible(control, binding),
+                   'deployment_qualification_generation_mismatch', 400)
         deployment_qualification.record(config,operator=value['operator'],reason=value['reason'],
             evidence=value['evidence'],backups=value['backups'],expected_generation=value['generation'],
             session_token=session['recognition_admin'],primary_token=session['recognition_primary'])
-        return dict(state='RECORDED',generation=5,execution_authority=False)
+        return dict(state='RECORDED',generation=value['generation'],execution_authority=False)
 
     @routes.get('/runtime-activation/readiness')
     def runtime_activation_readiness():

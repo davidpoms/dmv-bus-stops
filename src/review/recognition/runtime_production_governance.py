@@ -28,7 +28,7 @@ def trust_path(config):
     return config.control.with_name(config.control.name+'.governance-root.json')
 
 
-def _root(config):
+def _installed_root(config):
     path=trust_path(config)
     require(not path.is_symlink() and path.resolve()==path,'production_governance_root_path')
     raw=path.read_text(encoding='utf-8');value=load(raw)
@@ -38,8 +38,22 @@ def _root(config):
     return value
 
 
-def _verify(config,serialized,signature):
-    root=_root(config);body=load(serialized)
+def _root(config,*,control=None):
+    from .runtime_governance_recovery import current_root
+    return current_root(config,control=control)
+
+
+def _verify(config,serialized,signature,*,_control=None,_event=None):
+    if _event is None:
+        root=_root(config,control=_control)
+    else:
+        from .runtime_governance_recovery import historical_root
+        require(_control is not None, 'production_governance_history_context')
+        proof=_event['subject'].get('governance_proof')
+        require(type(proof) is dict and proof.get('serialized')==serialized and proof.get('signature')==signature,
+                'production_governance_audit_provenance')
+        root=historical_root(config,_control,_event)
+    body=load(serialized)
     fields(body,('format','mandate','installation_id','binding_sha256','holder','subject',
                  'target','control','issued_at_utc','expires_at_utc','approvals'))
     require(serialized==canonical(body) and body['format']==FORMAT and body['mandate']==root['mandate']
@@ -188,11 +202,14 @@ def evidence(handle,approval):
     return dict(serialized=entry['serialized'],signature=entry['signature'],root_sha256=entry['root'])
 
 
-def verify_evidence(proof,approval):
+def verify_evidence(proof,approval,*,control=None,event=None):
     fields(proof,('serialized','signature','root_sha256'))
     body=load(proof['serialized'])
     config=a.LocalAdministration(Path(body['target']['database']),Path(body['control']['database']),
                                  Path(body['control']['database']).with_name('unused-inspection-key'))
-    root,_,approvals=_verify(config,proof['serialized'],proof['signature'])
+    if event is not None:
+        require(event['subject'].get('governance_proof')==proof and event['subject'].get('approval')==approval,
+                'production_governance_audit_provenance')
+    root,_,approvals=_verify(config,proof['serialized'],proof['signature'],_control=control,_event=event)
     require(digest(root)==proof['root_sha256'] and approval in [asdict(x) for x in approvals],
             'production_governance_audit_provenance')

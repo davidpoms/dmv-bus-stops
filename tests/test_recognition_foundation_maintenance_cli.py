@@ -70,12 +70,34 @@ class FoundationMaintenanceTests(unittest.TestCase):
         path=self.config.target.parent/'synthetic-maintenance-approval.json'
         path.write_text(canonical(artifact or self.preview_approval()),encoding='utf-8')
         args=[action,'--target',str(self.config.target),'--control',str(self.config.control),
-              '--key-file',str(self.config.key_file),'--expected-generation','5','--authorization',str(path)]
+              '--key-file',str(self.config.key_file),'--expected-generation',str(options.get('expected_generation',5)),
+              '--authorization',str(path)]
         if approved is not None:args+=['--approved-plan-sha256',approved]
         with (patch('sys.stdout',new_callable=io.StringIO) as output,patch('sys.stderr',new_callable=io.StringIO) as error,
               patch('builtins.input',return_value=options.get('confirmation',approved))):
             status=self.cli.main(args)
         return status,output.getvalue(),error.getvalue()
+
+    def test_cli_wrong_generation_never_calls_completion_backend(self):
+        plan=self.preview()['plan'];grant=self.grant(plan);before=self.snapshots()
+        for artifact_generation,expected_generation in ((5,6),(6,5)):
+            body=load(grant['serialized_approval'])
+            body['subject']['plan']['generation']=artifact_generation
+            artifact=self.sign(body)
+            with self.subTest(artifact=artifact_generation,expected=expected_generation), \
+                    patch.object(completion,'complete_approved') as backend:
+                status,_,_=self.cli_run('complete',artifact,digest(body['subject']['plan']),
+                                        expected_generation=expected_generation)
+                self.assertEqual(1,status)
+                backend.assert_not_called()
+            self.assertEqual(before,self.snapshots())
+
+    def test_cli_retains_post_completion_generation_check(self):
+        plan=self.preview()['plan'];grant=self.grant(plan)
+        with patch.object(completion,'complete_approved',return_value=dict(generation=6)) as backend:
+            status,_,_=self.cli_run('complete',grant,digest(plan),expected_generation=5)
+        self.assertEqual(1,status)
+        backend.assert_called_once()
 
     def test_signed_preview_no_raw_tokens_is_deterministic_and_completely_nonmutating(self):
         artifact=self.preview_approval();before=self.snapshots()

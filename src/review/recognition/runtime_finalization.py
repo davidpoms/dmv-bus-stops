@@ -269,7 +269,7 @@ def _issuer(conn, issuer_sha256, *, now):
         last_index, event = found[0]; proof = event['subject']
         if proof['approval']['environment']=='production':
             from .runtime_production_governance import verify_evidence
-            verify_evidence(proof['governance_proof'],proof['approval'])
+            verify_evidence(proof['governance_proof'],proof['approval'],control=conn,event=event)
         require(proof['mandate']==contract.MANDATE and proof['purpose']==purpose
                 and proof['actor_id']==event['actor']==value['holder']['actor_id']
                 and proof['intent']==value['intent'] and proof['approval']['environment'] in ('disposable','production')

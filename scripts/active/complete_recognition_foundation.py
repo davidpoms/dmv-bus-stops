@@ -29,7 +29,7 @@ def main(argv=None):
     parser.add_argument('--target',type=Path,required=True)
     parser.add_argument('--control',type=Path,required=True)
     parser.add_argument('--key-file',type=Path,required=True)
-    parser.add_argument('--expected-generation',type=int,choices=(5,),required=True)
+    parser.add_argument('--expected-generation',type=int,choices=(5,6),required=True)
     parser.add_argument('--authorization',type=Path,required=True,
                         help='Existing independently signed JSON envelope; never a raw session token')
     parser.add_argument('--approved-plan-sha256')
@@ -55,6 +55,15 @@ def main(argv=None):
         if args.action == 'preview':
             result = completion.preview_approved(config,**artifact)
         else:
+            # This is only an operator-expectation preflight. The backend still
+            # verifies the signature, plan, current scope and final generation.
+            approval = load(artifact['serialized_approval'])
+            fields(approval['subject'], ('kind','plan'))
+            require(approval['subject']['kind'] == completion.lineage.KIND,
+                    'foundation_approval_purpose')
+            generation = approval['subject']['plan']['generation']
+            require(type(generation) is int and generation == args.expected_generation,
+                    'foundation_cli_generation_mismatch')
             # Digest confirmation is explicit; signing remains independent of this tool.
             confirmation = input('Type the approved preview plan SHA256 to install only its event foundation: ')
             require(confirmation == args.approved_plan_sha256,'foundation_plan_confirmation_mismatch')

@@ -55,7 +55,7 @@ def _resend_sender_address(value):
     return sender
 
 
-def smtp_sender_from_env(environ=None):
+def smtp_sender_from_env(environ=None, *, message_factory=magic_link_message):
     env = os.environ if environ is None else environ
     if env.get("REVIEWER_EMAIL_BACKEND", "").strip().lower() != "smtp":
         raise EmailConfigurationError("Reviewer email backend is not configured")
@@ -78,7 +78,7 @@ def smtp_sender_from_env(environ=None):
     use_tls = tls_value == "1"
 
     def send(recipient, verification_url, expires_minutes):
-        message = magic_link_message(sender, recipient, verification_url, expires_minutes)
+        message = message_factory(sender, recipient, verification_url, expires_minutes)
         with smtplib.SMTP(host, port, timeout=10) as client:
             if use_tls:
                 client.starttls(context=ssl.create_default_context())
@@ -89,7 +89,7 @@ def smtp_sender_from_env(environ=None):
     return send
 
 
-def resend_sender_from_env(environ=None):
+def resend_sender_from_env(environ=None, *, message_factory=magic_link_message):
     env = os.environ if environ is None else environ
     if env.get("REVIEWER_EMAIL_BACKEND", "").strip().lower() != "resend":
         raise EmailConfigurationError("Reviewer email backend is not configured")
@@ -99,7 +99,7 @@ def resend_sender_from_env(environ=None):
         raise EmailConfigurationError("RESEND_API_KEY is required")
 
     def send(recipient, verification_url, expires_minutes):
-        message = magic_link_message(sender, recipient, verification_url, expires_minutes)
+        message = message_factory(sender, recipient, verification_url, expires_minutes)
         try:
             response = requests.post(
                 RESEND_EMAIL_URL,
@@ -136,6 +136,33 @@ def email_sender_from_env(environ=None):
     if backend == "resend":
         return resend_sender_from_env(env)
     raise EmailConfigurationError("Reviewer email backend is not configured")
+
+
+def governance_recovery_message(sender, recipient, challenge, expires_minutes):
+    """Local-custodian purpose only: no login link or browser bearer credential."""
+    message = EmailMessage()
+    message['Subject'] = 'Approve DMV Bus Stops offline governance recovery enrollment'
+    message['From'] = _safe_header(sender, 'Sender')
+    message['To'] = _safe_header(recipient, 'Recipient')
+    message.set_content(
+        'This is NOT a sign-in link or ordinary governance approval.\n'
+        'Compare the complete recovery-key enrollment request below with your local\n'
+        'custodian tool. Only approve if you initiated and reviewed that exact request.\n'
+        'Enter its email challenge privately in that tool, together with a NEW\n'
+        'authenticator code. Never send either value to another person or a website.\n'
+        f'Expires in {expires_minutes} minutes. If unexpected, do nothing.\n\n{challenge}\n')
+    return message
+
+
+def governance_recovery_sender_from_env(environ=None):
+    """Actual configured transport only; never the reviewer's dev-mode outbox."""
+    env = os.environ if environ is None else environ
+    backend = env.get('REVIEWER_EMAIL_BACKEND', '').strip().lower()
+    if backend == 'smtp':
+        return smtp_sender_from_env(env, message_factory=governance_recovery_message)
+    if backend == 'resend':
+        return resend_sender_from_env(env, message_factory=governance_recovery_message)
+    raise EmailConfigurationError('Governance recovery email backend is not configured')
 
 
 def email_required_configuration(environ=None):

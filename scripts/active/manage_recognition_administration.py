@@ -59,8 +59,9 @@ def main(argv=None):
     config = a.LocalAdministration(args.target, args.control, args.key_file)
     config.paths()
     if args.action in ('record-deployment-rehearsal', 'record-deployment-qualification'):
-        if args.expected_generation != 5 or args.evidence_file is None or not args.operator or not args.reason:
-            parser.error('recording requires --expected-generation 5, --evidence-file, --operator and --reason')
+        allowed = (5,6) if args.action == 'record-deployment-qualification' else (5,)
+        if args.expected_generation not in allowed or args.evidence_file is None or not args.operator or not args.reason:
+            parser.error('recording requires an eligible --expected-generation, --evidence-file, --operator and --reason')
         import os
         import stat
         from src.review.recognition import local_readiness
@@ -83,7 +84,7 @@ def main(argv=None):
                 from src.review.recognition import deployment_qualification
                 a.need(type(evidence) is dict and set(evidence) == {'evidence','backups'}, 'deployment_qualification_input_required')
                 deployment_qualification.record(config,operator=args.operator,reason=args.reason,
-                    evidence=evidence['evidence'],backups=evidence['backups'],expected_generation=5)
+                    evidence=evidence['evidence'],backups=evidence['backups'],expected_generation=args.expected_generation)
             else:
                 local_readiness.record_deployment_rehearsal(config,operator=args.operator,reason=args.reason,
                     evidence=evidence,now=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),expected_generation=5)
@@ -91,7 +92,7 @@ def main(argv=None):
             label = 'Deployment rehearsal' if args.action == 'record-deployment-rehearsal' else 'Deployment qualification'
             print(label+' record failed or outcome unconfirmed; inspect trusted state before retrying.',file=sys.stderr)
             raise SystemExit(1) from None
-        print(canonical(dict(state='RECORDED',generation=5,evidence_checks=12 if args.action == 'record-deployment-rehearsal' else 4,execution_authority=False)))
+        print(canonical(dict(state='RECORDED',generation=args.expected_generation,evidence_checks=12 if args.action == 'record-deployment-rehearsal' else 4,execution_authority=False)))
         return
     if args.action == "preview":
         with a.connect(config.target) as conn:

@@ -171,6 +171,9 @@ def record(config, *, operator, reason, evidence, backups, expected_generation,
         v3 = any(body.get('format') == 'recognition-local-control-v3' for body in bodies)
 
     def append(control, target, binding, when):
+        from .runtime_profile_successor import eligible
+        if binding['generation'] == 6:
+            a.need(eligible(control, binding), 'deployment_qualification_generation_mismatch', 503)
         a.need(type(expected_generation) is int and binding['generation'] == expected_generation,
                'deployment_qualification_generation_mismatch', 503)
         a.need(ready._state(control, binding)['state'] == 'NOT_ACTIVATED', 'deployment_qualification_requires_not_activated', 503)

@@ -100,6 +100,16 @@ def _history_fresh(control):
         previous = row['body_sha256']
         bindings.append(body)
     a.need(bindings and bindings[-1]['format'] == r.V3, 'runtime_requires_v3', 503)
+    if bindings[-1]['generation'] == 6 and control.execute(
+            "SELECT 1 FROM recognition_admin_audit WHERE json_extract(body_json,'$.action')=?",
+            ('runtime_profile_device_successor_committed',)).fetchone():
+        from .runtime_profile_successor import verify
+        return verify(control, bindings, head)
+    return _enrollment_history(control, bindings, head)
+
+
+def _enrollment_history(control, bindings, head):
+    """Unchanged initial/schema-transition enrollment provenance kernel."""
     current = bindings[-1]
     a.need(current['runtime_profile_sha256'] is not None, 'runtime_profile_not_enrolled', 503)
     rows = control.execute(f'SELECT * FROM {r.PROFILES} WHERE profile_sha256=?',

@@ -85,7 +85,7 @@ def validate_plan(plan):
     extended = plan.get('package') == RUNTIME_PACKAGE
     fields(plan, PLAN_FIELDS + ('added_objects',) if extended else PLAN_FIELDS)
     require(plan['format'] == ('recognition-target-schema-completion-plan-v2' if extended else 'recognition-target-schema-completion-plan-v1')
-            and plan['package'] in (PACKAGE, RUNTIME_PACKAGE) and type(plan['generation']) is int and plan['generation'] == 5,
+            and plan['package'] in (PACKAGE, RUNTIME_PACKAGE) and type(plan['generation']) is int and plan['generation'] in (5, 6),
             'foundation_plan_scope')
     for key in ('installation_id', 'target_id'):
         from .trust import identity
@@ -120,9 +120,9 @@ def validate_plan(plan):
         _physical(physical)
 
 
-def _protected_root(config):
+def _protected_root(config, *, control=None):
     from . import runtime_production_governance as governance
-    root = governance._root(config)
+    root = governance._root(config, control=control)
     path = governance.trust_path(config)
     require(path.is_file() and path.stat().st_nlink == 1, 'foundation_approval_root')
     if os.name != 'nt':
@@ -134,8 +134,10 @@ def _protected_root(config):
 def _signed_history(control, event, subject):
     """Historical approval verification, not a fresh provisioning interface."""
     from . import runtime_production_governance as governance, authorization, admin_auth
+    require(event.get('subject') == subject, 'foundation_approval_audit_provenance')
     config = SimpleNamespace(control=Path(control.execute('PRAGMA database_list').fetchone()[2]).resolve())
-    root = _protected_root(config)
+    from .runtime_governance_recovery import historical_root
+    root = historical_root(config, control, event)
     encoded, signature, plan = subject['approval'], subject['signature'], subject['plan']
     require(type(encoded) is str and len(encoded.encode('utf-8')) <= 65536
             and type(signature) is str and len(signature) == 88, 'foundation_approval_encoding')
@@ -175,7 +177,7 @@ def _signed_history(control, event, subject):
         scope = control.execute('SELECT * FROM recognition_runtime_auth_bindings WHERE token_kind=? AND token_hash=?',
                                 (kind, hashed)).fetchone()
         require(row is not None and scope is not None and row['actor'] == plan['owner_id']
-                and row['generation'] == 5 and row['auth_epoch'] == plan['auth_epoch']
+                and row['generation'] == plan['generation'] and row['auth_epoch'] == plan['auth_epoch']
                 and row['created'] <= issued <= at < expires <= row['expires']
                 and scope['profile_sha256'] == plan['profile_sha256'] and scope['created_at'] == row['created'],
                 'foundation_approval_authentication')
@@ -200,9 +202,16 @@ def verify(control):
             and subject['package'] == plan['package'] and subject['state'] == 'CONSUMED'
             and subject['plan_sha256'] == digest(plan) and event['previous_sha256'] == plan['source_audit_sha256'],
             'foundation_lineage_record')
-    binding_row = control.execute('SELECT * FROM recognition_admin_bindings WHERE generation=5').fetchone()
+    binding_row = control.execute('SELECT * FROM recognition_admin_bindings WHERE generation=?', (plan['generation'],)).fetchone()
     require(binding_row is not None and binding_row['body_sha256'] == plan['binding_sha256'], 'foundation_binding_changed')
     binding = load(binding_row['body_json'])
+    if plan['generation'] == 6:
+        # Do not call _history(): control schema checks also validate foundation
+        # lineage. Verify the predecessor graph directly to avoid recursion.
+        from . import runtime_profile_successor as successor
+        bindings = [load(row[0]) for row in control.execute('SELECT body_json FROM recognition_admin_bindings ORDER BY generation')]
+        require(successor.verify(control, bindings[:6], a._audit_head(control))[0] == binding,
+                'foundation_successor_lineage')
     require(canonical(binding) == binding_row['body_json'] and digest(binding) == plan['binding_sha256']
             and binding['format'] == profiles.V3, 'foundation_binding_changed')
     profile = control.execute('SELECT * FROM '+profiles.PROFILES+' WHERE profile_sha256=?', (plan['profile_sha256'],)).fetchone()

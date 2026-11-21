@@ -107,8 +107,8 @@ def _signed_session(config, control, target, authorization):
     """
     require(all(conn.execute('PRAGMA query_only').fetchone()[0] == 1 for conn in (control,target)),
             'foundation_readonly_validation_required')
-    lineage._protected_root(config)
-    _, approval, _ = governance._verify(config, *authorization)
+    lineage._protected_root(config, control=control)
+    _, approval, _ = governance._verify(config, *authorization, _control=control)
     require(approval['subject']['kind'] in (PREVIEW_KIND,lineage.KIND), 'foundation_approval_purpose')
     now = runtime._utc_now()
     scope = runtime._identity_snapshot(config,control,target,now)
@@ -135,7 +135,8 @@ def _plan(config, control, target, session, primary, *, operator, reason, create
     else:
         require(session is None and primary is None, 'foundation_mixed_authentication')
         binding, profile, head, scope, p, s, mfa = _signed_session(config,control,target,signed_authorization)
-    require(type(binding['generation']) is int and binding['generation'] == 5, 'foundation_generation_required')
+    from .runtime_profile_successor import eligible
+    require(type(binding['generation']) is int and eligible(control, binding), 'foundation_generation_required')
     require(not lineage.present(control), 'foundation_already_completed')
     require(binding['production_state'] == 'NOT_ACTIVATED'
             and local_readiness._state(control,binding)['state'] == 'NOT_ACTIVATED', 'foundation_requires_not_activated')
@@ -188,7 +189,7 @@ def _plan(config, control, target, session, primary, *, operator, reason, create
     deadline = end.strftime('%Y-%m-%dT%H:%M:%SZ') if deadline is None else deadline
     require(a.timestamp(created_at) <= a.timestamp(now) < a.timestamp(deadline) <= limit, 'foundation_plan_expired')
     plan = dict(format='recognition-target-schema-completion-plan-v2' if package == lineage.RUNTIME_PACKAGE else 'recognition-target-schema-completion-plan-v1', package=package,
-        installation_id=binding['installation_id'],target_id=binding['target_id'],owner_id=binding['owner_id'],generation=5,
+        installation_id=binding['installation_id'],target_id=binding['target_id'],owner_id=binding['owner_id'],generation=binding['generation'],
         binding_sha256=digest(binding),profile_sha256=profile['profile_sha256'],
         enrollment_audit_sha256=control.execute('SELECT body_sha256 FROM recognition_admin_audit WHERE sequence=?',
                                               (profile['audit_sequence'],)).fetchone()[0],
@@ -311,9 +312,9 @@ def preview_approved(config, *, serialized_approval, signature):
                 require(asdict(a.target_identity(path)) == plan['physical'][key], 'foundation_physical_changed')
             clock.read()
             require(a.timestamp(runtime._utc_now()) < a.timestamp(plan['deadline_at_utc']), 'foundation_plan_expired')
-    return dict(plan=plan,plan_sha256=digest(plan),generation=5,h0=plan['h0'],h1=plan['h1'],
+    return dict(plan=plan,plan_sha256=digest(plan),generation=plan['generation'],h0=plan['h0'],h1=plan['h1'],
                 read_only=True,source_databases_modified=False,execution_authority=False,
-                preconditions=['enrolled_generation_5_h0','exact_profile_physical_identity','verified_owner',
+                preconditions=['enrolled_generation_5_or_verified_g6_successor_h0','exact_profile_physical_identity','verified_owner',
                                'live_profile_scoped_primary_and_mfa_admin_records','independent_signed_authorization',
                                'not_activated','delete_journals_full_synchronization','empty_work_and_claims',
                                'exact_control_topology','all_substantive_readiness_prerequisites',
@@ -401,7 +402,7 @@ def _complete(config, session_token, primary_token, serialized_approval, signatu
         else:
             _install(db, plan)
         _validate_after(db,plan)
-        governance._verify(config,serialized_approval,signature)
+        governance._verify(config,serialized_approval,signature,_control=db)
         now = runtime._utc_now()
         require(a.timestamp(now) < a.timestamp(plan['deadline_at_utc']), 'foundation_plan_expired')
         a._audit(db,lineage.ACTION,plan['owner_id'],now,
@@ -422,7 +423,7 @@ def _complete(config, session_token, primary_token, serialized_approval, signatu
         control.execute('BEGIN');target.execute('BEGIN')
         runtime._identity_snapshot(config,control,target,runtime._utc_now())
         execution_schema.check_schema(target)
-    return dict(package=plan['package'],generation=5,state='COMPLETED',schema_sha256=plan['h1'],
+    return dict(package=plan['package'],generation=plan['generation'],state='COMPLETED',schema_sha256=plan['h1'],
                 production_state='NOT_ACTIVATED',execution_authority=False)
 
 

@@ -1,6 +1,6 @@
 """Explicit offline governance bootstrap/signing and public-only root installation.
 
-No application imports except the pure canonical serializer; no SQLite, network,
+Only pure serialization/signing contracts are imported; no SQLite, network,
 authentication, migration or activation operations. Nothing happens on import.
 """
 
@@ -205,6 +205,11 @@ def _payload(path,root):
     fields(body,'format mandate installation_id binding_sha256 holder subject target control issued_at_utc expires_at_utc approvals')
     require(body['format'] == root['format'] and body['mandate'] == root['mandate']
             and body['installation_id'] == root['installation_id'])
+    from src.review.recognition import runtime_profile_successor_contract as successor
+    if body.get('subject', {}).get('kind') in successor.PURPOSES:
+        successor.validate_envelope(body, root)
+        _fresh(body)
+        return body
     fields(body['holder'],'actor_id primary_sha256 session_sha256')
     require(type(body['holder']['actor_id']) is int and body['holder']['actor_id'] == root['owner_id'])
     for value in (body['binding_sha256'],body['holder']['primary_sha256'],body['holder']['session_sha256']):
@@ -230,7 +235,7 @@ def _payload(path,root):
         plan = subject['plan']
         if plan['package'] == RUNTIME_PACKAGE:
             package, policy = RUNTIME_PACKAGE, RUNTIME_POLICY
-        require(plan['package'] == package and type(plan['generation']) is int and plan['generation'] == 5
+        require(plan['package'] == package and type(plan['generation']) is int and plan['generation'] in (5,6)
                 and plan['binding_sha256'] == body['binding_sha256']
                 and plan['installation_id'] == body['installation_id'] and plan['owner_id'] == body['holder']['actor_id']
                 and plan['physical'] == dict(target=body['target'],control=body['control']))
@@ -275,6 +280,39 @@ def sign(private_key,public_root,payload,output):
     return dict(state='SIGNED_OFFLINE',payload_sha256=digest(body),public_key_sha256=_fingerprint(public))
 
 
+def successor_payload(public_root, purpose, authorization_id, output, source=None, operator=None, reason=None):
+    """Build public, reviewable custodian payloads only. No signing or networking."""
+    from src.review.recognition import runtime_profile_successor_contract as successor
+    root, _ = _root(public_root)
+    require(purpose in ('prepare','complete','inspect'))
+    kinds = dict(prepare=successor.PREPARE,complete=successor.COMPLETE,inspect=successor.INSPECT)
+    if purpose == 'inspect':
+        require(source is None and operator is None and reason is None)
+        subject = dict(kind=kinds[purpose], authorization_id=authorization_id)
+    else:
+        require(source is not None)
+        data, _ = _read(source)
+        if purpose == 'prepare':
+            subject = dict(kind=kinds[purpose], authorization_id=authorization_id,
+                           scope=data['scope'],operator=operator,reason=reason)
+        else:
+            require(operator is None and reason is None and data['plan']['authorization_id'] == authorization_id)
+            subject = dict(kind=kinds[purpose],plan=data['plan'])
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    from datetime import timedelta
+    expires = now+timedelta(seconds=ADMIN_SECONDS)
+    if purpose == 'complete':
+        expires = min(expires,datetime.strptime(subject['plan']['deadline_at_utc'],'%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc))
+    body = dict(format=FORMAT,mandate=MANDATE,installation_id=root['installation_id'],
+        binding_sha256=successor.SOURCE_BINDING,holder=dict(kind='governance_custodian',actor_id=root['owner_id']),
+        subject=subject,**successor.destination(),issued_at_utc=now.strftime('%Y-%m-%dT%H:%M:%SZ'),
+        expires_at_utc=expires.strftime('%Y-%m-%dT%H:%M:%SZ'))
+    body['approvals'] = [successor.approval(subject,body['target'],body['expires_at_utc'],MANDATE)]
+    successor.validate_envelope(body,root);_fresh(body)
+    _publish(_path(output),canonical(body).encode('utf-8'))
+    return dict(state='PAYLOAD_PREPARED',payload_sha256=digest(body),execution_authority=False)
+
+
 def install_public_root(source,control,installation_id,owner_id,approved_public_key_sha256):
     control = _path(control)
     require(stat.S_ISREG(control.lstat().st_mode) and control.stat().st_nlink == 1)
@@ -306,6 +344,14 @@ def main(argv=None):
     signing = commands.add_parser('sign')
     for name in ('private-key','public-root','payload','output'):signing.add_argument('--'+name,type=Path,required=True)
     signing.add_argument('--confirm-offline',action='store_true',required=True)
+    successor = commands.add_parser('successor-payload')
+    successor.add_argument('--public-root',type=Path,required=True)
+    successor.add_argument('--purpose',choices=('prepare','complete','inspect'),required=True)
+    successor.add_argument('--authorization-id',required=True)
+    successor.add_argument('--source',type=Path)
+    successor.add_argument('--operator')
+    successor.add_argument('--reason')
+    successor.add_argument('--output',type=Path,required=True)
     install = commands.add_parser('install-public-root')
     install.add_argument('--source',type=Path,required=True)
     install.add_argument('--control',type=Path,required=True)
@@ -314,7 +360,8 @@ def main(argv=None):
     install.add_argument('--approved-public-key-sha256',required=True)
     args = vars(parser.parse_args(argv));action = args.pop('action');args.pop('confirm_offline',None)
     try:
-        result = dict(keygen=keygen,sign=sign,**{'install-public-root':install_public_root})[action](**args)
+        result = dict(keygen=keygen,sign=sign,**{'install-public-root':install_public_root,
+                      'successor-payload':successor_payload})[action](**args)
         print(canonical(result));return 0
     except SecureTerminalRequired:
         print(canonical(dict(error='governance_secure_terminal_required',
